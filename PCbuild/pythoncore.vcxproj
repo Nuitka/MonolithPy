@@ -69,11 +69,12 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{CF7AC3D1-E2DF-41D2-BEA6-1E2556CDEA26}</ProjectGuid>
     <RootNamespace>pythoncore</RootNamespace>
+    <WindowsTargetPlatformVersion>$(DefaultWindowsSDKVersion)</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="python.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseOfMfc>false</UseOfMfc>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -88,6 +89,7 @@
   <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="pyproject.props" />
+    <Import Project="libffi.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
@@ -104,7 +106,15 @@
       <AdditionalIncludeDirectories Condition="$(IncludeExternals)">$(zlibNgDir);$(GeneratedZlibNgDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalIncludeDirectories Condition="'$(UseJIT)' == 'true'">$(GeneratedJitStencilsDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_USRDLL;Py_BUILD_CORE;Py_BUILD_CORE_BUILTIN;Py_ENABLE_SHARED;MS_DLL_ID="$(SysWinVer)";ZLIB_COMPAT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="$(IncludeExternals)">_Py_HAVE_ZLIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="$(IncludeExternals)">_Py_HAVE_ZLIB;Py_NO_ENABLE_SHARED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">Py_ENABLE_SHARED</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)'=='PGInstrument'">Py_ENABLE_SHARED</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)'=='PGUpdate'">Py_ENABLE_SHARED</UndefinePreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions Condition="'$(Configuration)'=='Release'">Py_ENABLE_SHARED</UndefinePreprocessorDefinitions>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGInstrument'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGUpdate'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary>
       <PreprocessorDefinitions Condition="'$(UseJIT)' == 'true'">_Py_JIT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(UseTIER2)' != '' and '$(UseTIER2)' != '0'">_Py_TIER2=$(UseTIER2);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(UseTailCallInterp)' == 'true'">Py_TAIL_CALL_INTERP=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>

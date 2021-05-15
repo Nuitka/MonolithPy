@@ -59,6 +59,10 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <Import Project="pyproject.props" />
+  
+  <PropertyGroup>
+    <Perl>C:\Strawberry\perl\bin\perl.exe</Perl>
+  </PropertyGroup>
 
   <PropertyGroup>
     <IntDir>$(opensslDir)\tmp$(Bitness)dll</IntDir>

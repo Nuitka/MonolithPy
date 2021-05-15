@@ -84,6 +84,8 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="pyproject.props" />
     <Import Project="tcltk.props" />
+    <Import Project="libffi.props" />
+    <Import Project="openssl.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
@@ -100,6 +102,7 @@
       <StackReserveSize Condition="$(Configuration) == 'PGInstrument'">12000000</StackReserveSize>
       <!-- HACK: Need additional memory to avoid crashing until gh-113655 is fixed -->
       <StackReserveSize Condition="$(Configuration) == 'PGUpdate' and $(UseExtraStackReserve) == 'true'">3000000</StackReserveSize>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;uuid.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;ws2_32.lib;version.lib;libssl.lib;libcrypto.lib;tcl86t.lib;tk86t.lib;Crypt32.lib;Iphlpapi.lib;msi.lib;Rpcrt4.lib;Cabinet.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -112,9 +115,87 @@
     <ClCompile Include="..\Programs\python.c" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="liblzma.vcxproj">
+      <Project>{12728250-16ec-4dc6-94d7-e21dd88947f8}</Project>
+    </ProjectReference>
+    <ProjectReference Include="pyexpat.vcxproj">
+      <Project>{d06b6426-4762-44cc-8bad-d79052507f2f}</Project>
+    </ProjectReference>
     <ProjectReference Include="pythoncore.vcxproj">
       <Project>{cf7ac3d1-e2df-41d2-bea6-1e2556cdea26}</Project>
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>true</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>true</UseLibraryDependencyInputs>
+    </ProjectReference>
+    <ProjectReference Include="select.vcxproj">
+      <Project>{18cae28c-b454-46c1-87a0-493d91d97f03}</Project>
+    </ProjectReference>
+    <ProjectReference Include="sqlite3.vcxproj">
+      <Project>{a1a295e5-463c-437f-81ca-1f32367685da}</Project>
+      <Private>true</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>true</UseLibraryDependencyInputs>
+    </ProjectReference>
+    <ProjectReference Include="unicodedata.vcxproj">
+      <Project>{ecc7ceac-a5e5-458e-bb9e-2413cc847881}</Project>
+    </ProjectReference>
+    <ProjectReference Include="winsound.vcxproj">
+      <Project>{28b5d777-ddf2-4b6b-b34f-31d938813856}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_asyncio.vcxproj">
+      <Project>{384c224a-7474-476e-a01b-750ea7de918c}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_bz2.vcxproj">
+      <Project>{73fcd2bd-f133-46b7-8ec1-144cd82a59d5}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_ctypes.vcxproj">
+      <Project>{0e9791db-593a-465f-98bc-681011311618}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_decimal.vcxproj">
+      <Project>{0e9791db-593a-465f-98bc-681011311617}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_elementtree.vcxproj">
+      <Project>{17e1e049-c309-4d79-843f-ae483c264aea}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_hashlib.vcxproj">
+      <Project>{447f05a8-f581-4cac-a466-5ac7936e207e}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_lzma.vcxproj">
+      <Project>{f9d71780-f393-11e0-be50-0800200c9a66}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_msi.vcxproj">
+      <Project>{31ffc478-7b4a-43e8-9954-8d03e2187e9c}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_multiprocessing.vcxproj">
+      <Project>{9e48b300-37d1-11dd-8c41-005056c00008}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_overlapped.vcxproj">
+      <Project>{eb6e69dd-04bf-4543-9b92-49faabceac2e}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_queue.vcxproj">
+      <Project>{78d80a15-bd8c-44e2-b49e-1f05b0a0a687}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_socket.vcxproj">
+      <Project>{86937f53-c189-40ef-8ce8-8759d8e7d480}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_sqlite3.vcxproj">
+      <Project>{13cecb97-4119-4316-9d42-8534019a5a44}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_ssl.vcxproj">
+      <Project>{c6e20f84-3247-4ad6-b051-b073268f73ba}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_tkinter.vcxproj">
+      <Project>{4946ecac-2e69-4bf8-a90a-f5136f5094df}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_uuid.vcxproj">
+      <Project>{cb435430-ebb1-478b-8f4e-c256f6838f55}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_zoneinfo.vcxproj">
+      <Project>{fcbe1ef2-e0f0-40b1-88b5-00a35d378742}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
@@ -137,6 +218,9 @@ set PYTHONPATH=$(PySourcePath)Lib
   </Target>
   <Target Name="GeneratePythonBat" AfterTargets="AfterBuild">
     <PropertyGroup>
+      <_PGOPath Condition="$(Configuration) == 'PGInstrument' and $(Platform) == 'Win32'">@set PATH=%PATH%%3B$(VCInstallDir)bin</_PGOPath>
+      <_PGOPath Condition="$(Configuration) == 'PGInstrument' and $(Platform) == 'x64'">@set PATH=%PATH%%3B$(VCInstallDir)bin\amd64</_PGOPath>
+      <_PGOPath Condition="$(Configuration) == 'PGInstrument' and $(VC_PGO_RunTime_Dir) != ''">@set PATH=%PATH%%3B$(VC_PGO_RunTime_Dir)</_PGOPath>
       <_Content>@rem This script invokes the most recently built Python with all arguments
 @rem passed through to the interpreter.  This file is generated by the
 @rem build process and any changes *will* be thrown away by the next
@@ -146,6 +230,7 @@ set PYTHONPATH=$(PySourcePath)Lib
 @echo Running $(Configuration)^|$(Platform) interpreter...
 @setlocal
 @set PYTHONHOME=$(PySourcePath)
+$(_PGOPath)
 @"$(OutDir)$(PyExeName)$(PyDebugExt).exe" %*
 </_Content>
       <_ExistingContent Condition="Exists('$(PySourcePath)python.bat')">$([System.IO.File]::ReadAllText('$(PySourcePath)python.bat'))</_ExistingContent>

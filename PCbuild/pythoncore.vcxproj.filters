@@ -936,6 +936,17 @@
     <ClInclude Include="..\Include\internal\pycore_structseq.h">
       <Filter>Include\internal</Filter>
     </ClInclude>
+    <ClInclude Include="$(zlibDir)\crc32.h" />
+    <ClInclude Include="$(zlibDir)\deflate.h" />
+    <ClInclude Include="$(zlibDir)\inffast.h" />
+    <ClInclude Include="$(zlibDir)\inffixed.h" />
+    <ClInclude Include="$(zlibDir)\inflate.h" />
+    <ClInclude Include="$(zlibDir)\inftrees.h" />
+    <ClInclude Include="$(zlibDir)\trees.h" />
+    <ClInclude Include="$(zlibDir)\zconf.h" />
+    <ClInclude Include="$(zlibDir)\zconf.in.h" />
+    <ClInclude Include="$(zlibDir)\zlib.h" />
+    <ClInclude Include="$(zlibDir)\zutil.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Modules\_abc.c">
@@ -1670,6 +1681,18 @@
     <ClCompile Include="..\Modules\getbuildinfo.c">
       <Filter>Modules</Filter>
     </ClCompile>
+    <ClCompile Include="..\Modules\zlibmodule.c" />
+    <ClCompile Include="$(zlibDir)\adler32.c" />
+    <ClCompile Include="$(zlibDir)\compress.c" />
+    <ClCompile Include="$(zlibDir)\crc32.c" />
+    <ClCompile Include="$(zlibDir)\deflate.c" />
+    <ClCompile Include="$(zlibDir)\infback.c" />
+    <ClCompile Include="$(zlibDir)\inffast.c" />
+    <ClCompile Include="$(zlibDir)\inflate.c" />
+    <ClCompile Include="$(zlibDir)\inftrees.c" />
+    <ClCompile Include="$(zlibDir)\trees.c" />
+    <ClCompile Include="$(zlibDir)\uncompr.c" />
+    <ClCompile Include="$(zlibDir)\zutil.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\PC\python_nt.rc">

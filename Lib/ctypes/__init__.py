@@ -558,13 +558,13 @@ class LibraryLoader(object):
 cdll = LibraryLoader(CDLL)
 pydll = LibraryLoader(PyDLL)
 
-if _os.name == "nt":
-    pythonapi = PyDLL("python dll", None, _sys.dllhandle)
-elif _sys.platform in ["android", "cygwin"]:
-    # These are Unix-like platforms which use a dynamically-linked libpython.
-    pythonapi = PyDLL(_sysconfig.get_config_var("LDLIBRARY"))
-else:
-    pythonapi = PyDLL(None)
+#if _os.name == "nt":
+#    pythonapi = PyDLL("python dll", None, _sys.dllhandle)
+#elif _sys.platform in ["android", "cygwin"]:
+#    # These are Unix-like platforms which use a dynamically-linked libpython.
+#    pythonapi = PyDLL(_sysconfig.get_config_var("LDLIBRARY"))
+#else:
+pythonapi = PyDLL(None)
 
 
 if _os.name == "nt":

@@ -46,8 +46,9 @@
     <_PyStatsPreprocessorDefinition>PyStats;</_PyStatsPreprocessorDefinition>
     <_PyStatsPreprocessorDefinition Condition="$(PySTATS) != ''">Py_STATS;</_PyStatsPreprocessorDefinition>
     <_PlatformPreprocessorDefinition>_WIN32;</_PlatformPreprocessorDefinition>
-    <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64'">_WIN64;</_PlatformPreprocessorDefinition>
+    <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64'">_WIN64;_M_X64;</_PlatformPreprocessorDefinition>
     <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64' and $(PlatformToolset) != 'ClangCL'">_M_X64;$(_PlatformPreprocessorDefinition)</_PlatformPreprocessorDefinition>
+    <_PydPreprocessorDefinition Condition="$(TargetExt) == '.lib' And $(RootNamespace) != 'pythoncore'">Py_BUILD_CORE_MODULE;</_PydPreprocessorDefinition>
     <_Py3NamePreprocessorDefinition>PY3_DLLNAME=L"$(Py3DllName)$(PyDebugExt)";</_Py3NamePreprocessorDefinition>
     <_FreeThreadedPreprocessorDefinition Condition="$(DisableGil) == 'true'">Py_GIL_DISABLED=1;</_FreeThreadedPreprocessorDefinition>
   </PropertyGroup>

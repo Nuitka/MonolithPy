@@ -53,7 +53,7 @@
 @set _Py_NUGET=%NUGET%
 @set _Py_NUGET_URL=%NUGET_URL%
 @set _Py_HOST_PYTHON=%HOST_PYTHON%
-@if "%_Py_HOST_PYTHON%"=="" set _Py_HOST_PYTHON=py
+@if "%_Py_HOST_PYTHON%"=="" set _Py_HOST_PYTHON=python
 @if "%_Py_NUGET%"=="" (set _Py_NUGET=%_Py_EXTERNALS_DIR%\nuget.exe)
 @if "%_Py_NUGET_URL%"=="" (set _Py_NUGET_URL=https://aka.ms/nugetclidl)
 @if NOT exist "%_Py_NUGET%" (

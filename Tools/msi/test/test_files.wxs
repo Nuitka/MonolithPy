@@ -5,8 +5,8 @@
         <ComponentGroup Id="test_extensions">
             <?foreach ext in $(var.exts)?>
 
-            <Component Id="$(var.ext).pyd" Directory="DLLs" Guid="*">
-                <File Name="$(var.ext).pyd" KeyPath="yes" />
+            <Component Id="$(var.ext).lib" Directory="libs" Guid="*">
+                <File Name="$(var.ext).lib" KeyPath="yes" />
             </Component>
 
             <?endforeach ?>
@@ -15,28 +15,11 @@
 
     <Fragment>
         <ComponentGroup Id="test_extensions_symbols">
-            <?foreach ext in $(var.exts)?>
-
-            <Component Id="$(var.ext).pdb" Directory="DLLs" Guid="*">
-                <File Name="$(var.ext).pdb" />
-            </Component>
-
-            <?endforeach ?>
         </ComponentGroup>
     </Fragment>
 
     <Fragment>
         <ComponentGroup Id="test_extensions_d">
-            <?foreach ext in $(var.exts)?>
-
-            <Component Id="$(var.ext)_d.pyd" Directory="DLLs" Guid="*">
-                <File Name="$(var.ext)_d.pyd" />
-            </Component>
-            <Component Id="$(var.ext)_d.pdb" Directory="DLLs" Guid="*">
-                <File Name="$(var.ext)_d.pdb" />
-            </Component>
-
-            <?endforeach ?>
         </ComponentGroup>
     </Fragment>
 </Wix>

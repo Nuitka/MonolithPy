@@ -70,13 +70,14 @@
     <ProjectGuid>{fb868ea7-f93a-4d9b-be78-ca4e9ba14fff}</ProjectGuid>
     <RootNamespace>xxlimited_35</RootNamespace>
     <Keyword>Win32Proj</Keyword>
+    <RootNamespace>_freeze_importlib</RootNamespace>
+    <SupportPGO>false</SupportPGO>
   </PropertyGroup>
   <Import Project="python.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <CharacterSet>NotSet</CharacterSet>
-    <SupportPGO>false</SupportPGO>
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
@@ -93,19 +94,57 @@
     <_ProjectFileVersion>10.0.30319.1</_ProjectFileVersion>
   </PropertyGroup>
   <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGInstrument'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGUpdate'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary>
+    </ClCompile>
     <Link>
-      <AdditionalDependencies>wsock32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>wsock32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;uuid.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;ws2_32.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories Condition="'$(Platform)'=='Win32'">C:\src\Nuitka-Python\externals\tcltk-8.6.9.0\win32\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Modules\xxlimited_35.c" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="python3dll.vcxproj">
-      <Project>{885d4898-d08d-4091-9c40-c700cfe3fc5a}</Project>
+    <ProjectReference Include="pythoncore.vcxproj">
+      <Project>{cf7ac3d1-e2df-41d2-bea6-1e2556cdea26}</Project>
+      <Private>true</Private>
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+      <CopyLocalSatelliteAssemblies>false</CopyLocalSatelliteAssemblies>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>true</UseLibraryDependencyInputs>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="_RebuildImportLib">
+    <Exec Command="&quot;$(TargetPath)&quot; &quot;%(None.ModName)&quot; &quot;%(None.FullPath)&quot; &quot;%(None.IntFile)&quot;" />
+    <PropertyGroup>
+      <_OldContent Condition="Exists($(OutTargetPath))">
+      </_OldContent>
+      <_NewContent Condition="Exists($(IntTargetPath))">$([System.IO.File]::ReadAllText($(IntTargetPath)).Replace(`
+`, `
+`))</_NewContent>
+    </PropertyGroup>
+    <Copy SourceFiles="%(None.IntFile)" DestinationFiles="%(None.OutFile)" Condition="!Exists(%(None.OutFile)) or (Exists(%(None.IntFile)) and '$([System.IO.File]::ReadAllText(%(None.OutFile)).Replace(`&#xD;&#xA;`, `&#xA;`))' != '$([System.IO.File]::ReadAllText(%(None.IntFile)).Replace(`&#xD;&#xA;`, `&#xA;`))')">
+      <Output TaskParameter="CopiedFiles" ItemName="_Updated" />
+    </Copy>
+    <Warning Text="@(_Updated->'%(Filename)%(Extension)',', ') updated. You will need to rebuild pythoncore to see the changes.%0D%0A%0D%0AIf you are not developing on Windows but you see this error on a continuous integration build, you need to run 'make regen-all' and commit any changes." Condition="'@(_Updated)' != '' and $(Configuration) == 'Debug'" />
+    <Error Text="@(_Updated->'%(Filename)%(Extension)',', ') updated. You will need to rebuild pythoncore to see the changes.%0D%0A%0D%0AIf you are not developing on Windows but you see this error on a continuous integration build, you need to run 'make regen-all' and commit any changes." Condition="'@(_Updated)' != '' and $(Configuration) == 'Release'" />
+  </Target>
+  <Target Name="RebuildImportLib" AfterTargets="AfterBuild" Condition="$(Configuration) == 'Debug' or $(Configuration) == 'Release'" DependsOnTargets="_RebuildImportLib">
+  </Target>
+  <Target Name="_CleanImportLib" BeforeTargets="CoreClean">
+    <ItemGroup>
+      <Clean Include="$(IntDir)importlib.g.h" />
+      <Clean Include="$(IntDir)importlib_external.g.h" />
+      <Clean Include="$(IntDir)importlib_zipimport.g.h" />
+    </ItemGroup>
+  </Target>
 </Project>

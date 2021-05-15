@@ -5,9 +5,6 @@
             <Component Id="LICENSE.txt" Directory="InstallDirectory" Guid="*">
                 <File Name="LICENSE.txt" Source="LICENSE.txt" KeyPath="yes" />
             </Component>
-            <Component Id="NEWS.txt" Directory="InstallDirectory" Guid="*">
-                <File Name="NEWS.txt" KeyPath="yes" />
-            </Component>
         </ComponentGroup>
     </Fragment>
 
@@ -53,18 +50,6 @@
         
     <Fragment>
         <ComponentGroup Id="exe_python_d">
-            <Component Id="python_d.exe" Directory="InstallDirectory" Guid="*">
-                <File Name="python_d.exe" />
-            </Component>
-            <Component Id="python_d.pdb" Directory="InstallDirectory" Guid="*">
-                <File Name="python_d.pdb" />
-            </Component>
-            <Component Id="pythonw_d.exe" Directory="InstallDirectory" Guid="*">
-                <File Name="pythonw_d.exe" />
-            </Component>
-            <Component Id="pythonw_d.pdb" Directory="InstallDirectory" Guid="*">
-                <File Name="pythonw_d.pdb" />
-            </Component>
         </ComponentGroup>
     </Fragment>
     

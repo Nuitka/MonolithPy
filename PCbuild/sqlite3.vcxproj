@@ -70,12 +70,13 @@
     <ProjectGuid>{A1A295E5-463C-437F-81CA-1F32367685DA}</ProjectGuid>
     <RootNamespace>sqlite3</RootNamespace>
     <SupportPGO>false</SupportPGO>
+    <WindowsTargetPlatformVersion>$(DefaultWindowsSDKVersion)</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="python.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <TargetExt>$(PyStdlibPydExt)</TargetExt>
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <CharacterSet>NotSet</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -101,6 +102,10 @@
       <PreprocessorDefinitions>SQLITE_ENABLE_MATH_FUNCTIONS;SQLITE_ENABLE_FTS4;SQLITE_ENABLE_FTS5;SQLITE_ENABLE_RTREE;SQLITE_OMIT_AUTOINIT;SQLITE_API=__declspec(dllexport);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level1</WarningLevel>
       <AdditionalOptions Condition="$(PlatformToolset) == 'ClangCL'">%(AdditionalOptions) -Wno-unused</AdditionalOptions>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGInstrument'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='PGUpdate'">MultiThreaded</RuntimeLibrary>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>SQLITE_VERSION=$(SqliteVersion);SQLITE_MAJOR_VERSION=$(SqliteMajorVersion);SQLITE_MINOR_VERSION=$(SqliteMinorVersion);SQLITE_MICRO_VERSION=$(SqliteMicroVersion);SQLITE_PATCH_VERSION=$(SqlitePatchVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>

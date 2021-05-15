@@ -29,7 +29,7 @@ def retrieve_with_retries(download_location, output_path, reporthook,
             return resp
 
 
-def fetch_zip(commit_hash, zip_dir, *, org='python', binary=False, verbose):
+def fetch_zip(commit_hash, zip_dir, *, org='Maxwell175', binary=False, verbose):
     repo = f'cpython-{"bin" if binary else "source"}-deps'
     url = f'https://github.com/{org}/{repo}/archive/{commit_hash}.zip'
     reporthook = None
