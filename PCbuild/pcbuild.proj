@@ -59,8 +59,6 @@
     </Projects>
     <!-- python3.dll -->
     <Projects Include="python3dll.vcxproj" />
-    <!-- py[w].exe -->
-    <Projects Include="pylauncher.vcxproj;pywlauncher.vcxproj" />
     <!-- pyshellext.dll -->
     <Projects Include="pyshellext.vcxproj" />
     <!-- Extension modules -->
@@ -68,30 +66,18 @@
     <ExtensionModules Include="_ctypes" Condition="$(IncludeCTypes)" />
     <!-- Extension modules that require external sources -->
     <ExternalModules Include="_bz2;_lzma;_sqlite3" />
-    <!-- venv launchers -->
-    <Projects Include="venvlauncher.vcxproj;venvwlauncher.vcxproj" />
     <!-- _ssl will build _socket as well, which may cause conflicts in parallel builds -->
     <ExtensionModules Include="_socket" Condition="!$(IncludeSSL) or !$(IncludeExternals)" />
     <ExternalModules Include="_ssl;_hashlib" Condition="$(IncludeSSL)" />
     <ExternalModules Include="_tkinter" Condition="$(IncludeTkinter)" />
     <ExtensionModules Include="@(ExternalModules->'%(Identity)')" Condition="$(IncludeExternals)" />
     <Projects Include="@(ExtensionModules->'%(Identity).vcxproj')" Condition="$(IncludeExtensions)" />
-    <!-- Test modules -->
-    <TestModules Include="_ctypes_test;_testbuffer;_testcapi;_testlimitedcapi;_testinternalcapi;_testembed;_testimportmultiple;_testmultiphase;_testsinglephase;_testconsole;_testclinic;_testclinic_limited" />
-    <TestModules Include="xxlimited" Condition="'$(Configuration)' == 'Release'" />
-    <TestModules Include="xxlimited_35" Condition="'$(Configuration)' == 'Release'" />
-    <Projects Include="@(TestModules->'%(Identity).vcxproj')" Condition="$(IncludeTests)">
-      <!-- Disable parallel build for test modules -->
-      <BuildInParallel>false</BuildInParallel>
-    </Projects>
 
     <!-- _freeze_module -->
     <FreezeProjects Include="_freeze_module.vcxproj" />
     <!-- python[w].exe -->
     <Projects2 Include="python.vcxproj;pythonw.vcxproj" />
     <Projects2 Include="python_uwp.vcxproj;pythonw_uwp.vcxproj" Condition="$(IncludeUwp)" />
-    <!-- venv[w]launcher.exe -->
-    <Projects2 Include="venvlauncher.vcxproj;venvwlauncher.vcxproj" />
   </ItemGroup>
 
   <Target Name="Build">

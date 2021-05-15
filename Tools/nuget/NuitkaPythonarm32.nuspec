@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>NuitkaPythonARM32</id>
+    <title>Nuitka-Python (ARM32)</title>
+    <version>0.0.0.0</version>
+    <authors>Nuitka Organization contributors</authors>
+    <license type="file">tools\LICENSE.txt</license>
+    <projectUrl>https://github.com/Nuitka/Nuitka-Python</projectUrl>
+    <description>Installs ARM32 Python for use in build scenarios.</description>
+    <iconUrl>https://www.python.org/static/favicon.ico</iconUrl>
+    <tags>nuitkapython</tags>
+  </metadata>
+  <files>
+    <file src="**\*" exclude="python.props" target="tools" />
+    <file src="python.props" target="build\native\python.props" />
+	<file src="python.props" target="build\native\pythonarm32.props" />
+  </files>
+</package>

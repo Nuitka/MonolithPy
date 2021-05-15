@@ -12,7 +12,7 @@
 // current versions of Windows.
 1 RT_MANIFEST "python.manifest"
 
-1 ICON DISCARDABLE "icons\pythonw.ico" 
+1 ICON DISCARDABLE "icons\Nuitka-Python-Logo-Symbol.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////

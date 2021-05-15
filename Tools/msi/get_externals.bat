@@ -30,7 +30,7 @@ if exist "%EXTERNALS_DIR%" (
 if "%DO_FETCH%"=="false" goto end
 :fetch
 
-if "%ORG%"=="" (set ORG=Maxwell175)
+if "%ORG%"=="" (set ORG=Nuitka)
 
 call "%PCBUILD%\find_python.bat" "%PYTHON%"
 

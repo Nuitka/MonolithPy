@@ -44,7 +44,7 @@ PROPS_TEMPLATE = r"""<?xml version="1.0" encoding="utf-8"?>
   <ItemDefinitionGroup Condition="$(Platform) == '{PYTHON_PLATFORM}'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(PythonInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(PythonLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

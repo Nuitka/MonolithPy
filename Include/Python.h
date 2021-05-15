@@ -8,12 +8,16 @@
 // Since this is a "meta-include" file, "#ifdef __cplusplus / extern "C" {"
 // is not needed.
 
+#include "np_embed.h"
+
+// Since this is a "meta-include" file, no #ifdef __cplusplus / extern "C" {
 
 // Include Python header files
 #include "patchlevel.h"
 #include "pyconfig.h"
 #include "pymacconfig.h"
 
+#undef HAVE_DYNAMIC_LOADING
 
 // Include standard header files
 // When changing these files, remember to update Doc/extending/extending.rst.
@@ -59,6 +63,8 @@
 #if defined(Py_GIL_DISABLED) && defined(__MINGW32__)
 #  include <intrin.h>             // __readgsqword()
 #endif
+
+#define FFI_STATIC_BUILD
 
 // Include Python header files
 #include "pyport.h"
@@ -136,5 +142,7 @@
 #include "fileutils.h"
 #include "cpython/pyfpe.h"
 #include "cpython/tracemalloc.h"
+
+#include "staticinit.h"
 
 #endif /* !Py_PYTHON_H */

@@ -16,7 +16,7 @@
   <ItemDefinitionGroup Condition="$(Platform) == '$$PYTHON_PLATFORM$$'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(PythonInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(PythonLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -28,7 +28,6 @@
   <Target Name="$$PYTHON_TARGET$$" Returns="@(PythonRuntime)">
     <ItemGroup>
       <_PythonRuntimeExe Include="$(PythonHome)\python*.dll" />
-      <_PythonRuntimeExe Include="$(PythonHome)\vcruntime140.dll" />
       <_PythonRuntimeExe Include="$(PythonHome)\python*.exe" Condition="$(IncludePythonExe) == 'true'" />
       <_PythonRuntimeExe>
         <Link>%(Filename)%(Extension)</Link>

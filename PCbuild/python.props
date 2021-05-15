@@ -258,14 +258,14 @@
 
   <PropertyGroup Condition="$(DisableGil) != 'true'">
     <!-- The extension to use for standard library PYDs -->
-    <PyStdlibPydExt>.pyd</PyStdlibPydExt>
+    <PyStdlibPydExt>.lib</PyStdlibPydExt>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(DisableGil) == 'true'">
     <PydTag>$(FreethreadedPydTag)</PydTag>
 
     <!-- The extension to use for standard library PYDs -->
-    <PyStdlibPydExt>$(PydTag).pyd</PyStdlibPydExt>
+    <PyStdlibPydExt>$(PydTag).lib</PyStdlibPydExt>
 
     <!-- The version number for sys.winver -->
     <SysWinVer>$(FreethreadedSysWinVer)</SysWinVer>

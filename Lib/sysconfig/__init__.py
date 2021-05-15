@@ -107,11 +107,12 @@ else:
     _INSTALL_SCHEMES['venv'] = _INSTALL_SCHEMES['posix_venv']
 
 def _get_implementation():
-    return 'Python'
+    return 'MonolithPy'
 
 # NOTE: site.py has copy of this function.
 # Sync it when modify this function.
 def _getuserbase():
+    return None  # MONOLITHPY: Do not try to load stuff from user dirs to avoid contamination from system python.
     env_base = os.environ.get("PYTHONUSERBASE", None)
     if env_base:
         return env_base
@@ -468,13 +469,25 @@ def get_path(name, scheme=get_default_scheme(), vars=None, expand=True):
 def _init_config_vars():
     global _CONFIG_VARS
     _CONFIG_VARS = {}
+
+    _CONFIG_VARS['installed_base'] = _BASE_PREFIX
+    _CONFIG_VARS['base'] = _PREFIX
+    if os.name == 'nt':
+        _init_non_posix(_CONFIG_VARS)
+        _CONFIG_VARS['VPATH'] = sys._vpath
+    if os.name == 'posix':
+        _init_posix(_CONFIG_VARS)
+        orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
+        base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
+        for var in _CONFIG_VARS:
+            if isinstance(_CONFIG_VARS[var], str):
+                _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
+
     # Normalized versions of prefix and exec_prefix are handy to have;
     # in fact, these are the standard versions used most places in the
     # Distutils.
-    _PREFIX = os.path.normpath(sys.prefix)
-    _EXEC_PREFIX = os.path.normpath(sys.exec_prefix)
-    _CONFIG_VARS['prefix'] = _PREFIX  # FIXME: This gets overwriten by _init_posix.
-    _CONFIG_VARS['exec_prefix'] = _EXEC_PREFIX  # FIXME: This gets overwriten by _init_posix.
+    _CONFIG_VARS['prefix'] = _PREFIX
+    _CONFIG_VARS['exec_prefix'] = _EXEC_PREFIX
     _CONFIG_VARS['py_version'] = _PY_VERSION
     _CONFIG_VARS['py_version_short'] = _PY_VERSION_SHORT
     _CONFIG_VARS['py_version_nodot'] = _PY_VERSION_SHORT_NO_DOT
@@ -484,6 +497,7 @@ def _init_config_vars():
     _CONFIG_VARS['platbase'] = _EXEC_PREFIX
     _CONFIG_VARS['projectbase'] = _PROJECT_BASE
     _CONFIG_VARS['platlibdir'] = sys.platlibdir
+    _CONFIG_VARS['SOABI'] = 'mp3.11'
     _CONFIG_VARS['implementation'] = _get_implementation()
     _CONFIG_VARS['implementation_lower'] = _get_implementation().lower()
     try:
@@ -496,36 +510,8 @@ def _init_config_vars():
     except AttributeError:
         _CONFIG_VARS['py_version_nodot_plat'] = ''
 
-    if os.name == 'nt':
-        _init_non_posix(_CONFIG_VARS)
-        _CONFIG_VARS['VPATH'] = sys._vpath
-    if os.name == 'posix':
-        _init_posix(_CONFIG_VARS)
-    if _HAS_USER_BASE:
-        # Setting 'userbase' is done below the call to the
-        # init function to enable using 'get_config_var' in
-        # the init-function.
-        _CONFIG_VARS['userbase'] = _getuserbase()
-
     # e.g., 't' for free-threaded or '' for default build
     _CONFIG_VARS['abi_thread'] = 't' if _CONFIG_VARS.get('Py_GIL_DISABLED') else ''
-
-    # Always convert srcdir to an absolute path
-    srcdir = _CONFIG_VARS.get('srcdir', _PROJECT_BASE)
-    if os.name == 'posix':
-        if _PYTHON_BUILD:
-            # If srcdir is a relative path (typically '.' or '..')
-            # then it should be interpreted relative to the directory
-            # containing Makefile.
-            base = os.path.dirname(get_makefile_filename())
-            srcdir = os.path.join(base, srcdir)
-        else:
-            # srcdir is not meaningful since the installation is
-            # spread about the filesystem.  We choose the
-            # directory containing the Makefile since we know it
-            # exists.
-            srcdir = os.path.dirname(get_makefile_filename())
-    _CONFIG_VARS['srcdir'] = _safe_realpath(srcdir)
 
     # OS X platforms require special customization to handle
     # multi-architecture, multi-os-version installers

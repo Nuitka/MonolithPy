@@ -105,8 +105,11 @@ _Py_COMP_DIAG_IGNORE_DEPR_DECLS
 
 #if defined(MS_WINDOWS)
 
+#pragma push_macro("read")
+#undef read
 #pragma section("PyRuntime", read, write)
 __declspec(allocate("PyRuntime"))
+#pragma pop_macro("read")
 
 #elif defined(__APPLE__)
 

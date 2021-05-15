@@ -41,7 +41,7 @@ if exist "%EXTERNALS_DIR%" (
 if "%DO_FETCH%"=="false" goto end
 :fetch
 
-if "%ORG%"=="" (set ORG=Maxwell175)
+if "%ORG%"=="" (set ORG=Nuitka)
 call "%PCBUILD%\find_python.bat" "%PYTHON%"
 
 if NOT DEFINED PYTHON (
@@ -53,7 +53,7 @@ echo.Fetching external libraries...
 set libraries=
 set libraries=%libraries%                                       bzip2-1.0.8
 if NOT "%IncludeLibffiSrc%"=="false" set libraries=%libraries%  libffi-3.4.4
-if NOT "%IncludeSSLSrc%"=="false" set libraries=%libraries%     openssl-3.0.18
+if NOT "%IncludeSSLSrc%"=="false" set libraries=%libraries%     openssl-3.1.8
 set libraries=%libraries%                                       mpdecimal-4.0.0
 set libraries=%libraries%                                       sqlite-3.50.4.0
 if NOT "%IncludeTkinterSrc%"=="false" set libraries=%libraries% tcl-core-8.6.15.0
@@ -66,7 +66,7 @@ for %%e in (%libraries%) do (
         echo.%%e already exists, skipping.
     ) else if NOT DEFINED PYTHON (
         echo.Fetching %%e with git...
-        git clone --depth 1 https://github.com/%ORG%/Nuitka-Python-source-deps --branch %%e "%EXTERNALS_DIR%\%%e"
+        git clone --depth 1 https://github.com/%ORG%/MonolithPy-source-deps --branch %%e "%EXTERNALS_DIR%\%%e"
     ) else (
         echo.Fetching %%e...
         %PYTHON% -E "%PCBUILD%\get_external.py" -O %ORG% -e "%EXTERNALS_DIR%" %%e
@@ -76,8 +76,8 @@ for %%e in (%libraries%) do (
 echo.Fetching external binaries...
 
 set binaries=
-if NOT "%IncludeLibffi%"=="false"  set binaries=%binaries% libffi-3.4.4
-if NOT "%IncludeSSL%"=="false"     set binaries=%binaries% openssl-bin-3.0.18
+if NOT "%IncludeLibffi%"=="false"  set binaries=%binaries% libffi-3.4.6
+if NOT "%IncludeSSL%"=="false"     set binaries=%binaries% openssl-bin-3.1.8
 if NOT "%IncludeTkinter%"=="false" set binaries=%binaries% tcltk-8.6.15.0
 if NOT "%IncludeSSLSrc%"=="false"  set binaries=%binaries% nasm-2.11.06
 
@@ -86,7 +86,7 @@ for %%b in (%binaries%) do (
         echo.%%b already exists, skipping.
     ) else if NOT DEFINED PYTHON (
         echo.Fetching %%b with git...
-        git clone --depth 1 https://github.com/%ORG%/Nuitka-Python-bin-deps --branch %%b "%EXTERNALS_DIR%\%%b"
+        git clone --depth 1 https://github.com/%ORG%/MonolithPy-bin-deps --branch %%b "%EXTERNALS_DIR%\%%b"
     ) else (
         echo.Fetching %%b...
         %PYTHON% -E "%PCBUILD%\get_external.py" -b -O %ORG% -e "%EXTERNALS_DIR%" %%b

@@ -2041,14 +2041,14 @@ if test "$Py_LTO" = 'true' ; then
         AC_MSG_ERROR([thin lto is not supported under gcc compiler.])
       fi
       dnl flag to disable lto during linking
-      LDFLAGS_NOLTO="-fno-lto"
+      LDFLAGS_NOLTO=" "
       case $ac_sys_system in
         Darwin*)
           LTOFLAGS="-flto -Wl,-export_dynamic -Wl,-object_path_lto,\"\$@\".lto"
           LTOCFLAGS="-flto"
           ;;
         *)
-          LTOFLAGS="-flto -fuse-linker-plugin -ffat-lto-objects -flto-partition=none"
+          LTOFLAGS="-flto -fuse-linker-plugin -fno-fat-lto-objects"
           ;;
       esac
       ;;
@@ -6287,7 +6287,7 @@ AC_SUBST([SOABI])
 AC_MSG_CHECKING([ABIFLAGS])
 AC_MSG_RESULT([$ABIFLAGS])
 AC_MSG_CHECKING([SOABI])
-SOABI='cpython-'`echo $VERSION | tr -d .`${ABIFLAGS}${SOABI_PLATFORM:+-$SOABI_PLATFORM}
+SOABI='monolithpy-'`echo $VERSION | tr -d .`${ABIFLAGS}${SOABI_PLATFORM:+-$SOABI_PLATFORM}
 AC_MSG_RESULT([$SOABI])
 
 # Release build, debug build (Py_DEBUG), and trace refs build (Py_TRACE_REFS)
@@ -6295,13 +6295,13 @@ AC_MSG_RESULT([$SOABI])
 if test "$Py_DEBUG" = 'true'; then
   # Similar to SOABI but remove "d" flag from ABIFLAGS
   AC_SUBST([ALT_SOABI])
-  ALT_SOABI='cpython-'`echo $VERSION | tr -d .``echo $ABIFLAGS | tr -d d`${SOABI_PLATFORM:+-$SOABI_PLATFORM}
+  ALT_SOABI='monolithpy-'`echo $VERSION | tr -d .``echo $ABIFLAGS | tr -d d`${SOABI_PLATFORM:+-$SOABI_PLATFORM}
   AC_DEFINE_UNQUOTED([ALT_SOABI], ["${ALT_SOABI}"],
             [Alternative SOABI used in debug build to load C extensions built in release mode])
 fi
 
 AC_SUBST([EXT_SUFFIX])
-EXT_SUFFIX=.${SOABI}${SHLIB_SUFFIX}
+EXT_SUFFIX=.${SOABI}.a
 
 AC_MSG_CHECKING([LDVERSION])
 LDVERSION='$(VERSION)$(ABIFLAGS)'

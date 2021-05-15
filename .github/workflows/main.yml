@@ -1,0 +1,114 @@
+on:
+  push:
+    branches:
+    - 3.11
+
+jobs:
+  mac:
+    strategy:
+      matrix:
+        architecture:
+          - arch: arm64
+          - arch: x86_64
+        lto:
+          - lto: With LTO
+            lto_arg: ""
+            artifact_tag: ""
+          - lto: No LTO
+            lto_arg: "--no-lto"
+            artifact_tag: "_No_LTO"
+    name: MacOS Build
+    runs-on: macos-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - name: Download cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        curl -L "$file_url" -o "$file_name" || exit 0
+        tar -xf "$file_name" || exit 0
+        rm ${file_name} || exit 0
+        ln -s lib Nuitka-Python-Deps/lib64 || exit 0
+    - name: Uninstall homebrew
+      run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
+    - name: Run Build
+      run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/Nuitka-Python-Out"
+    - name: Cleanup artifact
+      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Nuitka-Python311_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
+        path: ${{ github.workspace }}/Nuitka-Python-Out
+    - name: Store cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        rm -rf ${file_name}
+        rm -f Nuitka-Python-Deps/lib64
+        tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+        rm -rf ${file_name}
+
+  linux:
+    name: Ubuntu Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+#      - name: Download cache
+#        env:
+#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+#        run: |
+#          cd ..
+#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+#          curl -L "$file_url" -o "$file_name" || exit 0
+#          unzip -q "$file_name" || exit 0
+#          rm ${file_name} || exit 0
+#          ln -s lib Nuitka-Python-Deps/lib64 || exit 0
+      - name: Run Build
+        run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
+      - name: Cleanup artifact
+        run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nuitka-Python311_ubuntu
+          path: ${{ github.workspace }}/Nuitka-Python-Out
+#      - name: Store cache
+#        env:
+#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+#        run: |
+#          cd ..
+#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+#          rm -rf ${file_name}
+#          rm -f Nuitka-Python-Deps/lib64
+#          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+#          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+#          rm -rf ${file_name}
+
+  windows:
+    name: Windows Build
+    runs-on: windows-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - uses: TheMrMilchmann/setup-msvc-dev@v3
+      with:
+        arch: x64
+    - name: Run Build
+      shell: cmd
+      run: build.bat
+    - name: Cleanup rebuild interpreters
+      run: Get-ChildItem -Path $(Get-Location) -File -Include *.old_interp -Recurse | Remove-Item -Force -Verbose
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Nuitka-Python311_windows_x64
+        path: output

@@ -19,13 +19,12 @@
     <tclWin32Exe Condition="$(Platform) != 'Win32'">$(tcltkDir)\..\win32\bin\tclsh$(TclMajorVersion)$(TclMinorVersion)t.exe</tclWin32Exe>
 
     <!--<TclDebugExt Condition="'$(Configuration)' == 'Debug'">g</TclDebugExt>-->
-    <tclDLLName>tcl$(TclMajorVersion)$(TclMinorVersion)t$(TclDebugExt).dll</tclDLLName>
-    <tclLibName>tcl$(TclMajorVersion)$(TclMinorVersion)t$(TclDebugExt).lib</tclLibName>
-    <tclShExeName>tclsh$(TclMajorVersion)$(TclMinorVersion)t$(TclDebugExt).exe</tclShExeName>
-    <tkDLLName>tk$(TkMajorVersion)$(TkMinorVersion)t$(TclDebugExt).dll</tkDLLName>
-    <tkLibName>tk$(TkMajorVersion)$(TkMinorVersion)t$(TclDebugExt).lib</tkLibName>
-    <tclZlibDLLName>zlib1.dll</tclZlibDLLName>
-    <tcltkLib>$(tcltkDir)lib\tcl$(TclMajorVersion)$(TclMinorVersion)t$(TclDebugExt).lib;$(tcltkDir)lib\tk$(TkMajorVersion)$(TkMinorVersion)t$(TclDebugExt).lib</tcltkLib>
+    <tclDLLName>tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).dll</tclDLLName>
+    <tclLibName>tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).lib</tclLibName>
+    <tclShExeName>tclsh$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).exe</tclShExeName>
+    <tkDLLName>tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).dll</tkDLLName>
+    <tkLibName>tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).lib</tkLibName>
+    <tcltkLib>$(tcltkDir)lib\tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).lib;$(tcltkDir)lib\tclstub$(TclMajorVersion)$(TclMinorVersion).lib;$(tcltkDir)lib\tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).lib</tcltkLib>
     <TclMachine>IX86</TclMachine>
     <TclMachine Condition="'$(Platform)' == 'x64'">AMD64</TclMachine>
     <TclMachine Condition="'$(Platform)' == 'ARM64'">ARM64</TclMachine>

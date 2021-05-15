@@ -130,92 +130,92 @@ PYTHONPATH=$(COREPYTHONPATH)
 
 # Modules that should always be present (POSIX and Windows):
 
-#_asyncio _asynciomodule.c
-#_bisect _bisectmodule.c
-#_contextvars _contextvarsmodule.c
-#_csv _csv.c
-#_datetime _datetimemodule.c
-#_decimal _decimal/_decimal.c
-#_heapq _heapqmodule.c
-#_interpchannels _interpchannelsmodule.c
-#_interpqueues _interpqueuesmodule.c
-#_interpreters _interpretersmodule.c
-#_json _json.c
-#_lsprof _lsprof.c rotatingtree.c
-#_multiprocessing -I$(srcdir)/Modules/_multiprocessing _multiprocessing/multiprocessing.c _multiprocessing/semaphore.c
-#_opcode _opcode.c
-#_pickle _pickle.c
-#_queue _queuemodule.c
-#_random _randommodule.c
-#_socket socketmodule.c
-#_statistics _statisticsmodule.c
-#_struct _struct.c
-#_typing _typingmodule.c
-#_zoneinfo _zoneinfo.c
-#array arraymodule.c
-#binascii binascii.c
-#cmath cmathmodule.c
-#math mathmodule.c
-#mmap mmapmodule.c
-#select selectmodule.c
-#_sysconfig _sysconfig.c
+_asyncio _asynciomodule.c
+_bisect _bisectmodule.c
+_contextvars _contextvarsmodule.c
+_csv _csv.c
+_datetime _datetimemodule.c
+_decimal _decimal/_decimal.c
+_heapq _heapqmodule.c
+_interpchannels _interpchannelsmodule.c
+_interpqueues _interpqueuesmodule.c
+_interpreters _interpretersmodule.c
+_json _json.c
+_lsprof _lsprof.c rotatingtree.c
+_multiprocessing -I$(srcdir)/Modules/_multiprocessing _multiprocessing/multiprocessing.c _multiprocessing/semaphore.c
+_opcode _opcode.c
+_pickle _pickle.c
+_queue _queuemodule.c
+_random _randommodule.c
+_socket socketmodule.c
+_statistics _statisticsmodule.c
+_struct _struct.c
+_typing _typingmodule.c
+_zoneinfo _zoneinfo.c
+array arraymodule.c
+binascii binascii.c
+cmath cmathmodule.c
+math mathmodule.c
+mmap mmapmodule.c
+select selectmodule.c
+_sysconfig _sysconfig.c
 
 # XML
-#_elementtree _elementtree.c
-#pyexpat pyexpat.c
+_elementtree _elementtree.c
+pyexpat pyexpat.c
 
 # hashing builtins
-#_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c
-#_md5 md5module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_MD5.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
-#_sha1 sha1module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA1.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
-#_sha2 sha2module.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_Hash_SHA2.a
-#_sha3 sha3module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA3.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c
+_md5 md5module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_MD5.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_sha1 sha1module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA1.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_sha2 sha2module.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_Hash_SHA2.a
+_sha3 sha3module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA3.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
 
 # text encodings and unicode
-#_codecs_cn cjkcodecs/_codecs_cn.c
-#_codecs_hk cjkcodecs/_codecs_hk.c
-#_codecs_iso2022 cjkcodecs/_codecs_iso2022.c
-#_codecs_jp cjkcodecs/_codecs_jp.c
-#_codecs_kr cjkcodecs/_codecs_kr.c
-#_codecs_tw cjkcodecs/_codecs_tw.c
-#_multibytecodec cjkcodecs/multibytecodec.c
-#unicodedata unicodedata.c
+_codecs_cn cjkcodecs/_codecs_cn.c
+_codecs_hk cjkcodecs/_codecs_hk.c
+_codecs_iso2022 cjkcodecs/_codecs_iso2022.c
+_codecs_jp cjkcodecs/_codecs_jp.c
+_codecs_kr cjkcodecs/_codecs_kr.c
+_codecs_tw cjkcodecs/_codecs_tw.c
+_multibytecodec cjkcodecs/multibytecodec.c
+unicodedata unicodedata.c
 
 # Modules with some UNIX dependencies
 
-#_posixsubprocess _posixsubprocess.c
-#_posixshmem -I$(srcdir)/Modules/_multiprocessing _multiprocessing/posixshmem.c -lrt
-#fcntl fcntlmodule.c
-#grp grpmodule.c
-#resource resource.c
-#syslog syslogmodule.c
-#termios termios.c
+_posixsubprocess _posixsubprocess.c
+_posixshmem -I$(srcdir)/Modules/_multiprocessing _multiprocessing/posixshmem.c -lrt
+fcntl fcntlmodule.c
+grp grpmodule.c
+resource resource.c
+syslog syslogmodule.c
+termios termios.c
 
 # Modules that require external libraries.
 
-#_bz2 _bz2module.c -lbz2
-#_ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict.c _ctypes/cfield.c -ldl -lffi -DHAVE_FFI_PREP_CIF_VAR -DHAVE_FFI_PREP_CLOSURE_LOC -DHAVE_FFI_CLOSURE_ALLOC
+_bz2 _bz2module.c -l:libbz2.a
+_ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict.c _ctypes/cfield.c -ldl -l:libffi.a -DHAVE_FFI_PREP_CIF_VAR -DHAVE_FFI_PREP_CLOSURE_LOC -DHAVE_FFI_CLOSURE_ALLOC
 # The _dbm module supports NDBM, GDBM with compat module, and Berkeley DB.
-#_dbm _dbmmodule.c -lgdbm_compat -DUSE_GDBM_COMPAT
-#_gdbm _gdbmmodule.c -lgdbm
-#_lzma _lzmamodule.c -llzma
-#_uuid _uuidmodule.c -luuid
-#zlib  zlibmodule.c -lz
+#_dbm _dbmmodule.c -l:libgdbm_compat.a -DUSE_GDBM_COMPAT
+#_gdbm _gdbmmodule.c -l:libgdbm.a
+_lzma _lzmamodule.c -l:liblzma.a
+_uuid _uuidmodule.c -l:libuuid.a
+zlib  zlibmodule.c -l:libz.a
 
 # The readline module also supports libeditline (-leditline).
 # Some systems may require -ltermcap or -ltermlib.
-#readline readline.c -lreadline -ltermcap
+#readline readline.c -l:libeditline.a -DWITH_EDITLINE
 
 # OpenSSL bindings
 #_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) $(OPENSSL_LIBS)
 #_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lcrypto
 
 # To statically link OpenSSL:
-# _ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-#     -l:libssl.a -Wl,--exclude-libs,libssl.a \
-#     -l:libcrypto.a -Wl,--exclude-libs,libcrypto.a
-# _hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-#     -l:libcrypto.a -Wl,--exclude-libs,libcrypto.a
+_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
+    -l:libssl.a \
+    -l:libcrypto.a
+_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
+    -l:libcrypto.a
 
 # The _tkinter module.
 #
@@ -229,11 +229,11 @@ PYTHONPATH=$(COREPYTHONPATH)
 # every system.
 
 # *** Always uncomment this (leave the leading underscore in!):
-#_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
+_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
 # *** Uncomment and edit to reflect where your Tcl/Tk libraries are:
 #	-L/usr/local/lib \
 # *** Uncomment and edit to reflect where your Tcl/Tk headers are:
-#	-I/usr/local/include \
+#	-I/usr/include/tcl8.6 \
 # *** Uncomment and edit to reflect where your X11 header files are:
 #	-I/usr/X11R6/include \
 # *** Or uncomment this for Solaris:
@@ -247,6 +247,8 @@ PYTHONPATH=$(COREPYTHONPATH)
 #	-DWITH_PIL -I../Extensions/Imaging/libImaging  tkImaging.c \
 # *** Uncomment and edit for TOGL extension only:
 #	-DWITH_TOGL togl.c \
+# *** Uncomment and edit to reflect your Tcl/Tk versions:
+	-l:libtk8.6.a -l:libtcl8.6.a \
 # *** Uncomment and edit to reflect where your X11 libraries are:
 #	-L/usr/X11R6/lib \
 # *** Or uncomment this for Solaris:
@@ -256,11 +258,11 @@ PYTHONPATH=$(COREPYTHONPATH)
 # *** Uncomment for AIX:
 #	-lld \
 # *** Always uncomment this; X11 libraries to link with:
-#	-lX11
+	  -l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a
 
 # Some system have -lcurses
-#_curses -lncurses -lncursesw -ltermcap _cursesmodule.c
-#_curses_panel -lpanel -lncurses _curses_panel.c
+_curses -l:libncursesw.a _cursesmodule.c
+_curses_panel -l:libpanelw.a -l:libncursesw.a _curses_panel.c
 
 # macOS specific module, needs SystemConfiguration and CoreFoundation framework
 # _scproxy _scproxy.c
@@ -292,7 +294,23 @@ PYTHONPATH=$(COREPYTHONPATH)
 # Uncommenting the following line tells makesetup that all following modules
 # are not built (see above for more detail).
 #
-#*disabled*
+*disabled*
+
+_xxsubinterpreters
+audioop
+_testcapi
+_testbuffer
+_testmultiphase
+_xxtestfuzz
+_testimportmultiple
+_testexternalinspection
+_testsinglephase
+_dbm
+nis
+_ctypes_test
+ossaudiodev
+xxlimited
+#_lzma
 #
 # _sqlite3 _tkinter _curses pyexpat
 # _codecs_jp _codecs_kr _codecs_tw unicodedata

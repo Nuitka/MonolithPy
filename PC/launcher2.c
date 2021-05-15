@@ -9,7 +9,8 @@
 #define __STDC_WANT_LIB_EXT1__ 1
 
 #include <windows.h>
-#include <pathcch.h>
+//#include <pathcch.h>
+#include "pathcch.private.h"
 #include <fcntl.h>
 #include <io.h>
 #include <shlobj.h>

@@ -3,16 +3,16 @@ goto Run
 :Usage
 echo.%~nx0 [flags and arguments] [quoted MSBuild options]
 echo.
-echo.Build CPython from the command line.  Requires the appropriate
+echo.Build Nuitka-Python from the command line.  Requires the appropriate
 echo.version(s) of Microsoft Visual Studio to be installed (see readme.txt).
 echo.
 echo.After the flags recognized by this script, up to 9 arguments to be passed
 echo.directly to MSBuild may be passed.  If the argument contains an '=', the
 echo.entire argument must be quoted (e.g. `%~nx0 "/p:PlatformToolset=v100"`).
-echo.Alternatively you can put extra flags for MSBuild in a file named 
+echo.Alternatively you can put extra flags for MSBuild in a file named
 echo.`msbuild.rsp` in the `PCbuild` directory, one flag per line. This file
 echo.will be picked automatically by MSBuild. Flags put in this file does not
-echo.need to be quoted. You can still use environment variables inside the 
+echo.need to be quoted. You can still use environment variables inside the
 echo.response file.
 echo.
 echo.Available flags:
@@ -70,6 +70,7 @@ set do_pgo=
 set pgo_job=-m test --pgo
 set UseTIER2=
 
+
 :CheckOpts
 if "%~1"=="-h" goto Usage
 if "%~1"=="-c" (set conf=%2) & shift & shift & goto CheckOpts
@@ -111,10 +112,10 @@ if "%IncludeExternals%"=="true" call "%dir%get_externals.bat"
 
 if "%do_pgo%" EQU "true" if "%platf%" EQU "x64" (
     if "%PROCESSOR_ARCHITEW6432%" NEQ "AMD64" if "%PROCESSOR_ARCHITECTURE%" NEQ "AMD64" (
-        echo.ERROR: Cannot cross-compile with PGO 
+        echo.ERROR: Cannot cross-compile with PGO
         echo.       32bit operating system detected. Ensure your PROCESSOR_ARCHITECTURE
         echo.       and PROCESSOR_ARCHITEW6432 environment variables are correct.
-        exit /b 1 
+        exit /b 1
     )
 )
 
@@ -135,6 +136,7 @@ if ERRORLEVEL 1 exit /B %ERRORLEVEL%
 
 if "%regen%"=="true" goto :Regen
 
+
 if "%do_pgo%"=="true" (
     set conf=PGInstrument
     call :Build %1 %2 %3 %4 %5 %6 %7 %8 %9
@@ -151,7 +153,12 @@ if "%do_pgo%"=="true" (
     call :Kill
     set conf=PGUpdate
     set target=Build
+) 
+
+if "%PlatformDir%"=="win32" (
+set conf="Release"
 )
+
 goto :Build
 
 :Kill

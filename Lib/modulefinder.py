@@ -99,6 +99,7 @@ class Module:
         self.__file__ = file
         self.__path__ = path
         self.__code__ = None
+        self.type = None
         # The set of global names that are assigned to in the module.
         # This includes those names imported through starimports of
         # Python modules.
@@ -108,11 +109,38 @@ class Module:
         self.starimports = {}
 
     def __repr__(self):
-        s = "Module(%r" % (self.__name__,)
+        s = "Module(name=%r" % (self.__name__,)
         if self.__file__ is not None:
-            s = s + ", %r" % (self.__file__,)
+            s = s + ", file=%r" % (self.__file__,)
         if self.__path__ is not None:
-            s = s + ", %r" % (self.__path__,)
+            s = s + ", path=%r" % (self.__path__,)
+        if self.type is not None:
+            if self.type == _PY_SOURCE:
+                s = s + ", type=_PY_SOURCE"
+            elif self.type == _C_EXTENSION:
+                s = s + ", type=_C_EXTENSION"
+            elif self.type == _PKG_DIRECTORY:
+                s = s + ", type=_PKG_DIRECTORY"
+            elif self.type == _C_BUILTIN:
+                s = s + ", type=_C_BUILTIN"
+            elif self.type == _PY_FROZEN:
+                s = s + ", type=_PY_FROZEN"
+            else:
+                s = s + ", type=%r" % (self.type,)
+        s = s + ")"
+        return s
+
+
+class ImportErrorModule:
+
+    def __init__(self, name, parent=None):
+        self.__name__ = name
+        self.parent = parent
+
+    def __repr__(self):
+        s = "ImportErrorModule(%r" % (self.__name__,)
+        if self.parent is not None:
+            s = s + ", parent = %r" % (self.parent,)
         s = s + ")"
         return s
 
@@ -129,6 +157,7 @@ class ModuleFinder:
         self.excludes = excludes if excludes is not None else []
         self.replace_paths = replace_paths if replace_paths is not None else []
         self.processed_paths = []   # Used in debugging only
+        self.import_errors = []
 
     def msg(self, level, str, *args):
         if level <= self.debug:
@@ -313,6 +342,8 @@ class ModuleFinder:
             fp, pathname, stuff = self.find_module(partname,
                                                    parent and parent.__path__, parent)
         except ImportError:
+            if parent is None or partname not in parent.globalnames:
+                self.import_errors.append(ImportErrorModule(partname, parent))
             self.msgout(3, "import_module ->", None)
             return None
 
@@ -347,10 +378,12 @@ class ModuleFinder:
             co = None
         m = self.add_module(fqname)
         m.__file__ = pathname
+        m.type = type
         if co:
             if self.replace_paths:
                 co = self.replace_paths_in_code(co)
             m.__code__ = co
+            print('Scanning module', m)
             self.scan_code(co, m)
         self.msgout(2, "load_module ->", m)
         return m
@@ -406,6 +439,9 @@ class ModuleFinder:
             if what == "store":
                 name, = args
                 m.globalnames[name] = 1
+        for what, args in scanner(co):
+            if what == "store":
+                pass
             elif what == "absolute_import":
                 fromlist, name = args
                 have_star = 0
@@ -456,6 +492,7 @@ class ModuleFinder:
         m = self.add_module(fqname)
         m.__file__ = pathname
         m.__path__ = [pathname]
+        m.type = _PKG_DIRECTORY
 
         # As per comment at top of file, simulate runtime __path__ additions.
         m.__path__ = m.__path__ + packagePathMap.get(fqname, [])

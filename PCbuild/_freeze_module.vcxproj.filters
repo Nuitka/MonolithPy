@@ -127,9 +127,6 @@
     <ClCompile Include="..\Python\dynamic_annotations.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\Python\dynload_win.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\Objects\enumobject.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -500,69 +497,6 @@
       <Filter>Python Files</Filter>
     </None>
     <None Include="..\Lib\importlib\_bootstrap_external.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\zipimport.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\abc.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\codecs.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\io.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\_collections_abc.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\_sitebuiltins.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\genericpath.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\ntpath.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\posixpath.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\os.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\site.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\stat.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\importlib\util.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\importlib\machinery.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\runpy.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\__hello__.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\__phello__\__init__.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\__phello__\ham\__init__.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\__phello__\ham\eggs.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Lib\__phello__\spam.py">
-      <Filter>Python Files</Filter>
-    </None>
-    <None Include="..\Tools\freeze\flag.py">
       <Filter>Python Files</Filter>
     </None>
     <!-- END frozen modules -->

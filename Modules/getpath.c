@@ -13,7 +13,8 @@
 
 #ifdef MS_WINDOWS
 #  include <windows.h>            // GetFullPathNameW(), MAX_PATH
-#  include <pathcch.h>
+// #  include <pathcch.h>
+#  include "pathcch.private.h"
 #endif
 
 #ifdef __APPLE__

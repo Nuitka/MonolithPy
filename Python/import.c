@@ -4382,6 +4382,14 @@ _imp_extension_suffixes_impl(PyObject *module)
         Py_DECREF(item);
         index += 1;
     }
+#else
+#ifdef WIN32
+    PyObject *item = PyUnicode_FromString(".lib");
+#else
+    PyObject *item = PyUnicode_FromString(".a");
+#endif
+    PyList_Append(list, item);
+    Py_DECREF(item);
 #endif
     return list;
 }
@@ -4735,8 +4743,18 @@ _imp_create_dynamic_impl(PyObject *module, PyObject *spec, PyObject *file)
     // import_run_extension() to address this.
     _PyEval_EnableGILTransient(tstate);
 #endif
+    char *package_sep = strrchr(p->name, '.');
+    const char *old_context = _Py_PackageContext;
+    if (package_sep != NULL) {
+        _Py_PackageContext = p->name;
+    }
+
     mod = import_run_extension(
                     tstate, p0, &info, spec, get_modules_dict(tstate, true));
+
+    if (package_sep != NULL) {
+        _Py_PackageContext = old_context;
+    }
 #ifdef Py_GIL_DISABLED
     if (_PyImport_CheckGILForModule(mod, info.name) < 0) {
         Py_CLEAR(mod);

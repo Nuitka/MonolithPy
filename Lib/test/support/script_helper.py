@@ -160,6 +160,9 @@ def run_python_until_end(*args, **env_vars):
 
 @support.requires_subprocess()
 def _assert_python(expected_success, /, *args, **env_vars):
+    from unittest import SkipTest
+    raise SkipTest("no real python executions")
+
     res, cmd_line = run_python_until_end(*args, **env_vars)
     if (res.rc and expected_success) or (not res.rc and not expected_success):
         res.fail(cmd_line)
@@ -188,6 +191,7 @@ def assert_python_failure(*args, **env_vars):
 
     See assert_python_ok() for more options.
     """
+
     return _assert_python(False, *args, **env_vars)
 
 

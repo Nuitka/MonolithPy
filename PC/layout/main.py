@@ -123,6 +123,9 @@ def get_tcltk_lib(ns):
     for dest, src in rglob(Path(tcl_lib).parent, "**/*"):
         yield "tcl/{}".format(dest), src
 
+    for dest, src in rglob(Path(tcl_lib).parent.parent.joinpath('bin'), "*.dll"):
+        yield dest, src
+
 
 def get_layout(ns):
     def in_build(f, dest="", new_name=None, no_lib=False):
@@ -181,9 +184,13 @@ def get_layout(ns):
         yield from in_build(sourcew, new_name=a)
 
     if ns.include_freethreaded:
-        yield from in_build(FREETHREADED_PYTHON_DLL_NAME)
+        yield from in_build(FREETHREADED_PYTHON_DLL_NAME.replace(".dll", ".lib"))
     else:
-        yield from in_build(PYTHON_DLL_NAME)
+        yield from in_build(PYTHON_DLL_NAME.replace(".dll", ".lib"))
+
+    yield Path("python.c"), ns.source / "Programs" / "python.c"
+    if os.path.exists(ns.build / "python.pgd"):
+        yield "python.pgd", ns.build / "python.pgd"
 
     if ns.include_launchers and ns.include_appxmanifest:
         if ns.include_pip:
@@ -196,13 +203,6 @@ def get_layout(ns):
             yield from in_build(FREETHREADED_PYTHON_STABLE_DLL_NAME)
         else:
             yield from in_build(PYTHON_STABLE_DLL_NAME)
-
-    found_any = False
-    for dest, src in rglob(ns.build, "vcruntime*.dll"):
-        found_any = True
-        yield dest, src
-    if not found_any:
-        log_error("Failed to locate vcruntime DLL in the build.")
 
     yield "LICENSE.txt", ns.build / "LICENSE.txt"
 
@@ -243,7 +243,7 @@ def get_layout(ns):
         for dest, src in get_lib_layout(ns):
             yield "Lib/{}".format(dest), src
 
-        if ns.include_venv:
+        if ns.include_venv and False:
             if ns.include_freethreaded:
                 yield from in_build("venvlaunchert.exe", "Lib/venv/scripts/nt/")
                 yield from in_build("venvwlaunchert.exe", "Lib/venv/scripts/nt/")
@@ -271,6 +271,19 @@ def get_layout(ns):
         yield PYTHON_PTH_NAME, ns.temp / PYTHON_PTH_NAME
 
     if ns.include_dev:
+        for dest, src in rglob(ns.build, ("*.lib",)):
+            if src.stem.endswith("_d") != bool(ns.debug) and src not in REQUIRED_DLLS:
+                continue
+            if src in EXCLUDE_FROM_DLLS and src not in FileNameSet('python39.lib'):
+                continue
+            if src in TEST_PYDS_ONLY and not ns.include_tests:
+                continue
+            if src in TCLTK_PYDS_ONLY and not ns.include_tcltk:
+                continue
+            if src in FileNameSet('python3.lib', 'python.lib', 'pythonw.lib') and src not in FileNameSet('python39.lib'):
+                continue
+            yield "libs/{}".format(dest), src
+
         for dest, src in rglob(ns.source / "Include", "**/*.h"):
             yield "include/{}".format(dest), src
         # Support for layout of new and old releases.
@@ -283,7 +296,7 @@ def get_layout(ns):
     for dest, src in get_tcltk_lib(ns):
         yield dest, src
 
-    if ns.include_pip:
+    if ns.include_pip and False:
         for dest, src in get_pip_layout(ns):
             if not isinstance(src, tuple) and (
                 src in EXCLUDE_FROM_LIB or src in EXCLUDE_FROM_PACKAGED_LIB
@@ -408,7 +421,13 @@ def generate_source_files(ns):
 
     if ns.include_pip:
         log_info("Extracting pip")
-        extract_pip_files(ns)
+        #extract_pip_files(ns)
+        subprocess.check_output(
+            [
+                sys.executable,
+                "-m",
+                "ensurepip"
+            ])
 
     if ns.include_install_json:
         log_info("Generating __install__.json in {}", ns.temp)

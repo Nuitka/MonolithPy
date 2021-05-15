@@ -2,7 +2,7 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{10487945-15D1-4092-A214-338395C4116B}</ProjectGuid>
-        <OutputName>python</OutputName>
+        <OutputName>NuitkaPython</OutputName>
         <OutputName Condition="$(Platform) == 'x86'">$(OutputName)x86</OutputName>
         <OutputName Condition="$(Platform) == 'ARM'">$(OutputName)arm32</OutputName>
         <OutputName Condition="$(BuildForDaily) == 'true'">$(OutputName)daily</OutputName>
@@ -29,7 +29,7 @@
         <PythonArguments>$(PythonArguments) -b "$(BuildPath.TrimEnd(`\`))" -s "$(PySourcePath.TrimEnd(`\`))"</PythonArguments>
         <PythonArguments>$(PythonArguments) -t "$(IntermediateOutputPath)obj"</PythonArguments>
         <PythonArguments>$(PythonArguments) --copy "$(IntermediateOutputPath)pkg"</PythonArguments>
-        <PythonArguments>$(PythonArguments) --preset-nuget</PythonArguments>
+        <PythonArguments>$(PythonArguments) --preset-nuget --include-dev --include-pip --include-tcltk</PythonArguments>
         
         <PackageArguments Condition="$(Packages) != ''">"$(IntermediateOutputPath)pkg\pip.exe" -B -m pip install -U $(Packages)</PackageArguments>
         
