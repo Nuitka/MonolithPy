@@ -384,7 +384,7 @@ def create_externals_sbom() -> None:
             )
 
         download_location = (
-            f"https://github.com/python/cpython-source-deps/archive/refs/tags/{externals_name_to_git_tag[package['name']]}.tar.gz"
+            f"https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/{externals_name_to_git_tag[package['name']]}.tar.gz"
         )
         download_location_changed = download_location != package["downloadLocation"]
         package["downloadLocation"] = download_location

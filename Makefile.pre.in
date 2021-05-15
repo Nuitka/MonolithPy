@@ -1733,7 +1733,7 @@ Python/frozen_modules/importlib._bootstrap.h: Lib/importlib/_bootstrap.py $(FREE
 Python/frozen_modules/importlib._bootstrap_external.h: Lib/importlib/_bootstrap_external.py $(FREEZE_MODULE_BOOTSTRAP_DEPS)
 	$(FREEZE_MODULE_BOOTSTRAP) importlib._bootstrap_external $(srcdir)/Lib/importlib/_bootstrap_external.py Python/frozen_modules/importlib._bootstrap_external.h
 
-# We do not freeze modules in Nuitka-Python to avoid contaminating the binary with
+# We do not freeze modules in MonolithPy to avoid contaminating the binary with
 # useless bytecode. Only leave the minimally required modules.
 # END: freezing modules
 
@@ -1925,10 +1925,10 @@ regen-ast:
 regen-token:
 	# Regenerate Doc/library/token-list.inc from Grammar/Tokens
 	# using Tools/build/generate_token.py
-	$(PYTHON_FOR_REGEN) $(srcdir)/Tools/build/generate_token.py rst \
-		$(srcdir)/Grammar/Tokens \
-		$(srcdir)/Doc/library/token-list.inc \
-		$(srcdir)/Doc/library/token.rst
+	#$(PYTHON_FOR_REGEN) $(srcdir)/Tools/build/generate_token.py rst \
+	#	$(srcdir)/Grammar/Tokens \
+	#	$(srcdir)/Doc/library/token-list.inc \
+	#	$(srcdir)/Doc/library/token.rst
 	# Regenerate Include/internal/pycore_token.h from Grammar/Tokens
 	# using Tools/build/generate_token.py
 	$(PYTHON_FOR_REGEN) $(srcdir)/Tools/build/generate_token.py h \

@@ -5,8 +5,7 @@ import glob
 import sysconfig
 import __np__
 import mkembeddata
-import distutils
-import distutils.ccompiler
+import setuptools._distutils.ccompiler as ccompiler
 
 embed_path = None
 out_lib_path = None
@@ -17,7 +16,7 @@ def main():
         mkembeddata.out_dir = tmpdir
         mkembeddata.main()
 
-        compiler = distutils.ccompiler.new_compiler(verbose=5)
+        compiler = ccompiler.new_compiler(verbose=5)
         try:
             compiler.initialize()
         except AttributeError:

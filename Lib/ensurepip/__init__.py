@@ -10,9 +10,9 @@ from importlib import resources
 
 __all__ = ["version", "bootstrap", "_PROJECTS", "_get_packages"]
 _PACKAGE_NAMES = ('setuptools', 'packaging', 'pip', 'pyproject-hooks', 'wheel')
-_SETUPTOOLS_VERSION = "78.1.0"
+_SETUPTOOLS_VERSION = "80.9.0"
 _PACKAGING_VERSION = "24.2"
-_PIP_VERSION = "25.1.1"
+_PIP_VERSION = "25.2"
 _PYPROJECT_HOOKS_VERSION = "1.2.0"
 _WHEEL_VERSION = "0.42.0"
 _PROJECTS = [
@@ -71,7 +71,7 @@ def _get_packages():
 
     packages = {}
     for name, version, py_tag in _PROJECTS:
-        wheel_name = f"{name}-{version}-{py_tag}-none-any.whl"
+        wheel_name = f"{name.replace('-', '_')}-{version}-{py_tag}-none-any.whl"
         packages[name] = _Package(version, wheel_name, None)
     if _WHEEL_PKG_DIR:
         dir_packages = _find_packages(_WHEEL_PKG_DIR)

@@ -58,7 +58,7 @@ rem Move the standalone build result to "output". TODO: Version number could be 
 rem from the Python binary built, or much rather we do not use one in the nuget build at all.
 
 set OUTPUT_DIR=output
-set SRC_TOOLS_DIR=nuget-result-%NUGET_PYTHON_PACKAGE_NAME%\%NUGET_PYTHON_PACKAGE_NAME%.3.11.9\tools
+set SRC_TOOLS_DIR=nuget-result-%NUGET_PYTHON_PACKAGE_NAME%\%NUGET_PYTHON_PACKAGE_NAME%.3.13.9\tools
 set SRC_LIB_DIR=%%d\amd64
 if "%ARCH_OPT%" EQU "-x86" (
     set OUTPUT_DIR=output32
@@ -66,7 +66,7 @@ if "%ARCH_OPT%" EQU "-x86" (
 )
 
 move %SRC_TOOLS_DIR%\Lib\pip.py.bak %SRC_TOOLS_DIR%\Lib\pip.py
-copy %SRC_TOOLS_DIR%\python311.lib %SRC_TOOLS_DIR%\libs\python311.lib
+copy %SRC_TOOLS_DIR%\python313.lib %SRC_TOOLS_DIR%\libs\python313.lib
 
 xcopy /i /q /s /y %SRC_TOOLS_DIR% %OUTPUT_DIR%
 
@@ -84,8 +84,9 @@ copy Embedded\np_embed.obj %OUTPUT_DIR%\Embedded\np_embed.obj
 copy Embedded\np_embed.lib %OUTPUT_DIR%\libs\np_embed.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython
+%OUTPUT_DIR%\python.exe -c "import __np__.packaging; __np__.packaging.install_build_tool('clang')"
 
-echo "Ok, Nuitka Python now lives in %OUTPUT_DIR% folder"
+echo "Ok, MonolithPy now lives in %OUTPUT_DIR% folder"
 
 endlocal
 

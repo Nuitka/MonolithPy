@@ -3,8 +3,8 @@ from .common import *
 
 
 def get_compiler_module():
-    __import__("distutils.unixccompiler")
-    return sys.modules["distutils.unixccompiler"]
+    __import__("setuptools._distutils.unixccompiler")
+    return sys.modules["setuptools._distutils.unixccompiler"]
 
 
 def make(*args):

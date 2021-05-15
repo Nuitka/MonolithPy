@@ -24,7 +24,7 @@ fi
 # The dependencies must be outside of the build folder because
 # the python build process ends up running a find -delete that
 # happens to also delete all the static libraries that we built.
-export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
+export "PREFIX=$(pwd)/../MonolithPy-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
@@ -47,7 +47,7 @@ export CC
 export CXX
 
 # Have this as a standard path. We are not yet relocatable, but that will come hopefully.
-target=~/Library/Nuitka-Python${short_version}-$arch
+target=~/Library/MonolithPy${short_version}-$arch
 
 if [ ! -z "$1" ]
 then
@@ -337,7 +337,7 @@ $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
 # Copy over the compiled dependencies.
 $ELEVATE mkdir -p "$target/dependency_libs"
-$ELEVATE cp -r "$(pwd)/../Nuitka-Python-Deps" "$target/dependency_libs/base"
+$ELEVATE cp -r "$(pwd)/../MonolithPy-Deps" "$target/dependency_libs/base"
 $ELEVATE ln -s base "$target/dependency_libs/bzip2"
 $ELEVATE ln -s base "$target/dependency_libs/editline"
 $ELEVATE ln -s base "$target/dependency_libs/expat"

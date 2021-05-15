@@ -10,7 +10,6 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-from distutils.util import get_platform  # pylint: disable=import-error
 
 
 def getDependencyInstallDir():
@@ -173,7 +172,7 @@ def download_file(url, destination):
     try:
         my_print("Attempting to download '%s'." % url, style="blue")
 
-        req = Request(url, headers={"User-Agent": "Nuitka-Python"})
+        req = Request(url, headers={"User-Agent": "MonolithPy"})
         with contextlib.closing(urlopen(req)) as fp:
             if (
                 "content-disposition" in fp.headers

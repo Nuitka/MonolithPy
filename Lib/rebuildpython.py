@@ -2,8 +2,7 @@ from __future__ import print_function
 
 import __np__
 import ctypes
-import distutils
-import distutils.ccompiler
+import setuptools._distutils.ccompiler as ccompiler
 import fnmatch
 import glob
 import hashlib
@@ -23,6 +22,7 @@ if platform.system() == "Windows":
     interpreter_prefix = sysconfig.get_config_var("base")
 else:
     interpreter_prefix = sysconfig.get_config_var("prefix")
+
 
 def find_files(directory, pattern):
     for root, dirs, files in os.walk(directory):
@@ -81,7 +81,8 @@ def get_lib_hash():
         if path == os.getcwd() or "pip-install-" in path or not path:
             continue
 
-        for lib_file in list(glob.glob(os.path.join("**", "*.a"), root_dir=path, recursive=True)) + list(glob.glob(os.path.join("**", "*.lib"), root_dir=path, recursive=True)):
+        for lib_file in list(glob.glob(os.path.join("**", "*.a"), root_dir=path, recursive=True)) + list(
+            glob.glob(os.path.join("**", "*.lib"), root_dir=path, recursive=True)):
             if os.path.basename(lib_file) in read_files:
                 continue
 
@@ -104,6 +105,21 @@ def is_lib_valid(path):
         return False
     else:
         return True
+
+
+def resolve_library(lib, base_paths):
+    potential_paths = []
+    for base_path in base_paths:
+        potential_paths.append(os.path.join(base_path, lib))
+        potential_paths.append(os.path.join(base_path, lib + ".lib"))
+        potential_paths.append(os.path.join(base_path, lib + ".a"))
+        potential_paths.append(os.path.join(base_path, "lib" + lib + ".a"))
+        potential_paths.append(os.path.join(base_path, "lib" + lib + ".lib"))
+    for path in potential_paths:
+        if os.path.exists(path) and is_lib_valid(path):
+            return path
+
+    return lib
 
 
 def run_rebuild():
@@ -129,15 +145,15 @@ def run_rebuild():
     if has_compiler_vars:
         cc_config_var = sysconfig.get_config_var("CC").split()[0]
         if "CC" in os.environ and os.environ["CC"] != cc_config_var:
-            print("Overriding CC variable to Nuitka-Python used '%s' ..." % cc_config_var)
+            print("Overriding CC variable to MonolithPy used '%s' ..." % cc_config_var)
         os.environ["CC"] = cc_config_var
 
         cxx_config_var = sysconfig.get_config_var("CXX").split()[0]
         if "CXX" in os.environ and os.environ["CXX"] != cxx_config_var:
-            print("Overriding CXX variable to Nuitka-Python used '%s' ..." % cxx_config_var)
+            print("Overriding CXX variable to MonolithPy used '%s' ..." % cxx_config_var)
         os.environ["CXX"] = cxx_config_var
 
-    compiler = distutils.ccompiler.new_compiler(verbose=5)
+    compiler = ccompiler.new_compiler(verbose=5)
     if has_compiler_vars:
         compiler.set_executables(
             compiler=cc_config_var,
@@ -154,7 +170,7 @@ def run_rebuild():
     foundLibs = {}
     checkedLibs = set()
 
-    from distutils.sysconfig import get_config_var
+    from setuptools._distutils.sysconfig import get_config_var
 
     ext_suffix = get_config_var("SO" if str is bytes else "EXT_SUFFIX")
 
@@ -169,7 +185,7 @@ def run_rebuild():
         if path == os.getcwd() or installDir == path or path in installDir or "pip-install-" in path:
             continue
         for file in find_files(
-                path, "*.lib" if platform.system() == "Windows" else "*.a"
+            path, "*.lib" if platform.system() == "Windows" else "*.a"
         ):
             normalized_file = os.path.normpath(file)
             if normalized_file in checkedLibs:
@@ -242,7 +258,9 @@ def run_rebuild():
             "Cabinet",
             "winmm",
             "Netapi32",
-            "Bcrypt"
+            "Bcrypt",
+            "wbemuuid",
+            "propsys"
         ]
         if "32" in platform.architecture()[0]:
             link_libs += ["msvcrt"]
@@ -265,8 +283,8 @@ def run_rebuild():
 
     # Scrape all available libs from the libs directory. We will let the linker worry about filtering out extra symbols.
     for file in find_files(
-            sysconfig.get_config_var("prefix"),
-            "*.lib" if platform.system() == "Windows" else "*.a",
+        sysconfig.get_config_var("prefix"),
+        "*.lib" if platform.system() == "Windows" else "*.a",
     ):
         if "interpreter_build" in file:
             continue
@@ -287,45 +305,36 @@ def run_rebuild():
             if os.path.isfile(tool_link_file):
                 with open(tool_link_file, "r") as f:
                     linkData = json.load(f)
-                    link_libs += [os.path.join(os.path.dirname(tool_link_file), x) if os.path.isfile(os.path.join(os.path.dirname(tool_link_file), x)) else x for x in linkData.get("libraries", [])]
+                    link_libs += [os.path.join(os.path.dirname(tool_link_file), x) if os.path.isfile(
+                        os.path.join(os.path.dirname(tool_link_file), x)) else x for x in linkData.get("libraries", [])]
                     library_dirs += [
                         os.path.join(os.path.dirname(tool_link_file), x)
                         for x in linkData.get("library_dirs", [])
                     ]
 
-    library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__np__.getDependencyInstallDir(), "*")) if os.path.isdir(os.path.join(x, "lib"))]
+    library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__np__.getDependencyInstallDir(), "*")) if
+                     os.path.isdir(os.path.join(x, "lib"))]
 
     libIdx = 0
     while libIdx < len(link_libs):
         final_path = None
         lib = link_libs[libIdx]
+        curr_lib_dirs = library_dirs + [os.path.dirname(lib)]
         if os.path.isfile(lib):
             final_path = lib
         else:
-            for dir in library_dirs:
-                if os.path.isfile(os.path.join(dir, lib)):
-                    final_path = os.path.join(dir, lib)
-                    break
-                elif os.path.isfile(os.path.join(dir, lib) + ".a"):
-                    final_path = os.path.join(dir, lib) + ".a"
-                    break
-                elif os.path.isfile(os.path.join(dir, "lib" + lib) + ".a"):
-                    final_path = os.path.join(dir, "lib" + lib) + ".a"
-                    break
-                elif os.path.isfile(os.path.join(dir, lib) + ".lib"):
-                    final_path = os.path.join(dir, lib) + ".lib"
-                    break
+            final_path = resolve_library(lib, curr_lib_dirs)
         if not final_path:
             libIdx += 1
             continue
         if os.path.isfile(final_path + ".link.json"):
             with open(final_path + ".link.json", "r") as f:
                 linkData = json.load(f)
-                link_libs += linkData.get("libraries", [])
                 library_dirs += [
                     os.path.join(os.path.dirname(final_path), x)
                     for x in linkData.get("library_dirs", [])
                 ]
+                link_libs += [resolve_library(x, curr_lib_dirs) for x in linkData.get("libraries", [])]
                 extra_link_args += linkData.get("extra_postargs", [])
         libIdx += 1
 
@@ -372,32 +381,32 @@ extern "C" {
 
         staticinitheader += "   extern  PyObject* " + module_initfunc_name + "(void);\n"
         inittab_code += (
-                '   PyImport_AppendInittab("'
-                + module_fullname
-                + '", '
-                + module_initfunc_name
-                + ");\n"
+            '   PyImport_AppendInittab("'
+            + module_fullname
+            + '", '
+            + module_initfunc_name
+            + ");\n"
         )
 
     staticinitheader += (
-            """
-    #ifdef __cplusplus
-    }
-    #endif // __cplusplus
+        """
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
-    static inline void Py_InitStaticModules(void) {
-    %s
-    }
+static inline void Py_InitStaticModules(void) {
+%s
+}
 
-    #endif
+#endif
 
-    #endif // !Py_STATICINIT_H
-    """
-            % inittab_code
+#endif // !Py_STATICINIT_H
+"""
+        % inittab_code
     )
 
     with open(
-            os.path.join(sysconfig.get_config_var("INCLUDEPY"), "staticinit.h"), "w"
+        os.path.join(sysconfig.get_config_var("INCLUDEPY"), "staticinit.h"), "w"
     ) as f:
         f.write(staticinitheader)
 
@@ -458,7 +467,7 @@ extern "C" {
 
         link_flags = ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
         extra_preargs_ = ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
-        #if not ('32bit', 'WindowsPE') == platform.architecture():
+        # if not ('32bit', 'WindowsPE') == platform.architecture():
         #    # Not Win32 where is no PGO
         #    extra_preargs_.append("/USEPROFILE:PGD=python.pgd")
 
@@ -502,7 +511,8 @@ extern "C" {
 
         EndUpdateResource(update_handle, False)
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python.exe"), "-c", "print('Interpreter OK')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python.exe"), "-c",
+                                                          "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         # Replace running interpreter by moving current version to a temp file, then marking it for deletion.
@@ -522,11 +532,11 @@ extern "C" {
         sysconfig_libs = []
         sysconfig_lib_dirs = []
         for arg in (
-                ["-lm", "-pthread", "-lutil", "-ldl"]
-                + sysconfig.get_config_var("LDFLAGS").split()
-                + sysconfig.get_config_var("CFLAGS").split()
-                + sysconfig.get_config_var("MODLIBS").split()
-                + sysconfig.get_config_var("LIBS").split()
+            ["-lm", "-pthread", "-lutil", "-ldl"]
+            + sysconfig.get_config_var("LDFLAGS").split()
+            + sysconfig.get_config_var("CFLAGS").split()
+            + sysconfig.get_config_var("MODLIBS").split()
+            + sysconfig.get_config_var("LIBS").split()
         ):
             if arg.startswith("-l"):
                 if arg[2:] not in sysconfig_libs:
@@ -563,7 +573,8 @@ extern "C" {
             extra_postargs=["-l:libsqlite3.a"]
         )
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Interpreter OK')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c",
+                                                          "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         # Replace running interpreter by moving current version to a temp file, then deleting it. This
@@ -582,9 +593,9 @@ extern "C" {
         sysconfig_libs = []
         sysconfig_lib_dirs = []
         for arg in (
-                ["-lm", "-pthread", "-lutil", "-ldl", "-lffi"]
-                + sysconfig.get_config_var("LDFLAGS").split()
-                + sysconfig.get_config_var("CFLAGS").split()
+            ["-lm", "-pthread", "-lutil", "-ldl", "-lffi"]
+            + sysconfig.get_config_var("LDFLAGS").split()
+            + sysconfig.get_config_var("CFLAGS").split()
         ):
             if arg.startswith("-l"):
                 if arg[2:] not in sysconfig_libs:
@@ -596,7 +607,7 @@ extern "C" {
         link_libs = sysconfig_libs + link_libs
         libpython_lib = [x for x in link_libs if os.path.basename(x).startswith('libpython') and x.endswith(".a")][0]
         link_libs = [libpython_lib] + [x for x in link_libs if x != libpython_lib]
-        library_dirs = [x for x in sysconfig_lib_dirs + library_dirs if 'Nuitka-Python-Deps' not in x]
+        library_dirs = [x for x in sysconfig_lib_dirs + library_dirs if 'MonolithPy-Deps' not in x]
 
         os.environ["MACOSX_DEPLOYMENT_TARGET"] = "10.9"
 
@@ -607,20 +618,21 @@ extern "C" {
             macros=macros,
         )
 
-        extra_args_combined = [x for x in sysconfig.get_config_var("LDFLAGS").split() if not x.startswith("-L") and not x.startswith("-l")] \
-                                + extra_link_args \
-                                + [
-                                    "-flto=thin",
-                                    "-framework", "SystemConfiguration",
-                                    "-framework", "CoreFoundation",
-                                    "-framework", "Cocoa",
-                                    "-framework", "Carbon",
-                                    "-framework", "IOKit",
-                                    "-framework", "QuartzCore",
-                                    "-framework", "CoreServices",
-                                    "-framework", "ApplicationServices",
-                                    "-framework", "UniformTypeIdentifiers"
-                                ]
+        extra_args_combined = [x for x in sysconfig.get_config_var("LDFLAGS").split() if
+                               not x.startswith("-L") and not x.startswith("-l")] \
+                              + extra_link_args \
+                              + [
+                                  "-flto=thin",
+                                  "-framework", "SystemConfiguration",
+                                  "-framework", "CoreFoundation",
+                                  "-framework", "Cocoa",
+                                  "-framework", "Carbon",
+                                  "-framework", "IOKit",
+                                  "-framework", "QuartzCore",
+                                  "-framework", "CoreServices",
+                                  "-framework", "ApplicationServices",
+                                  "-framework", "UniformTypeIdentifiers"
+                              ]
         num_link_threads = os.environ.get("LINK_THREADS", None)
         if num_link_threads is not None:
             extra_args_combined += ["-Wl,-mllvm,-threads=" + num_link_threads]
@@ -630,7 +642,7 @@ extern "C" {
         while i < len(extra_args_combined):
             if extra_args_combined[i].lower() == "-framework":
                 if i + 1 < len(extra_args_combined) and \
-                        extra_args_combined[i + 1] not in used_frameworks:
+                    extra_args_combined[i + 1] not in used_frameworks:
                     used_frameworks.append(extra_args_combined[i + 1])
                     final_extra_link_args += ["-framework", extra_args_combined[i + 1]]
                 i += 2
@@ -650,7 +662,8 @@ extern "C" {
             extra_midargs=final_extra_link_args,
         )
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Interpreter OK')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c",
+                                                          "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         otool_output = __np__.run_with_output("otool", "-l", os.path.join(build_dir, "python"), quiet=True)
@@ -668,8 +681,10 @@ extern "C" {
             name_len = first_word[0] + len(first_word[1])
             curr_load_lines[-1][line[:name_len].strip()] = line[name_len + 1:]
 
-        for lib in [x for x in curr_load_lines if x.get('name') and not x.get('name').startswith("/") and not x.get('name').startswith("@")]:
-            __np__.run_with_output("install_name_tool", "-change", lib['name'].split(' ')[0], os.path.join("@rpath", lib['name'].split(' ')[0]), os.path.join(build_dir, "python"))
+        for lib in [x for x in curr_load_lines if
+                    x.get('name') and not x.get('name').startswith("/") and not x.get('name').startswith("@")]:
+            __np__.run_with_output("install_name_tool", "-change", lib['name'].split(' ')[0],
+                                   os.path.join("@rpath", lib['name'].split(' ')[0]), os.path.join(build_dir, "python"))
 
         __np__.run_with_output("install_name_tool", "-add_rpath", "@loader_path", os.path.join(build_dir, "python"))
 

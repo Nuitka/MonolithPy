@@ -54,9 +54,10 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(PySourcePath)Include;$(PySourcePath)Include\internal;$(PySourcePath)Include\internal\mimalloc;$(PySourcePath)PC;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;$(_Py3NamePreprocessorDefinition)$(_PlatformPreprocessorDefinition)$(_DebugPreprocessorDefinition)$(_PyStatsPreprocessorDefinition)$(_PydPreprocessorDefinition)$(_FreeThreadedPreprocessorDefinition)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(PySourcePath)Include;$(PySourcePath)Include\internal;$(PySourcePath)Include\internal\mimalloc;$(GeneratedPyConfigDir);$(PySourcePath)PC;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;Py_NO_ENABLE_SHARED;$(_Py3NamePreprocessorDefinition)$(_PlatformPreprocessorDefinition)$(_DebugPreprocessorDefinition)$(_PyStatsPreprocessorDefinition)$(_PydPreprocessorDefinition)$(_FreeThreadedPreprocessorDefinition)%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(SupportPGO)' and ($(Configuration) == 'PGInstrument' or $(Configuration) == 'PGUpdate')">_Py_USING_PGO=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions>Py_ENABLE_SHARED</UndefinePreprocessorDefinitions>
 
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
@@ -102,7 +103,7 @@
       <TargetMachine Condition="'$(Platform)'=='ARM64'">MachineARM64</TargetMachine>
       <LinkTimeCodeGeneration Condition="$(Configuration) != 'Debug'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <AdditionalOptions>/NODEFAULTLIB:python3.lib</AdditionalOptions>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;np_embed.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;np_embed.lib;shlwapi.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions Condition="$(Configuration) != 'Debug'">/OPT:REF,NOICF %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(MSVCHasBrokenARM64Clamping) == 'true' and $(Platform) == 'ARM64'">-d2:-pattern-opt-disable:-932189325 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(SupportPGO) and $(Configuration) == 'PGInstrument' and $(PlatformToolset) != 'ClangCL'">/GENPROFILE %(AdditionalOptions)</AdditionalOptions>

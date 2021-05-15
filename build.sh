@@ -27,7 +27,7 @@ set -x
 # The dependencies must be outside of the build folder because
 # the python build process ends up running a find -delete that
 # happens to also delete all the static libraries that we built.
-export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
+export "PREFIX=$(pwd)/../MonolithPy-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
@@ -399,7 +399,7 @@ cd ..
 long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
 short_version=$(echo $long_version | sed -e 's#\.##')
 
-target=/opt/nuitka-python${short_version}
+target=/opt/monolithpy${short_version}
 
 if [ ! -z "$1" ]
 then
@@ -450,7 +450,7 @@ $ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
 $ELEVATE mkdir -p "$target/dependency_libs"
-$ELEVATE cp -r "$(pwd)/../Nuitka-Python-Deps" "$target/dependency_libs/base"
+$ELEVATE cp -r "$(pwd)/../MonolithPy-Deps" "$target/dependency_libs/base"
 $ELEVATE ln -s base "$target/dependency_libs/bzip2"
 $ELEVATE ln -s base "$target/dependency_libs/editline"
 $ELEVATE ln -s base "$target/dependency_libs/expat"

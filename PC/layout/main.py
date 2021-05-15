@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+import subprocess
 
 from pathlib import Path
 
@@ -143,7 +144,7 @@ def get_layout(ns):
             pdb = src.with_suffix(".pdb")
             if pdb.is_file():
                 yield dest + n + ".pdb", pdb
-        if ns.include_dev and not no_lib:
+        if ns.include_dev and not no_lib and not src.name == "python.exe":
             lib = src.with_suffix(".lib")
             if lib.is_file():
                 yield "libs/" + n + ".lib", lib
@@ -198,7 +199,7 @@ def get_layout(ns):
         if ns.include_idle:
             yield from in_build("pythonw_uwp.exe", new_name="idle{}".format(VER_DOT))
 
-    if ns.include_stable:
+    if ns.include_stable and False:
         if ns.include_freethreaded:
             yield from in_build(FREETHREADED_PYTHON_STABLE_DLL_NAME)
         else:
@@ -280,7 +281,7 @@ def get_layout(ns):
                 continue
             if src in TCLTK_PYDS_ONLY and not ns.include_tcltk:
                 continue
-            if src in FileNameSet('python3.lib', 'python.lib', 'pythonw.lib') and src not in FileNameSet('python39.lib'):
+            if src in FileNameSet('python3.lib', 'python.lib', 'pythonw.lib') and src not in FileNameSet('python313.lib'):
                 continue
             yield "libs/{}".format(dest), src
 

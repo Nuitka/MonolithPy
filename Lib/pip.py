@@ -70,7 +70,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
         with open(os.path.join(os.path.dirname(pyproject_toml), "..", "np_script.json"), 'r') as f:
             data = json.load(f)
 
-        package_name = re.split(r'[><= ]', req_name, 1)[0]
+        package_name = re.split(r'[><= ]', req_name, maxsplit=1)[0]
         if package_name in data:
             package_data = data[package_name]
 
@@ -86,7 +86,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
     if result is None:
         return None
     return pip._internal.pyproject.BuildSystemDetails(
-        [x for x in result.requires if re.split(r'[><=]', x, 1)[0] not in builtin_packages],
+        [x for x in result.requires if re.split(r'[><=]', x, maxsplit=1)[0] not in builtin_packages] + list(builtin_packages.keys()),
         result.backend, result.check, sys.path + result.backend_path)
 
 
@@ -258,13 +258,13 @@ def main():
     if sysconfig.get_config_var("CC"):
         cc_config_var = sysconfig.get_config_var("CC").split()[0]
         if "CC" in os.environ and os.environ["CC"] != cc_config_var:
-            print("Overriding CC variable to Nuitka-Python used '%s' ..." % cc_config_var)
+            print("Overriding CC variable to MonolithPy used '%s' ..." % cc_config_var)
         os.environ["CC"] = cc_config_var
 
     if sysconfig.get_config_var("CXX"):
         cxx_config_var = sysconfig.get_config_var("CXX").split()[0]
         if "CXX" in os.environ and os.environ["CXX"] != cxx_config_var:
-            print("Overriding CXX variable to Nuitka-Python used '%s' ..." % cxx_config_var)
+            print("Overriding CXX variable to MonolithPy used '%s' ..." % cxx_config_var)
         os.environ["CXX"] = cxx_config_var
 
     if platform.system() == "Darwin":

@@ -6,10 +6,10 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "ab8d1b0cc087c20d4c32c0e4fcf7d0c733a95da12cedc6d63b3f0a9af07427e2"
+          "checksumValue": "c0f5dc817d5c769e822a2b2af52fac30f008181f05dffd2252c21dc0685a9f73"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/bzip2-1.0.8.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/bzip2-1.0.8.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -27,31 +27,31 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "9d802681adfea27d84cae0487a785fb9caa925bdad44c401b364c59ab2b8edda"
+          "checksumValue": "4139c702930ef20b57cb8ad3bb9a2b2780b2b8d1143be709a3e141ca5af74cac"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/libffi-3.4.4.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/libffi-3.4.6.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:libffi_project:libffi:3.4.4:*:*:*:*:*:*:*",
+          "referenceLocator": "cpe:2.3:a:libffi_project:libffi:3.4.6:*:*:*:*:*:*:*",
           "referenceType": "cpe23Type"
         }
       ],
       "licenseConcluded": "NOASSERTION",
       "name": "libffi",
       "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "3.4.4"
+      "versionInfo": "3.4.6"
     },
     {
       "SPDXID": "SPDXRef-PACKAGE-mpdecimal",
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "338fac3fb8cdd60f406b6326431338756f58a8af94229ffd9bf1e7c2b1ad71ca"
+          "checksumValue": "3bf287469bc4c4cc89dde7467a9b37783bcae47b170a59b5837db361f8ec2448"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/mpdecimal-4.0.0.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/mpdecimal-4.0.0.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -70,31 +70,31 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "c6ea8a5423f3966923060db2089f869017dfb10bcf2037394146e7a74caec0a8"
+          "checksumValue": "b182d567878188049c3d0853e97e64a246fcdcdab3fb166bd8876170b06ab5ed"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/openssl-3.0.19.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/openssl-3.1.8.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.0.19:*:*:*:*:*:*:*",
+          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.1.8:*:*:*:*:*:*:*",
           "referenceType": "cpe23Type"
         }
       ],
       "licenseConcluded": "NOASSERTION",
       "name": "openssl",
       "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "3.0.19"
+      "versionInfo": "3.1.8"
     },
     {
       "SPDXID": "SPDXRef-PACKAGE-sqlite",
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "fb5ab81f27612b0a7b4861ba655906c76dc85ee969e7a4905d2075aff931e8d0"
+          "checksumValue": "80b75fce97e587ae675b24558b88d9d36d6e9e93987ba91d4f46dbe95a94a0b0"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/sqlite-3.50.4.0.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/sqlite-3.50.4.0.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -112,10 +112,10 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "4c23f0dd3efcbe6f3a22c503a68d147617bb30c4f5290f1eb3eaacf0b460440b"
+          "checksumValue": "a332b9566b847d9c343c6be9e559d66a8a55a2e11192525c9ea5968f07b8b630"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/tcl-core-8.6.15.0.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/tcl-core-8.6.15.0.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -133,10 +133,10 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "0ae56d39bca92865f338529557a1e56d110594184b6dc5a91339c5675751e264"
+          "checksumValue": "9d5ffb3bcb495caea682519062d2c12bb6fd35d923b556ca1d8d6c5611ed534c"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/tk-8.6.15.0.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/tk-8.6.15.0.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -154,10 +154,10 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "a15c168e39e87d750c3dc766edc7f19bdda57dacf01e509678467eace91ad282"
+          "checksumValue": "e38fba9002e89fd712e9516f2e1c12339af88844c16ef73ed59d5abf43a89d86"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/xz-5.2.5.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/xz-5.2.5.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
@@ -171,46 +171,25 @@
       "versionInfo": "5.2.5"
     },
     {
-      "SPDXID": "SPDXRef-PACKAGE-zlib-ng",
+      "SPDXID": "SPDXRef-PACKAGE-zlib",
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "00bbd88709bc416cb96160ab61d3e1c8f76e106799af7328d0fe434dc7dd5004"
+          "checksumValue": "8ee2ae479caa5c16aaa241cde0cf6b1529b9dac2d5f0e6ff211ab07c95203577"
         }
       ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/zlib-ng-2.2.4.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/zlib-1.3.1.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:zlib-ng:zlib-ng:2.2.4:*:*:*:*:*:*:*",
+          "referenceLocator": "cpe:2.3:a:zlib:zlib:1.3.1:*:*:*:*:*:*:*",
           "referenceType": "cpe23Type"
         }
       ],
       "licenseConcluded": "NOASSERTION",
-      "name": "zlib-ng",
+      "name": "zlib",
       "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "2.2.4"
-    },
-    {
-      "SPDXID": "SPDXRef-PACKAGE-zstd",
-      "checksums": [
-        {
-          "algorithm": "SHA256",
-          "checksumValue": "f24b52470d12f466e9fa4fcc94e6c530625ada51d7b36de7fdc6ed7e6f499c8e"
-        }
-      ],
-      "downloadLocation": "https://github.com/python/cpython-source-deps/archive/refs/tags/zstd-1.5.7.tar.gz",
-      "externalRefs": [
-        {
-          "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:facebook:zstandard:1.5.7:*:*:*:*:*:*:*",
-          "referenceType": "cpe23Type"
-        }
-      ],
-      "licenseConcluded": "NOASSERTION",
-      "name": "zstd",
-      "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "1.5.7"
+      "versionInfo": "1.3.1"
     }
   ],
   "spdxVersion": "SPDX-2.3"

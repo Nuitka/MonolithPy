@@ -32,17 +32,17 @@ jobs:
         curl -L "$file_url" -o "$file_name" || exit 0
         tar -xf "$file_name" || exit 0
         rm ${file_name} || exit 0
-        ln -s lib Nuitka-Python-Deps/lib64 || exit 0
+        ln -s lib MonolithPy-Deps/lib64 || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
-      run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/Nuitka-Python-Out"
+      run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/MonolithPy-Out"
     - name: Cleanup artifact
-      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
-        name: Nuitka-Python311_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
-        path: ${{ github.workspace }}/Nuitka-Python-Out
+        name: MonolithPy313_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
+        path: ${{ github.workspace }}/MonolithPy-Out
     - name: Store cache
       env:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
@@ -51,8 +51,8 @@ jobs:
         export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         rm -rf ${file_name}
-        rm -f Nuitka-Python-Deps/lib64
-        tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        rm -f MonolithPy-Deps/lib64
+        tar -cf ${file_name} MonolithPy-Deps MonolithPy/dep-build
         curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
         rm -rf ${file_name}
 
@@ -72,15 +72,15 @@ jobs:
 #          curl -L "$file_url" -o "$file_name" || exit 0
 #          unzip -q "$file_name" || exit 0
 #          rm ${file_name} || exit 0
-#          ln -s lib Nuitka-Python-Deps/lib64 || exit 0
+#          ln -s lib MonolithPy-Deps/lib64 || exit 0
       - name: Run Build
-        run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
+        run: bash build.sh "${{ github.workspace }}/MonolithPy-Out"
       - name: Cleanup artifact
-        run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+        run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
       - uses: actions/upload-artifact@v4
         with:
-          name: Nuitka-Python311_ubuntu
-          path: ${{ github.workspace }}/Nuitka-Python-Out
+          name: MonolithPy313_ubuntu
+          path: ${{ github.workspace }}/MonolithPy-Out
 #      - name: Store cache
 #        env:
 #          CACHE_SAS: ${{ secrets.CACHE_SAS }}
@@ -89,8 +89,8 @@ jobs:
 #          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
 #          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
 #          rm -rf ${file_name}
-#          rm -f Nuitka-Python-Deps/lib64
-#          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+#          rm -f MonolithPy-Deps/lib64
+#          zip -r ${file_name} MonolithPy-Deps MonolithPy/dep-build
 #          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
 #          rm -rf ${file_name}
 
@@ -110,5 +110,5 @@ jobs:
       run: Get-ChildItem -Path $(Get-Location) -File -Include *.old_interp -Recurse | Remove-Item -Force -Verbose
     - uses: actions/upload-artifact@v4
       with:
-        name: Nuitka-Python311_windows_x64
+        name: MonolithPy313_windows_x64
         path: output

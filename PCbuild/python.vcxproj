@@ -169,9 +169,6 @@
     <ProjectReference Include="_lzma.vcxproj">
       <Project>{f9d71780-f393-11e0-be50-0800200c9a66}</Project>
     </ProjectReference>
-    <ProjectReference Include="_msi.vcxproj">
-      <Project>{31ffc478-7b4a-43e8-9954-8d03e2187e9c}</Project>
-    </ProjectReference>
     <ProjectReference Include="_multiprocessing.vcxproj">
       <Project>{9e48b300-37d1-11dd-8c41-005056c00008}</Project>
     </ProjectReference>
