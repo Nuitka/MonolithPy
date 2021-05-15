@@ -377,7 +377,7 @@ class CDLL(object):
             else:
                 import nt
                 mode = nt._LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
-                if '/' in name or '\\' in name:
+                if name and ('/' in name or '\\' in name):
                     self._name = nt._getfullpathname(self._name)
                     mode |= nt._LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
 
@@ -482,7 +482,8 @@ pydll = LibraryLoader(PyDLL)
 #elif _sys.platform == "cygwin":
 #    pythonapi = PyDLL("libpython%d.%d.dll" % _sys.version_info[:2])
 #else:
-pythonapi = PyDLL(None)
+#    pythonapi = PyDLL(None)
+pythonapi = None
 
 
 if _os.name == "nt":

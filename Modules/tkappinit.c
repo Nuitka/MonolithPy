@@ -13,8 +13,10 @@
  */
 
 #include <string.h>
+#define STATIC_BUILD
 #include <tcl.h>
 #include <tk.h>
+#undef STATIC_BUILD
 
 #include "tkinter.h"
 

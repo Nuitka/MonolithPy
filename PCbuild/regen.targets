@@ -14,9 +14,9 @@
       <Argument>-C</Argument>
     </_ASTOutputs>
     <_TokenSources Include="$(PySourcePath)Grammar\Tokens" />
-    <_TokenOutputs Include="$(PySourcePath)Doc\library\token-list.inc">
+    <!--<_TokenOutputs Include="$(PySourcePath)Doc\library\token-list.inc">
       <Format>rst</Format>
-    </_TokenOutputs>
+    </_TokenOutputs>-->
     <_TokenOutputs Include="$(PySourcePath)Include\internal\pycore_token.h">
       <Format>h</Format>
     </_TokenOutputs>

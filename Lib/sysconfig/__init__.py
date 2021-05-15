@@ -174,6 +174,8 @@ _SCHEME_KEYS = ('stdlib', 'platstdlib', 'purelib', 'platlib', 'include',
 _PY_VERSION = sys.version.split()[0]
 _PY_VERSION_SHORT = f'{sys.version_info[0]}.{sys.version_info[1]}'
 _PY_VERSION_SHORT_NO_DOT = f'{sys.version_info[0]}{sys.version_info[1]}'
+_PREFIX = os.path.normpath(sys.prefix)
+_EXEC_PREFIX = os.path.normpath(sys.exec_prefix)
 _BASE_PREFIX = os.path.normpath(sys.base_prefix)
 _BASE_EXEC_PREFIX = os.path.normpath(sys.base_exec_prefix)
 # Mutex guarding initialization of _CONFIG_VARS.
@@ -497,7 +499,7 @@ def _init_config_vars():
     _CONFIG_VARS['platbase'] = _EXEC_PREFIX
     _CONFIG_VARS['projectbase'] = _PROJECT_BASE
     _CONFIG_VARS['platlibdir'] = sys.platlibdir
-    _CONFIG_VARS['SOABI'] = 'mp3.11'
+    _CONFIG_VARS['SOABI'] = 'mp3.13'
     _CONFIG_VARS['implementation'] = _get_implementation()
     _CONFIG_VARS['implementation_lower'] = _get_implementation().lower()
     try:

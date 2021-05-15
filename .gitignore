@@ -170,7 +170,7 @@ Python/frozen_modules/MANIFEST
 /python
 !/Python/
 
-# Nuitka-Python specifics here:
+# MonolithPy specifics here:
 nuget-result*
 output
 output32

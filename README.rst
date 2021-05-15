@@ -1,7 +1,7 @@
-This is Nuitka-Python
+This is MonolithPy
 =====================
 
-This is a fork of CPython, that is called Nuitka-Python, and diverges in various
+This is a fork of CPython, that is called MonolithPy, and diverges in various
 ways from the original.
 
 Our immediate goals are:
@@ -15,22 +15,22 @@ Our immediate goals are:
 Installation
 ============
 
-Currently, you have to build Nuitka-Python from source code. It is questionable
+Currently, you have to build MonolithPy from source code. It is questionable
 if deploying binaries makes sense, as you will have to compile from source code
 everything else that is installed afterwards, and the ``python.exe`` will be
 self-modifying with pip installs.
 
-Use the following command in the root of a Nuitka-Python repository checkout:
+Use the following command in the root of a MonolithPy repository checkout:
 
 .. code:: sh
 
     build.bat -x64
 
 This produces a portable Python installation in the ``output`` folder. It has a
-``pip`` and ``setuptools``, but not ``wheel`` out of the box. Nuitka-Python
+``pip`` and ``setuptools``, but not ``wheel`` out of the box. MonolithPy
 supports these all of these though, with differences to standard CPython that
 make it essentially always compile from source. Esp. the architecture of
-Nuitka-Python will be different, so binary wheels uploaded to PyPI cannot be
+MonolithPy will be different, so binary wheels uploaded to PyPI cannot be
 installed, which will make it fallback to compiling from source.
 
 The ``output`` folder can be moved freely, even to other machines. When you

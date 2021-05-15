@@ -13,7 +13,7 @@ Quick Start Guide
 Building Python using Microsoft Visual C++
 ------------------------------------------
 
-This directory is used to build Nuitka-Python for Microsoft Windows NT version
+This directory is used to build MonolithPy for Microsoft Windows NT version
 6.0 or higher (Windows Vista, Windows Server 2008, or later) on 32 and 64
 bit platforms.  Using this directory requires an installation of
 Microsoft Visual Studio 2017 (MSVC 14.1) with the *Python workload* and
@@ -41,7 +41,7 @@ Debug
     python311_d.dll, python_d.exe, parser_d.pyd, and so on.  Both the
     build and rt (run test) batch files in this directory accept a -d
     option for debug builds.  If you are building Python to help with
-    development of Nuitka-Python, you will most likely use this configuration.
+    development of MonolithPy, you will most likely use this configuration.
 PGInstrument, PGUpdate
     Used to build Python in Release configuration using PGO, which
     requires Premium Edition of Visual Studio.  See the "Profile
@@ -84,14 +84,14 @@ redist folder.
 Sub-Projects
 ------------
 
-The Nuitka-Python project is split up into several smaller sub-projects which
+The MonolithPy project is split up into several smaller sub-projects which
 are managed by the pcbuild.sln solution file.  Each sub-project is
 represented by a .vcxproj and a .vcxproj.filters file starting with the
 name of the sub-project.  These sub-projects fall into a few general
 categories:
 
 The following sub-projects represent the bare minimum required to build
-a functioning Nuitka-Python interpreter.  If nothing else builds but these,
+a functioning MonolithPy interpreter.  If nothing else builds but these,
 you'll have a very limited but usable python.exe:
 pythoncore
     .dll and .lib
@@ -99,7 +99,7 @@ python
     .exe
 
 These sub-projects provide extra executables that are useful for running
-Nuitka-Python in different ways:
+MonolithPy in different ways:
 pythonw
     pythonw.exe, a variant of python.exe that doesn't open a Command
     Prompt window
