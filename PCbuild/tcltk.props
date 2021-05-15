@@ -17,21 +17,14 @@
     <tcltkDir Condition="$(tcltkDir) == ''">$(ExternalsDir)tcltk-$(TclVersion)\$(ArchName)\</tcltkDir>
     <tclWin32Exe Condition="$(Platform) == 'Win32'">$(tcltkDir)\bin\tclsh$(TclMajorVersion)$(TclMinorVersion)t.exe</tclWin32Exe>
     <tclWin32Exe Condition="$(Platform) != 'Win32'">$(tcltkDir)\..\win32\bin\tclsh$(TclMajorVersion)$(TclMinorVersion)t.exe</tclWin32Exe>
-    <tclExternalTommath Condition="$(TclMajorVersion) == '9'">TCL_WITH_EXTERNAL_TOMMATH;</tclExternalTommath>
 
     <!--<TclDebugExt Condition="'$(Configuration)' == 'Debug'">g</TclDebugExt>-->
-    <tcltkSuffix Condition="'$(TclMajorVersion)' == '8'">t</tcltkSuffix>
-    <tkPrefix Condition="'$(TclMajorVersion)' == '9'">tcl9</tkPrefix>
-    <tclDLLName >tcl$(TclMajorVersion)$(TclMinorVersion)$(tcltkSuffix)$(TclDebugExt).dll</tclDLLName>
-    <tclLibName>tcl$(TclMajorVersion)$(TclMinorVersion)$(tcltkSuffix)$(TclDebugExt).lib</tclLibName>
-    <tclShExeName>tclsh$(TclMajorVersion)$(TclMinorVersion)$(tcltkSuffix)$(TclDebugExt).exe</tclShExeName>
-    <tkDLLName>$(tkPrefix)tk$(TkMajorVersion)$(TkMinorVersion)$(tcltkSuffix)$(TclDebugExt).dll</tkDLLName>
-    <tkLibName>$(tkPrefix)tk$(TclMajorVersion)$(TclMinorVersion)$(tcltkSuffix)$(TclDebugExt).lib</tkLibName>
-    <tclZlibDLLName>zlib1.dll</tclZlibDLLName>
-    <tommathDLLName Condition="'$(TclMajorVersion)' == '9'">libtommath.dll</tommathDLLName>
-    <tommathLibName Condition="'$(TclMajorVersion)' == '9'">tommath.lib</tommathLibName>
-    <tcltkLib>$(tcltkDir)lib\$(TclLibName);$(tcltkDir)lib\$(TkLibName);</tcltkLib>
-    <tcltkLib Condition="'$(tommathLibName)' != ''">$(tcltkLib);$(tcltkDir)lib\$(tommathLibName)</tcltkLib>
+    <tclDLLName>tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).dll</tclDLLName>
+    <tclLibName>tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).lib</tclLibName>
+    <tclShExeName>tclsh$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).exe</tclShExeName>
+    <tkDLLName>tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).dll</tkDLLName>
+    <tkLibName>tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).lib</tkLibName>
+    <tcltkLib>$(tcltkDir)lib\tcl$(TclMajorVersion)$(TclMinorVersion)ts$(TclDebugExt).lib;$(tcltkDir)lib\tclstub$(TclMajorVersion)$(TclMinorVersion).lib;$(tcltkDir)lib\tk$(TkMajorVersion)$(TkMinorVersion)ts$(TclDebugExt).lib</tcltkLib>
     <TclMachine>IX86</TclMachine>
     <TclMachine Condition="'$(Platform)' == 'x64'">AMD64</TclMachine>
     <TclMachine Condition="'$(Platform)' == 'ARM64'">ARM64</TclMachine>
@@ -43,6 +36,9 @@
     <BuildDirTop Condition="$(Configuration) == 'Debug'">Debug</BuildDirTop>
     <BuildDirTop Condition="$(TclMachine) != 'IX86'">$(BuildDirTop)_$(TclMachine)</BuildDirTop>
     <BuildDirTop Condition="$(PlatformToolset.StartsWith('v14'))">$(BuildDirTop)_VC13</BuildDirTop>
+    <BuildDirTop Condition="$(PlatformToolset) == 'v120'">$(BuildDirTop)_VC12</BuildDirTop>
+    <BuildDirTop Condition="$(PlatformToolset) == 'v110'">$(BuildDirTop)_VC11</BuildDirTop>
+    <BuildDirTop Condition="$(PlatformToolset) == 'v100'">$(BuildDirTop)_VC10</BuildDirTop>
   </PropertyGroup>
 
   <!--

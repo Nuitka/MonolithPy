@@ -7,7 +7,7 @@ echo.%~nx0 [flags and arguments]
 echo.
 echo.Download and build OpenSSL. This should only be performed in order to
 echo.update the binaries kept online - in most cases, the files downloaded
-echo.by the get_externals.bat script are sufficient for building CPython.
+echo.by the get_externals.bat script are sufficient for building Nuitka-Python.
 echo.
 echo.Available flags:
 echo.  -h  Display this help message

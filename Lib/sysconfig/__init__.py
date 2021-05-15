@@ -107,11 +107,12 @@ else:
     _INSTALL_SCHEMES['venv'] = _INSTALL_SCHEMES['posix_venv']
 
 def _get_implementation():
-    return 'Python'
+    return 'MonolithPy'
 
 # NOTE: site.py has copy of this function.
 # Sync it when modify this function.
 def _getuserbase():
+    return None  # MONOLITHPY: Do not try to load stuff from user dirs to avoid contamination from system python.
     env_base = os.environ.get("PYTHONUSERBASE", None)
     if env_base:
         return env_base
@@ -522,6 +523,11 @@ def _init_config_vars():
 
     if os.name == 'posix':
         _init_posix(_CONFIG_VARS)
+        orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
+        base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
+        for var in _CONFIG_VARS:
+            if isinstance(_CONFIG_VARS[var], str):
+                _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
         # If we are cross-compiling, load the prefixes from the Makefile instead.
         if '_PYTHON_PROJECT_BASE' in os.environ:
             prefix = _CONFIG_VARS['host_prefix']
@@ -544,6 +550,7 @@ def _init_config_vars():
     _CONFIG_VARS['platbase'] = exec_prefix
     _CONFIG_VARS['projectbase'] = _PROJECT_BASE
     _CONFIG_VARS['platlibdir'] = sys.platlibdir
+    _CONFIG_VARS['SOABI'] = 'mp3.14'
     _CONFIG_VARS['implementation'] = _get_implementation()
     _CONFIG_VARS['implementation_lower'] = _get_implementation().lower()
     _CONFIG_VARS['abiflags'] = abiflags
@@ -561,25 +568,9 @@ def _init_config_vars():
         # the init-function.
         _CONFIG_VARS['userbase'] = _getuserbase()
 
+
     # e.g., 't' for free-threaded or '' for default build
     _CONFIG_VARS['abi_thread'] = 't' if _CONFIG_VARS.get('Py_GIL_DISABLED') else ''
-
-    # Always convert srcdir to an absolute path
-    srcdir = _CONFIG_VARS.get('srcdir', _PROJECT_BASE)
-    if os.name == 'posix':
-        if _PYTHON_BUILD:
-            # If srcdir is a relative path (typically '.' or '..')
-            # then it should be interpreted relative to the directory
-            # containing Makefile.
-            base = os.path.dirname(get_makefile_filename())
-            srcdir = os.path.join(base, srcdir)
-        else:
-            # srcdir is not meaningful since the installation is
-            # spread about the filesystem.  We choose the
-            # directory containing the Makefile since we know it
-            # exists.
-            srcdir = os.path.dirname(get_makefile_filename())
-    _CONFIG_VARS['srcdir'] = _safe_realpath(srcdir)
 
     # OS X platforms require special customization to handle
     # multi-architecture, multi-os-version installers

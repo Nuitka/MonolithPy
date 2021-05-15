@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>NuitkaPythonx86</id>
+    <title>Nuitka-Python (32-bit)</title>
+    <version>0.0.0.0</version>
+    <authors>Nuitka Organization contributors</authors>
+    <license type="file">tools\LICENSE.txt</license>
+    <projectUrl>https://github.com/Nuitka/Nuitka-Python</projectUrl>
+    <description>Installs 32-bit Python for use in build scenarios.</description>
+    <iconUrl>https://www.python.org/static/favicon.ico</iconUrl>
+    <tags>nuitkapython</tags>
+  </metadata>
+  <files>
+    <file src="**\*" exclude="python.props" target="tools" />
+    <file src="python.props" target="build\native\python.props" />
+    <file src="python.props" target="build\native\pythonx86.props" />
+  </files>
+</package>

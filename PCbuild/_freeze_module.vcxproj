@@ -96,7 +96,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>version.lib;ws2_32.lib;pathcch.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>version.lib;ws2_32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
   </ItemDefinitionGroup>
@@ -205,7 +205,6 @@
     <ClCompile Include="..\Python\crossinterp.c" />
     <ClCompile Include="..\Python\dtoa.c" />
     <ClCompile Include="..\Python\dynamic_annotations.c" />
-    <ClCompile Include="..\Python\dynload_win.c" />
     <ClCompile Include="..\Python\errors.c" />
     <ClCompile Include="..\Python\fileutils.c" />
     <ClCompile Include="..\Python\flowgraph.c" />
@@ -275,6 +274,7 @@
     <ClCompile Include="..\Python\traceback.c" />
     <ClCompile Include="..\Python\tracemalloc.c" />
     <ClCompile Include="..\Python\uniqueid.c" />
+    <ClCompile Include="..\Python\pathcch.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\PC\pyconfig.h" />

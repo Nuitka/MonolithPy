@@ -102,7 +102,9 @@
       <StackReserveSize Condition="$(Configuration) == 'PGInstrument'">12000000</StackReserveSize>
       <!-- HACK: Need additional memory to avoid crashing until gh-113655 is fixed -->
       <StackReserveSize Condition="$(Configuration) == 'PGUpdate' and $(UseExtraStackReserve) == 'true'">3000000</StackReserveSize>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;uuid.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;ws2_32.lib;version.lib;libssl.lib;libcrypto.lib;tcl86t.lib;tk86t.lib;Crypt32.lib;Iphlpapi.lib;msi.lib;Rpcrt4.lib;Cabinet.lib;winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;uuid.lib;odbc32.lib;odbccp32.lib;shlwapi.lib;ws2_32.lib;version.lib;Netapi32.lib;libssl.lib;libcrypto.lib;Crypt32.lib;Iphlpapi.lib;msi.lib;Rpcrt4.lib;Cabinet.lib;winmm.lib;np_embed.lib;$(tcltkLib);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories Condition="'$(Platform)'=='Win32'">$(tcltkDir)\win32\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="'$(Platform)'=='x64'">$(tcltkDir)\amd64\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -237,7 +239,7 @@ $(_PGOPath)
     </PropertyGroup>
     <WriteLinesToFile File="$(PySourcePath)python.bat" Lines="$(_Content)" Overwrite="true" Condition="'$(_Content)' != '$(_ExistingContent)'" />
   </Target>
-  <Target Name="CopyPGORT" AfterTargets="Link" Condition="$(Configuration) == 'PGInstrument'">
+  <Target Name="CopyPGORT" AfterTargets="Link" Condition="$(Configuration) == 'PGInstrument' and '1' == '2'">
     <ItemGroup>
       <_PGORT Include="$(VCToolsInstallDir)bin\Hostx86\x86\pgort140.dll" Condition="$(Platform) == 'Win32'" />
       <_PGORT Include="$(VCToolsInstallDir)bin\Hostx64\x64\pgort140.dll" Condition="$(Platform) == 'x64'" />

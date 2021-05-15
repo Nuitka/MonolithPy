@@ -13,10 +13,12 @@ Quick Start Guide
 Building Python using Microsoft Visual C++
 ------------------------------------------
 
-This directory is used to build CPython for Microsoft Windows on 32- and 64-
+This directory is used to build Nuitka-Python for Microsoft Windows NT version
+6.0 or higher (Windows Vista, Windows Server 2008, or later) on 32 and 64
 bit platforms.  Using this directory requires an installation of
-Microsoft Visual Studio (MSVC) with the *Python workload* and
-its optional *Python native development* component selected.
+Microsoft Visual Studio 2017 (MSVC 14.1) with the *Python workload* and
+its optional *Python native development* component selected. (For
+command-line builds, Visual Studio 2015 may also be used.)
 
 Building from the command line is recommended in order to obtain any
 external dependencies. To build, simply run the "build.bat" script without
@@ -36,10 +38,10 @@ Debug
     Used to build Python with extra debugging capabilities, equivalent
     to using ./configure --with-pydebug on UNIX.  All binaries built
     using this configuration have "_d" added to their name:
-    python310_d.dll, python_d.exe, parser_d.pyd, and so on.  Both the
+    python311_d.dll, python_d.exe, parser_d.pyd, and so on.  Both the
     build and rt (run test) batch files in this directory accept a -d
     option for debug builds.  If you are building Python to help with
-    development of CPython, you will most likely use this configuration.
+    development of Nuitka-Python, you will most likely use this configuration.
 PGInstrument, PGUpdate
     Used to build Python in Release configuration using PGO, which
     requires Premium Edition of Visual Studio.  See the "Profile
@@ -121,14 +123,14 @@ redist folder.
 Sub-Projects
 ------------
 
-The CPython project is split up into several smaller sub-projects which
+The Nuitka-Python project is split up into several smaller sub-projects which
 are managed by the pcbuild.sln solution file.  Each sub-project is
 represented by a .vcxproj and a .vcxproj.filters file starting with the
 name of the sub-project.  These sub-projects fall into a few general
 categories:
 
 The following sub-projects represent the bare minimum required to build
-a functioning CPython interpreter.  If nothing else builds but these,
+a functioning Nuitka-Python interpreter.  If nothing else builds but these,
 you'll have a very limited but usable python.exe:
 pythoncore
     .dll and .lib
@@ -136,13 +138,13 @@ python
     .exe
 
 These sub-projects provide extra executables that are useful for running
-CPython in different ways:
+Nuitka-Python in different ways:
 pythonw
     pythonw.exe, a variant of python.exe that doesn't open a Command
     Prompt window
 pylauncher
     py.exe, the Python Launcher for Windows, see
-        https://docs.python.org/3/using/windows.html#launcher
+        http://docs.python.org/3/using/windows.html#launcher
 pywlauncher
     pyw.exe, a variant of py.exe that doesn't open a Command Prompt
     window
@@ -203,20 +205,20 @@ interpreter, but they do implement several major features.  See the
 about getting the source for building these libraries.  The sub-projects
 are:
 _bz2
-    Python wrapper for version 1.0.8 of the libbzip2 compression library
+    Python wrapper for version 1.0.6 of the libbzip2 compression library
     Homepage:
         http://www.bzip.org/
 _lzma
     Python wrapper for version 5.2.2 of the liblzma compression library
     Homepage:
-        https://tukaani.org/xz/
+        http://tukaani.org/xz/
 _ssl
     Python wrapper for version 3.0.19 of the OpenSSL secure sockets
     library, which is downloaded from our binaries repository at
     https://github.com/python/cpython-bin-deps.
 
     Homepage:
-        https://www.openssl.org/
+        http://www.openssl.org/
 
     Building OpenSSL requires Perl on your path, and can be performed by
     running PCbuild\prepare_ssl.bat. This will retrieve the version of
@@ -232,14 +234,14 @@ _ssl
 _sqlite3
     Wraps SQLite 3.50.4, which is itself built by sqlite3.vcxproj
     Homepage:
-        https://www.sqlite.org/
+        http://www.sqlite.org/
 _tkinter
     Wraps version 8.6.15 of the Tk windowing system, which is downloaded
     from our binaries repository at
     https://github.com/python/cpython-bin-deps.
 
     Homepage:
-        https://www.tcl.tk/
+        http://www.tcl.tk/
 
     Building Tcl and Tk can be performed by running
     PCbuild\prepare_tcltk.bat. This will retrieve the version of the
@@ -320,7 +322,7 @@ and finally creates the optimized files.
 You can customize the job for profiling with `--pgo-job <job>` option.
 
 See
-    https://docs.microsoft.com/en-us/cpp/build/profile-guided-optimizations
+    http://msdn.microsoft.com/en-us/library/e7k32f4k(VS.140).aspx
 for more on this topic.
 
 

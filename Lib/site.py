@@ -294,6 +294,7 @@ def _get_implementation():
 
 # Copy of sysconfig._getuserbase()
 def _getuserbase():
+    return None  # Do not try to load stuff from user dirs to avoid contamination from system python.
     env_base = os.environ.get("PYTHONUSERBASE", None)
     if env_base:
         return env_base

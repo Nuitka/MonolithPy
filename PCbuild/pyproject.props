@@ -62,7 +62,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <StringPooling>true</StringPooling>
       <ExceptionHandling></ExceptionHandling>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -71,7 +71,9 @@
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <ControlFlowGuard Condition="$(EnableControlFlowGuard) != ''">$(EnableControlFlowGuard)</ControlFlowGuard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /FS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="$(PlatformToolset) == 'ClangCL'">-Wno-deprecated-non-prototype -Wno-unused-label -Wno-pointer-sign -Wno-incompatible-pointer-types-discards-qualifiers -Wno-unused-function %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="$(Configuration) != 'Debug' and $(PlatformToolset) == 'ClangCL'">-flto %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(MSVCHasBrokenARM64Clamping) == 'true' and $(Platform) == 'ARM64'">-d2pattern-opt-disable:-932189325 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(MSVCHasBrokenARM64SignExtension) == 'true' and $(Platform) == 'ARM64'">-d2ssa-patterns-all- %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(GenerateSourceDependencies) == 'true'">/sourceDependencies "$(IntDir.Trim(`\`))" %(AdditionalOptions)</AdditionalOptions>
@@ -86,7 +88,7 @@
       <FloatingPointModel>Strict</FloatingPointModel>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(OutDir);$(MSBuildThisFileDirectory)\..\Embedded;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
@@ -99,7 +101,8 @@
       <TargetMachine Condition="'$(Platform)'=='ARM'">MachineARM</TargetMachine>
       <TargetMachine Condition="'$(Platform)'=='ARM64'">MachineARM64</TargetMachine>
       <LinkTimeCodeGeneration Condition="$(Configuration) != 'Debug'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/NODEFAULTLIB:python3.lib</AdditionalOptions>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;np_embed.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions Condition="$(Configuration) != 'Debug'">/OPT:REF,NOICF %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(MSVCHasBrokenARM64Clamping) == 'true' and $(Platform) == 'ARM64'">-d2:-pattern-opt-disable:-932189325 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(SupportPGO) and $(Configuration) == 'PGInstrument' and $(PlatformToolset) != 'ClangCL'">/GENPROFILE %(AdditionalOptions)</AdditionalOptions>
@@ -194,13 +197,13 @@ public override bool Execute() {
 
   <Target Name="CopyPGCFiles" BeforeTargets="PrepareForBuild" Condition="$(Configuration) == 'PGUpdate' and $(PlatformToolset) != 'ClangCL'">
     <ItemGroup>
-      <_PGCFiles Include="$(OutDir)instrumented\$(TargetName)!*.pgc" />
+      <_PGCFiles Include="$(OutDir)instrumented\*.pgc" />
       <_PGDFile Include="$(OutDir)instrumented\$(TargetName).pgd" />
       <_CopyFiles Include="@(_PGCFiles);@(_PGDFile)" Condition="Exists(%(FullPath))" />
     </ItemGroup>
-    <Delete Files="@(_CopyFiles->'$(OutDir)%(Filename)%(Extension)')" />
-    <Error Text="PGO run did not succeed (no $(TargetName)!*.pgc files) and there is no data to merge"
-           Condition="$(RequireProfileData) == 'true' and @(_PGCFiles) == ''" />
+    <!--<Delete Files="@(_CopyFiles->'$(OutDir)%(Filename)%(Extension)')" />-->
+    <Warning Text="PGO run did not succeed (no $(TargetName)!*.pgc files) and there is no data to merge"
+           Condition="$(RequirePGCFiles) == 'true' and @(_PGCFiles) == ''" />
     <Copy SourceFiles="@(_CopyFiles)"
           DestinationFolder="$(OutDir)"
           UseHardLinksIfPossible="true"
@@ -216,6 +219,7 @@ public override bool Execute() {
     <_SignCommand Condition="Exists($(SdkBinPath)) and '$(SigningCertificate)' != '' and $(SupportSigning)">"$(SdkBinPath)\signtool.exe" sign /a /n "$(SigningCertificate)" /fd sha256 /tr http://timestamp.digicert.com/ /td sha256 /d "Python $(PythonVersion)"</_SignCommand>
     <_SignCommand Condition="Exists($(SdkBinPath)) and '$(SigningCertificateSha1)' != '' and $(SupportSigning)">"$(SdkBinPath)\signtool.exe" sign /a /sha1 "$(SigningCertificateSha1)" /fd sha256 /tr http://timestamp.digicert.com/ /td sha256 /d "Python $(PythonVersion)"</_SignCommand>
     <_MakeCatCommand Condition="Exists($(SdkBinPath))">"$(SdkBinPath)\makecat.exe"</_MakeCatCommand>
+    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
 
   <Target Name="_SignBuild" AfterTargets="AfterBuild" Condition="'$(_SignCommand)' != '' and $(SupportSigning)">
@@ -248,17 +252,17 @@ public override bool Execute() {
     <Message Text="VC Redist Version: $(VCToolsRedistVersion)" />
   </Target>
 
-  <Target Name="FindVCRuntime" Returns="VCRuntimeDLL" DependsOnTargets="FindVCRedistDir">
-    <ItemGroup Condition="$(VCRuntimeDLL) != ''">
-      <VCRuntimeDLL Include="$(VCRuntimeDLL)" />
-    </ItemGroup>
-    <ItemGroup Condition="$(VCInstallDir) != '' and $(VCRuntimeDLL) == ''">
-      <VCRuntimeDLL Include="$(VCRedistDir)\Microsoft.VC*.CRT\vcruntime*.dll" Exclude="$(VCRedistDir)\Microsoft.VC*.CRT\vcruntime*_threads.dll" />
-    </ItemGroup>
+<!--   <Target Name="FindVCRuntime" Returns="VCRuntimeDLL" DependsOnTargets="FindVCRedistDir"> -->
+<!--     <ItemGroup Condition="$(VCRuntimeDLL) != ''"> -->
+<!--       <VCRuntimeDLL Include="$(VCRuntimeDLL)" /> -->
+<!--     </ItemGroup> -->
+<!--     <ItemGroup Condition="$(VCInstallDir) != '' and $(VCRuntimeDLL) == ''"> -->
+<!--       <VCRuntimeDLL Include="$(VCRedistDir)\Microsoft.VC*.CRT\vcruntime*.dll" Exclude="$(VCRedistDir)\Microsoft.VC*.CRT\vcruntime*_threads.dll" /> -->
+<!--     </ItemGroup> -->
 
-    <Warning Text="vcruntime*.dll not found under $(VCRedistDir)." Condition="@(VCRuntimeDLL) == ''" />
-    <Message Text="VC Runtime DLL(s):%0A- @(VCRuntimeDLL,'%0A- ')" />
-  </Target>
+<!--     <Warning Text="vcruntime*.dll not found under $(VCRedistDir)." Condition="@(VCRuntimeDLL) == ''" /> -->
+<!--     <Message Text="VC Runtime DLL(s):%0A- @(VCRuntimeDLL,'%0A- ')" /> -->
+<!--   </Target> -->
 
   <Target Name="FindPythonForBuild" Condition="$(PythonForBuild) == ''">
     <Exec Command="&quot;$(MSBuildThisFileDirectory)\find_python.bat&quot; -q"

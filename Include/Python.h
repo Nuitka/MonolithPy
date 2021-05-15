@@ -8,12 +8,16 @@
 // Since this is a "meta-include" file, "#ifdef __cplusplus / extern "C" {"
 // is not needed.
 
+#include "np_embed.h"
+
+// Since this is a "meta-include" file, no #ifdef __cplusplus / extern "C" {
 
 // Include Python header files
 #include "patchlevel.h"
 #include "pyconfig.h"
 #include "pymacconfig.h"
 
+#undef HAVE_DYNAMIC_LOADING
 
 // Include standard header files
 // When changing these files, remember to update Doc/extending/extending.rst.
@@ -67,6 +71,8 @@
 #pragma warning(push)
 #pragma warning(disable: 5274)
 #endif
+
+#define FFI_STATIC_BUILD
 
 // Include Python header files
 #include "pyport.h"
@@ -151,5 +157,7 @@
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
+
+#include "staticinit.h"
 
 #endif /* !Py_PYTHON_H */

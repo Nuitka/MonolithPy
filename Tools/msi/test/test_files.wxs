@@ -4,7 +4,7 @@
     <Fragment>
         <ComponentGroup Id="test_extensions">
             <?foreach ext in $(var.exts)?>
-
+        
             <Component Id="$(var.ext).lib" Directory="libs" Guid="*">
                 <File Name="$(var.ext).lib" KeyPath="yes" />
             </Component>

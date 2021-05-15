@@ -986,7 +986,7 @@ context_setemax(PyObject *self, PyObject *value, void *Py_UNUSED(closure))
     return 0;
 }
 
-#ifdef CONFIG_32
+#if defined(MPD_CONFIG_32) || defined(CONFIG_32)
 static PyObject *
 context_unsafe_setprec(PyObject *self, PyObject *value)
 {
@@ -2280,7 +2280,7 @@ Py_LOCAL_INLINE(void)
 _dec_settriple(PyObject *dec, uint8_t sign, uint32_t v, mpd_ssize_t exp)
 {
 
-#ifdef CONFIG_64
+#if defined(MPD_CONFIG_64) || defined(CONFIG_64)
     MPD(dec)->data[0] = v;
     MPD(dec)->len = 1;
 #else
@@ -4881,7 +4881,7 @@ dec_floor(PyObject *self, PyObject *Py_UNUSED(dummy))
 static Py_hash_t
 _dec_hash(PyDecObject *v)
 {
-#if defined(CONFIG_64) && _PyHASH_BITS == 61
+#if (defined(MPD_CONFIG_64) || defined(CONFIG_64)) && _PyHASH_BITS == 61
     /* 2**61 - 1 */
     mpd_uint_t p_data[1] = {2305843009213693951ULL};
     mpd_t p = {MPD_POS|MPD_STATIC|MPD_CONST_DATA, 0, 19, 1, 1, p_data};
@@ -4889,7 +4889,7 @@ _dec_hash(PyDecObject *v)
     mpd_uint_t inv10_p_data[1] = {2075258708292324556ULL};
     mpd_t inv10_p = {MPD_POS|MPD_STATIC|MPD_CONST_DATA,
                      0, 19, 1, 1, inv10_p_data};
-#elif defined(CONFIG_32) && _PyHASH_BITS == 31
+#elif (defined(MPD_CONFIG_32) || defined(CONFIG_32)) && _PyHASH_BITS == 31
     /* 2**31 - 1 */
     mpd_uint_t p_data[2] = {147483647UL, 2};
     mpd_t p = {MPD_POS|MPD_STATIC|MPD_CONST_DATA, 0, 10, 2, 2, p_data};
@@ -5838,7 +5838,7 @@ static PyMethodDef context_methods [] =
   { "clear_flags", context_clear_flags, METH_NOARGS, doc_ctx_clear_flags },
   { "clear_traps", context_clear_traps, METH_NOARGS, doc_ctx_clear_traps },
 
-#ifdef CONFIG_32
+#if defined(MPD_CONFIG_32) || defined(CONFIG_32)
   /* Unsafe set functions with relaxed range checks */
   { "_unsafe_setprec", context_unsafe_setprec, METH_O, NULL },
   { "_unsafe_setemin", context_unsafe_setemin, METH_O, NULL },

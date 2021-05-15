@@ -947,6 +947,9 @@
     <ClInclude Include="$(zlibDir)\zconf.in.h" />
     <ClInclude Include="$(zlibDir)\zlib.h" />
     <ClInclude Include="$(zlibDir)\zutil.h" />
+    <ClInclude Include="..\Include\staticinit.h">
+      <Filter>Include</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Modules\_abc.c">
@@ -1315,9 +1318,6 @@
     <ClCompile Include="..\PC\config.c">
       <Filter>PC</Filter>
     </ClCompile>
-    <ClCompile Include="..\PC\dl_nt.c">
-      <Filter>PC</Filter>
-    </ClCompile>
     <ClCompile Include="..\PC\msvcrtmodule.c">
       <Filter>PC</Filter>
     </ClCompile>
@@ -1367,9 +1367,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\Python\dynamic_annotations.c">
-      <Filter>Python</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Python\dynload_win.c">
       <Filter>Python</Filter>
     </ClCompile>
     <ClCompile Include="..\Python\errors.c">

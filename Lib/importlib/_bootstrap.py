@@ -1020,6 +1020,13 @@ class BuiltinImporter:
         """Return False as built-in modules are never packages."""
         return False
 
+    @classmethod
+    def iter_modules(cls, prefix=''):
+        """Yield all built-in modules matching the given prefix."""
+        for name in sys.builtin_module_names:
+            if name.startswith(prefix):
+                yield name, False
+
     load_module = classmethod(_load_module_shim)
 
 
