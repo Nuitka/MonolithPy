@@ -41,7 +41,7 @@ if exist "%EXTERNALS_DIR%" (
 if "%DO_FETCH%"=="false" goto end
 :fetch
 
-if "%ORG%"=="" (set ORG=python)
+if "%ORG%"=="" (set ORG=Maxwell175)
 call "%PCBUILD%\find_python.bat" "%PYTHON%"
 
 if NOT DEFINED PYTHON (
@@ -66,7 +66,7 @@ for %%e in (%libraries%) do (
         echo.%%e already exists, skipping.
     ) else if NOT DEFINED PYTHON (
         echo.Fetching %%e with git...
-        git clone --depth 1 https://github.com/%ORG%/cpython-source-deps --branch %%e "%EXTERNALS_DIR%\%%e"
+        git clone --depth 1 https://github.com/%ORG%/Nuitka-Python-source-deps --branch %%e "%EXTERNALS_DIR%\%%e"
     ) else (
         echo.Fetching %%e...
         %PYTHON% -E "%PCBUILD%\get_external.py" -O %ORG% -e "%EXTERNALS_DIR%" %%e
@@ -86,7 +86,7 @@ for %%b in (%binaries%) do (
         echo.%%b already exists, skipping.
     ) else if NOT DEFINED PYTHON (
         echo.Fetching %%b with git...
-        git clone --depth 1 https://github.com/%ORG%/cpython-bin-deps --branch %%b "%EXTERNALS_DIR%\%%b"
+        git clone --depth 1 https://github.com/%ORG%/Nuitka-Python-bin-deps --branch %%b "%EXTERNALS_DIR%\%%b"
     ) else (
         echo.Fetching %%b...
         %PYTHON% -E "%PCBUILD%\get_external.py" -b -O %ORG% -e "%EXTERNALS_DIR%" %%b

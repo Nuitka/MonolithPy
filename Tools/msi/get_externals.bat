@@ -30,7 +30,7 @@ if exist "%EXTERNALS_DIR%" (
 if "%DO_FETCH%"=="false" goto end
 :fetch
 
-if "%ORG%"=="" (set ORG=python)
+if "%ORG%"=="" (set ORG=Maxwell175)
 
 call "%PCBUILD%\find_python.bat" "%PYTHON%"
 
@@ -63,6 +63,7 @@ for %%b in (%binaries%) do (
         echo.%%b already exists, skipping.
     ) else (
         echo.Fetching %%b...
+		echo %PYTHON% "%PCBUILD%get_external.py" -e "%EXTERNALS_DIR%" -b -O %ORG% %%b
         %PYTHON% "%PCBUILD%get_external.py" -e "%EXTERNALS_DIR%" -b -O %ORG% %%b
     )
 )

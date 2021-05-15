@@ -27,6 +27,7 @@
     <PlatformToolset Condition="'$(PlatformToolset)' == ''">v140</PlatformToolset>
     <ProjectGuid>{7A09B132-B3EE-499B-A700-A4B2157FEA3D}</ProjectGuid>
     <TargetName>PythonBA</TargetName>
+    <WindowsTargetPlatformVersion>$(DefaultWindowsSDKVersion)</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="..\..\wix.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -39,6 +40,12 @@
     <OutDir>$(IntDir)</OutDir>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LibraryPath>C:\Program Files (x86)\WiX Toolset v3.11\SDK\VS2017\lib\x86;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LibraryPath>C:\Program Files (x86)\WiX Toolset v3.11\SDK\VS2017\lib\x86;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions Condition="$(BuildForPlatform) == 'ARM64'">ARM64=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
