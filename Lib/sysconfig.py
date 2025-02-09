@@ -640,6 +640,16 @@ def get_config_vars(*args):
     global _CONFIG_VARS
     if _CONFIG_VARS is None:
         _CONFIG_VARS = {}
+
+        if os.name == 'nt':
+            _init_non_posix(_CONFIG_VARS)
+            _CONFIG_VARS['VPATH'] = sys._vpath
+        if os.name == 'posix':
+            _init_posix(_CONFIG_VARS)
+            for var in _CONFIG_VARS:
+                if isinstance(_CONFIG_VARS[var], str):
+                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX)
+
         # Normalized versions of prefix and exec_prefix are handy to have;
         # in fact, these are the standard versions used most places in the
         # Distutils.
@@ -664,34 +674,6 @@ def get_config_vars(*args):
             _CONFIG_VARS['py_version_nodot_plat'] = sys.winver.replace('.', '')
         except AttributeError:
             _CONFIG_VARS['py_version_nodot_plat'] = ''
-
-        if os.name == 'nt':
-            _init_non_posix(_CONFIG_VARS)
-            _CONFIG_VARS['VPATH'] = sys._vpath
-        if os.name == 'posix':
-            _init_posix(_CONFIG_VARS)
-        if _HAS_USER_BASE:
-            # Setting 'userbase' is done below the call to the
-            # init function to enable using 'get_config_var' in
-            # the init-function.
-            _CONFIG_VARS['userbase'] = _getuserbase()
-
-        # Always convert srcdir to an absolute path
-        srcdir = _CONFIG_VARS.get('srcdir', _PROJECT_BASE)
-        if os.name == 'posix':
-            if _PYTHON_BUILD:
-                # If srcdir is a relative path (typically '.' or '..')
-                # then it should be interpreted relative to the directory
-                # containing Makefile.
-                base = os.path.dirname(get_makefile_filename())
-                srcdir = os.path.join(base, srcdir)
-            else:
-                # srcdir is not meaningful since the installation is
-                # spread about the filesystem.  We choose the
-                # directory containing the Makefile since we know it
-                # exists.
-                srcdir = os.path.dirname(get_makefile_filename())
-        _CONFIG_VARS['srcdir'] = _safe_realpath(srcdir)
 
         # OS X platforms require special customization to handle
         # multi-architecture, multi-os-version installers

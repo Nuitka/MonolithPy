@@ -10,6 +10,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import shutil
 
 STAT_0o775 = ( stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
              | stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP
@@ -34,7 +35,7 @@ def main():
     except FileNotFoundError:
         pass
     print(" -- creating symlink to certifi certificate bundle")
-    os.symlink(certifi.where(), openssl_cafile)
+    shutil.copyfile(certifi.where(), openssl_cafile)
     print(" -- setting permissions")
     os.chmod(openssl_cafile, STAT_0o775)
     print(" -- update complete")

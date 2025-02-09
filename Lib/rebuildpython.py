@@ -448,7 +448,7 @@ extern "C" {
             extra_preargs=extra_preargs_,
         )
 
-        if 'Test' not in __np__.run_with_output(os.path.join(build_dir, "python.exe"), "-c", "print('Test')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python.exe"), "-c", "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         # Replace running interpreter by moving current version to a temp file, then marking it for deletion.
@@ -504,7 +504,7 @@ extern "C" {
                           ],
         )
 
-        if 'Test' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Test')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         # Replace running interpreter by moving current version to a temp file, then deleting it. This
@@ -591,7 +591,7 @@ extern "C" {
             extra_midargs=final_extra_link_args,
         )
 
-        if 'Test' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Test')"):
+        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c", "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
         otool_output = __np__.run_with_output("otool", "-l", os.path.join(build_dir, "python"), quiet=True)
