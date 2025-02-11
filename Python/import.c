@@ -992,7 +992,15 @@ create_builtin(PyThreadState *tstate, PyObject *name, PyObject *spec)
                 mod = PyImport_AddModuleObject(name);
                 return Py_XNewRef(mod);
             }
+            char *package_sep = strrchr(p->name, '.');
+            const char *old_context = _Py_PackageContext;
+            if (package_sep != NULL) {
+                _Py_PackageContext = p->name;
+            }
             mod = _PyImport_InitFunc_TrampolineCall(*p->initfunc);
+            if (package_sep != NULL) {
+                _Py_PackageContext = old_context;
+            }
             if (mod == NULL) {
                 return NULL;
             }
