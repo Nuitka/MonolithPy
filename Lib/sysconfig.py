@@ -641,6 +641,8 @@ def get_config_vars(*args):
     if _CONFIG_VARS is None:
         _CONFIG_VARS = {}
 
+        _CONFIG_VARS['installed_base'] = _BASE_PREFIX
+        _CONFIG_VARS['base'] = _PREFIX
         if os.name == 'nt':
             _init_non_posix(_CONFIG_VARS)
             _CONFIG_VARS['VPATH'] = sys._vpath

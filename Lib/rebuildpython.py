@@ -19,7 +19,7 @@ import tempfile
 MOVEFILE_DELAY_UNTIL_REBOOT = 4
 
 if platform.system() == "Windows":
-    interpreter_prefix = sysconfig.get_config_var("srcdir")
+    interpreter_prefix = sysconfig.get_config_var("base")
 else:
     interpreter_prefix = sysconfig.get_config_var("prefix")
 
@@ -69,7 +69,7 @@ def get_lib_hash():
 
     extra_scan_dirs = []
     if platform.system() == "Windows":
-        extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('srcdir'), 'libs'))
+        extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
     else:
         extra_scan_dirs.append(interpreter_prefix)
 
@@ -159,7 +159,7 @@ def run_rebuild():
 
     extra_scan_dirs = [__np__.getDependencyInstallDir()]
     if platform.system() == "Windows":
-        extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('srcdir'), 'libs'))
+        extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
 
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
@@ -248,9 +248,9 @@ def run_rebuild():
 
     if platform.system() == "Windows":
         library_dirs = [
-            sysconfig.get_config_var("srcdir"),
-            os.path.join(sysconfig.get_config_var("srcdir"), "libs"),
-            os.path.join(sysconfig.get_config_var("srcdir"), "tcl"),
+            interpreter_prefix,
+            os.path.join(interpreter_prefix, "libs"),
+            os.path.join(interpreter_prefix, "tcl"),
         ]
     else:
         library_dirs = [
