@@ -154,6 +154,14 @@ cd freetype-2.13.2
 make -j$(sysctl -n hw.ncpu)
 make install
 cd ..
+
+cd harfbuzz-8.3.0
+export FREETYPE_CFLAGS=-I/Users/m1/Nuitka-Python/../Nuitka-Python-Deps/include/freetype2
+export "FREETYPE_LIBS=-L/Users/m1/Nuitka-Python/../Nuitka-Python-Deps/lib -lfreetype"
+./configure --prefix=/Users/m1/Nuitka-Python/../Nuitka-Python-Deps --disable-shared --with-freetype=yes
+make -j$(sysctl -n hw.ncpu)
+make install
+
 fi
 
 if [ ! -d tcl8.6.15 ]; then
