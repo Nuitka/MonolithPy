@@ -547,12 +547,14 @@ class MSVCCompiler(CCompiler) :
 
         if not self.initialized:
             self.initialize()
-        
+
         if extra_preargs is None:
             extra_preargs = []
         (objects, output_dir) = self._fix_object_args(objects, output_dir)
         output_filename = self.library_filename(output_libname,
                                                 output_dir=output_dir)
+
+        os.makedirs(os.path.dirname(output_filename), exist_ok=True)
 
         if self._need_link(objects, output_filename):
             lib_args = objects + ['/OUT:' + output_filename]

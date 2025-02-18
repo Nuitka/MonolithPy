@@ -129,16 +129,18 @@ class UnixCCompiler(CCompiler):
     def create_static_lib(self, objects, output_libname,
                           output_dir=None, debug=0, target_lang=None, extra_preargs=None):
         if extra_preargs is None:
-            extra_preargs = []                  
-        
+            extra_preargs = []
+
         objects, output_dir = self._fix_object_args(objects, output_dir)
 
         output_filename = \
             self.library_filename(output_libname, output_dir=output_dir)
 
+        os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+
         if self._need_link(objects, output_filename):
             self.mkpath(os.path.dirname(output_filename))
-            self.spawn(self.archiver + 
+            self.spawn(self.archiver +
                        [output_filename] +
                        objects + self.objects)
 
