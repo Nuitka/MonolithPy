@@ -318,10 +318,10 @@ def run_rebuild():
         if os.path.isfile(final_path + ".link.json"):
             with open(final_path + ".link.json", "r") as f:
                 linkData = json.load(f)
-                link_libs += linkData["libraries"]
+                link_libs += linkData.get("libraries", [])
                 library_dirs += [
                     os.path.join(os.path.dirname(final_path), x)
-                    for x in linkData["library_dirs"]
+                    for x in linkData.get("library_dirs", [])
                 ]
                 extra_link_args += linkData.get("extra_postargs", [])
         libIdx += 1
