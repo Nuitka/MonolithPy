@@ -278,6 +278,20 @@ def run_rebuild():
     library_dirs = list(set(library_dirs))
     extra_link_args = []
 
+    if os.path.isdir(__np__.getToolsInstallDir()):
+        for build_tool in os.listdir(__np__.getToolsInstallDir()):
+            tool_link_file = os.path.join(__np__.getToolsInstallDir(), build_tool, "link.json")
+            if os.path.isfile(tool_link_file):
+                with open(tool_link_file, "r") as f:
+                    linkData = json.load(f)
+                    link_libs += [os.path.join(os.path.dirname(tool_link_file), x) if os.path.isfile(os.path.join(os.path.dirname(tool_link_file), x)) else x for x in linkData.get("libraries", [])]
+                    library_dirs += [
+                        os.path.join(os.path.dirname(tool_link_file), x)
+                        for x in linkData.get("library_dirs", [])
+                    ]
+
+    library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__np__.getDependencyInstallDir(), "*")) if os.path.isdir(os.path.join(x, "lib"))]
+
     libIdx = 0
     while libIdx < len(link_libs):
         final_path = None
@@ -292,6 +306,12 @@ def run_rebuild():
                 elif os.path.isfile(os.path.join(dir, lib) + ".a"):
                     final_path = os.path.join(dir, lib) + ".a"
                     break
+                elif os.path.isfile(os.path.join(dir, "lib" + lib) + ".a"):
+                    final_path = os.path.join(dir, "lib" + lib) + ".a"
+                    break
+                elif os.path.isfile(os.path.join(dir, lib) + ".lib"):
+                    final_path = os.path.join(dir, lib) + ".lib"
+                    break
         if not final_path:
             libIdx += 1
             continue
@@ -305,18 +325,6 @@ def run_rebuild():
                 ]
                 extra_link_args += linkData.get("extra_postargs", [])
         libIdx += 1
-
-    if os.path.isdir(__np__.getToolsInstallDir()):
-        for build_tool in os.listdir(__np__.getToolsInstallDir()):
-            tool_link_file = os.path.join(__np__.getToolsInstallDir(), build_tool, "link.json")
-            if os.path.isfile(tool_link_file):
-                with open(tool_link_file, "r") as f:
-                    linkData = json.load(f)
-                    link_libs +=[os.path.join(os.path.dirname(tool_link_file), x) if os.path.isfile(os.path.join(os.path.dirname(tool_link_file), x)) else x for x in linkData.get("libraries", [])]
-                    library_dirs += [
-                        os.path.join(os.path.dirname(tool_link_file), x)
-                        for x in linkData.get("library_dirs", [])
-                    ]
 
     link_libs = list(set(link_libs))
     library_dirs = list(set(library_dirs))
