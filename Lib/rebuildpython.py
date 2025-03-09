@@ -96,6 +96,9 @@ def is_lib_valid(path):
         if __np__.getToolsInstallDir() in path:
             # Disqualify libs from inside build tools.
             return False
+        if "/~" in path or "\\~" in path:
+            # Disqualify libs that were removed by pip.
+            return False
 
         with open(path, "rb") as f:
             if f.read(7) == b"!<arch>":
@@ -204,6 +207,8 @@ def run_rebuild():
                 relative_path = filename
                 if dirpath:
                     relative_path = dirpath.replace("\\", ".").replace("/", ".") + "." + relative_path
+                if relative_path.startswith("~"):
+                    continue
                 print(relative_path, file)
                 foundLibs[relative_path] = file
 
@@ -348,6 +353,9 @@ extern "C" {
     inittab_code = ""
 
     for module_fullname, filename in foundLibs.items():
+        if not is_lib_valid(filename):
+            continue
+
         initFunctions = getPythonInitFunctions(compiler, filename)
 
         if not initFunctions:
