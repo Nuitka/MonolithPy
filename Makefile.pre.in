@@ -1356,6 +1356,7 @@ regen-typeslots:
 # Header files
 
 PYTHON_HEADERS= \
+		$(srcdir)/Include/np_embed.h \
 		$(srcdir)/Include/Python.h \
 		$(srcdir)/Include/abstract.h \
 		$(srcdir)/Include/bltinmodule.h \

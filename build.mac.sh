@@ -17,11 +17,40 @@ echo Building for architecture $arch
 # the python build process ends up running a find -delete that
 # happens to also delete all the static libraries that we built.
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
+export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
-export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC -flto=thin"
-export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC -flto=thin"
+export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC"
+export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC"
 export "LDFLAGS=-arch $arch -L${PREFIX}/lib"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
+
+# Allow to overload the compiler used via CC environment variable
+if [ "$CC" = "" ]
+then
+  export CC=clang
+  export CXX=clang++
+else
+  export CXX=`echo "$CC" | sed -e 's#cc#++#'`
+fi
+
+export CC
+export CXX
+
+ELEVATE=
+if [ ! -w "$(dirname "$target")" ]
+then
+  export "ELEVATE=sudo --preserve-env=CC,CXX"
+  $ELEVATE echo
+fi
+
+# Preparing embedded resources
+mkdir -p Embedded/embed_data/vfs/ssl
+curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
+python3 Lib/mkembed.py Embedded Embedded/embed_data
+$CC -c -O0 -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
+$CC -c -o Embedded/np_embed_data.o Embedded/np_embed_data.c
+ar rcs ${PREFIX}/lib/libnp_embed.a Embedded/np_embed.o Embedded/np_embed_data.o
+
 
 mkdir -p ${PREFIX}/lib
 
@@ -65,13 +94,20 @@ make install
 cd ..
 fi
 
-if [ ! -d openssl-3.1.4 ]; then
-curl -L https://www.openssl.org/source/openssl-3.1.4.tar.gz -o openssl.tar.gz
+if [ ! -d openssl-3.1.8 ]; then
+curl -L https://www.openssl.org/source/openssl-3.1.8.tar.gz -o openssl.tar.gz
 tar -xf openssl.tar.gz
-cd openssl-3.1.4
-./Configure --prefix=${PREFIX} --libdir=lib darwin64-$arch enable-ec_nistp_64_gcc_128 no-shared no-tests
-make depend all -j$(sysctl -n hw.ncpu)
-make install
+cd openssl-3.1.8
+export "CPPINCLUDES=$PYTHON_BASE/Include"
+./Configure --prefix=${PREFIX} --libdir=lib darwin64-$arch enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
+else
+    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+fi
+#make depend all -j$(sysctl -n hw.ncpu)
+make install_dev -j$(sysctl -n hw.ncpu)
+unset CPPINCLUDES
 cd ..
 fi
 
@@ -161,7 +197,7 @@ export "FREETYPE_LIBS=-L/Users/m1/Nuitka-Python/../Nuitka-Python-Deps/lib -lfree
 ./configure --prefix=/Users/m1/Nuitka-Python/../Nuitka-Python-Deps --disable-shared --with-freetype=yes
 make -j$(sysctl -n hw.ncpu)
 make install
-
+cd ..
 fi
 
 if [ ! -d tcl8.6.15 ]; then
@@ -229,25 +265,6 @@ then
   target="$1"
 fi
 
-# Allow to overload the compiler used via CC environment variable
-if [ "$CC" = "" ]
-then
-  export CC=clang
-  export CXX=clang++
-else
-  export CXX=`echo "$CC" | sed -e 's#cc#++#'`
-fi
-
-export CC
-export CXX
-
-ELEVATE=
-if [ ! -w "$(dirname "$target")" ]
-then
-  export "ELEVATE=sudo --preserve-env=CC,CXX"
-  $ELEVATE echo
-fi
-
 cp Modules/Setup.macos Modules/Setup
 
 export "LDFLAGS=-L${PREFIX}/lib"
@@ -259,7 +276,7 @@ export "LDFLAGS=-L${PREFIX}/lib"
   CXX="$CXX" \
   CFLAGS="-g $CFLAGS" \
   LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS" \
-  LIBS="-lffi -lbz2 -lsqlite3 -llzma" \
+  LIBS="-lffi -lbz2 -lsqlite3 -llzma -lnp_embed -lssl -lcrypto " \
   ax_cv_c_float_words_bigendian=no
 
 make -j 32 \
@@ -272,12 +289,15 @@ make build_all_merge_profile
 # while compiling, which is slow due to PGO beign applied.
 $ELEVATE rm -rf "$target" && $ELEVATE make install
 
-# Make sure to have pip installed, might even remove it afterwards, Debian
-# e.g. doesn't include it.
+# Make sure to have pip installed.
 $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long_version}/pip.py.bak" && \
     $ELEVATE "$target/bin/python${long_version}" -m ensurepip && \
-    $ELEVATE "$target/bin/python${long_version}" install_ssl.py && \
     $ELEVATE mv "$target/lib/python${long_version}/pip.py.bak" "$target/lib/python${long_version}/pip.py"
+
+# Copy embedded data
+$ELEVATE mkdir -p "$target/embed_data"
+$ELEVATE mv ${PREFIX}/lib/libnp_embed.a "$target/lib/libnp_embed.a"
+$ELEVATE cp -r Embedded/embed_data "$target/embed_data"
 
 # Copy over the compiled dependencies.
 $ELEVATE mkdir -p "$target/dependency_libs"
