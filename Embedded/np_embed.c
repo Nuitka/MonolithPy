@@ -316,10 +316,9 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, ...) {
 }
 #endif
 
-NP_DECL(void) np_fclose(void* e) {
+NP_DECL(int) np_fclose(void* e) {
   if (NP_FOREIGN_PTR) {
-    fclose((FILE*)e);
-    return;
+    return fclose((FILE*)e);
   }
   if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
     fclose(((EFILE*)e)->f);
@@ -327,6 +326,7 @@ NP_DECL(void) np_fclose(void* e) {
 
   free(e);
   e = NULL;
+  return 0;
 }
 
 NP_DECL(int) np_close(int fd) {
@@ -514,11 +514,11 @@ NP_DECL(int) np_getc_unlocked(void* e) {
     return getc_unlocked((FILE*)e);
   }
 
-  if (e->handle_type != EHANDLE_VIRTUAL) {
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return getc_unlocked(((EFILE*)e)->f);
   }
 
-  return np_egetc(e);
+  return np_fgetc(e);
 }
 #endif
 
@@ -705,7 +705,7 @@ NP_DECL(int) np_fflush(void *e) {
 }
 
 #ifndef _WIN32
-NP_DECL(void) np_lockfile(void *e) {
+NP_DECL(void) np_flockfile(void *e) {
   if (NP_FOREIGN_PTR) {
     flockfile((FILE*)e);
     return;
@@ -715,7 +715,7 @@ NP_DECL(void) np_lockfile(void *e) {
   }
 }
 
-NP_DECL(void) np_unlockfile(EFILE *e) {
+NP_DECL(void) np_funlockfile(void *e) {
   if (NP_FOREIGN_PTR) {
     funlockfile((FILE*)e);
     return;
@@ -725,7 +725,7 @@ NP_DECL(void) np_unlockfile(EFILE *e) {
   }
 }
 
-NP_DECL(int) np_trylockfile(void *e) {
+NP_DECL(int) np_ftrylockfile(void *e) {
   if (NP_FOREIGN_PTR) {
     return ftrylockfile((FILE*)e);
   }

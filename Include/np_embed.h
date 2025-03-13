@@ -78,7 +78,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode);
 NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, ...
         /* mode_t mode */ );
 #endif
-NP_DECL(void) np_fclose(void* e);
+NP_DECL(int) np_fclose(void* e);
 NP_DECL(int) np_close(int fd);
 NP_DECL(bool) np_feof(void* e);
 NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* stream);
@@ -123,9 +123,9 @@ NP_DECL(int) np_fileno(void *stream);
 NP_DECL(int) np_fflush(void *stream);
 
 /* Locking Functions */
-NP_DECL(void) np_lockfile(void *e);
-NP_DECL(void) np_unlockfile(void *e);
-NP_DECL(int) np_trylockfile(void *e);
+NP_DECL(void) np_flockfile(void *e);
+NP_DECL(void) np_funlockfile(void *e);
+NP_DECL(int) np_ftrylockfile(void *e);
 
 #ifndef NUITKAPYTHON_EMBED_BUILD
 // Preprocessor Translation

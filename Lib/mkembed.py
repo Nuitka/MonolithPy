@@ -10,6 +10,9 @@ except ValueError:
 import struct
 from ctypes import c_uint32
 
+out_dir = ""
+base_path = ""
+
 map_format = "IIIIBII"
 
 def hash(key: str) -> int:  # Hash Function: MurmurOAAT64
@@ -32,6 +35,8 @@ MAX_UINT32 = 2 ** 32 - 1
 
 
 def main():
+    global out_dir
+    global base_path
     out_dir = os.path.abspath(sys.argv[1])
     base_path = os.path.abspath(sys.argv[2])
 
