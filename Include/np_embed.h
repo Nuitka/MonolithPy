@@ -11,6 +11,10 @@
 extern "C" {
 #endif
 
+#ifdef _WIN32
+#define _CRTIMP
+#include <WinSock2.h>
+#endif
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,32 +22,33 @@ extern "C" {
 #include <sys/types.h>
 #include <stdbool.h>
 #include <string.h>
-#include <libgen.h>
 #include <fcntl.h>
 
 #ifdef _WIN32
     #include <windows.h>
     #define PATH_MAX MAX_PATH
+    typedef SSIZE_T ssize_t;
 #else
     #include <limits.h>
     #include <unistd.h>
+    #include <libgen.h>
 #endif
 
 typedef fpos_t epos_t;
 
 struct EMAP_S {     // Map Indexing Struct
-  u_int32_t hash;
-  u_int32_t parentidx;
-  u_int32_t pathpos;
-  u_int32_t pathsize;
-  u_int8_t type;
-  u_int32_t pos;
-  u_int32_t size;
+  uint32_t hash;
+  uint32_t parentidx;
+  uint32_t pathpos;
+  uint32_t pathsize;
+  uint8_t type;
+  uint32_t pos;
+  uint32_t size;
 };
 typedef struct EMAP_S EMAP;
 
 struct EFILE_S {    // Virtual File Stream
-  u_int32_t handle_type;
+  uint32_t handle_type;
   const char* name;
   const char* pos;
   const char* end;
@@ -59,112 +64,161 @@ typedef struct EFILE_S EFILE;
 #define EHANDLE_VIRTUAL 0x11111111
 #define EHANDLE_NATIVE 0xFFFFFFFF
 
-void np_normalize_path(char *path);
-void np_get_absolute_path(const char *relative_path, char *absolute_path, size_t size);
-EFILE* efopen_native_fallback(const char* file, const char* mode);
-EFILE* efopen(const char* file, const char* mode);
-int eopen(const char *pathname, int flags, ...
+#ifdef _WIN32
+#define NP_DECL(x) _ACRTIMP x __cdecl
+#else
+#define NP_DECL(x) x
+#endif
+
+NP_DECL(EFILE*) np_fopen(const char* file, const char* mode);
+NP_DECL(int) np_open(const char *pathname, int flags, ...
     /* mode_t mode */ );
-void efclose(EFILE* e);
-int eclose(int fd);
-bool eeof(EFILE* e);
-size_t efread(void* ptr, size_t size, size_t count, EFILE* stream);
-ssize_t eread(int fd, void *buf, size_t count);
-ssize_t epread(int fd, void *buf, size_t count, off_t offset);
-int egetpos(EFILE* e, epos_t* pos);
+#ifdef _WIN32
+NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode);
+NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, ...
+        /* mode_t mode */ );
+#endif
+NP_DECL(void) np_fclose(void* e);
+NP_DECL(int) np_close(int fd);
+NP_DECL(bool) np_feof(void* e);
+NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* stream);
+#ifdef _WIN32
+NP_DECL(int) np_read(int fd, void *buf, unsigned int count);
+#else
+NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count);
+#endif
+NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset);
+NP_DECL(int) np_fgetpos(void* e, epos_t* pos);
 /* File Opening and Closing */
-EFILE *ereopen(const char *filename, const char *mode, EFILE *stream);
-EFILE *efdopen(int fd, const char *mode);
+NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, EFILE *stream);
+NP_DECL(EFILE*) np_fdopen(int fd, const char *mode);
 
 /* File Input Functions */
-int egetc(EFILE *stream);
-char *egets(char *str, int n, EFILE *stream);
-int escanf(EFILE *stream, const char *format, ...);
-size_t efread(void *ptr, size_t size, size_t count, EFILE *stream);
-int egetchar(void);
-int egetc_unlocked(EFILE *stream);  /* Unlocked version of egetc */
+NP_DECL(int) np_fgetc(void *stream);
+NP_DECL(char*) np_fgets(char *str, int n, void *stream);
+NP_DECL(int) np_fscanf(void *stream, const char *format, ...);
+NP_DECL(int) np_getc_unlocked(void *stream);  /* Unlocked version of egetc */
 
 /* File Output Functions */
-int eputc(int character, EFILE *stream);
-int eputs(const char *str, EFILE *stream);
-int eprintf(EFILE *stream, const char *format, ...);
-size_t ewrite(const void *ptr, size_t size, size_t count, EFILE *stream);
+NP_DECL(int) np_fputc(int character, void *stream);
+NP_DECL(int) np_fputs(const char *str, void *stream);
+NP_DECL(int) np_fprintf(void *stream, const char *format, ...);
+NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *stream);
 
 /* File Buffering */
-void esetbuf(EFILE *stream, char *buffer);
-int esetvbuf(EFILE *stream, char *buffer, int mode, size_t size);
+NP_DECL(void) np_setbuf(void *stream, char *buffer);
+NP_DECL(int) np_setvbuf(void *stream, char *buffer, int mode, size_t size);
 
 /* File Positioning */
-int eseek(EFILE *stream, long int offset, int origin);
-long int etell(EFILE *stream);
-void erewind(EFILE *stream);
-int egetpos(EFILE *stream, fpos_t *pos);
-int esetpos(EFILE *stream, const fpos_t *pos);
-int eungetc(int character, EFILE *stream);
+NP_DECL(int) np_fseek(void *stream, long int offset, int origin);
+NP_DECL(long int) np_ftell(void *stream);
+NP_DECL(void) np_rewind(void *stream);
+NP_DECL(int) np_fsetpos(void *stream, const fpos_t *pos);
+NP_DECL(int) np_ungetc(int character, void *stream);
 
 /* Error Handling & Other Utilities */
-void eclearerr(EFILE *stream);
-int eerror(EFILE *stream);
-int efileno(EFILE *stream);
-int eflush(EFILE *stream);
+NP_DECL(void) np_clearerr(void *stream);
+NP_DECL(int) np_ferror(void *stream);
+NP_DECL(int) np_fileno(void *stream);
+NP_DECL(int) np_fflush(void *stream);
 
 /* Locking Functions */
-void elockfile(EFILE *e);
-void eunlockfile(EFILE *e);
-int etrylockfile(EFILE *e);
+NP_DECL(void) np_lockfile(void *e);
+NP_DECL(void) np_unlockfile(void *e);
+NP_DECL(int) np_trylockfile(void *e);
 
 #ifndef NUITKAPYTHON_EMBED_BUILD
 // Preprocessor Translation
 #define FILE EFILE
 /* File Opening and Closing */
-#define fopen efopen
-#define open eopen
-#define fdopen efdopen
-#define freopen ereopen
-#define fclose efclose
-#define close eclose
-
+#define fopen np_fopen
+#define _fopen np_fopen
+#define open np_open
+#define _open np_open
+#define fdopen np_fdopen
+#define _fdopen np_fdopen
+#define freopen np_freopen
+#define _freopen np_freopen
+#define fclose np_fclose
+#define _fclose np_fclose
+#ifndef _WIN32
+#define close np_close
+#endif
+#define _close np_close
+#ifdef _WIN32
+#define wopen np_wopen
+#define _wopen np_wopen
+#define wfopen np_wfopen
+#define _wfopen np_wfopen
+#endif
 
 /* File Input Functions */
-#define fgets egets
-#define fgetc egetc
-#define fscanf escanf
-#define fread efread
-#define read eread
-#define pread epread
-#define getc egetc
-#define getc_unlocked egetc_unlocked
-#define ungetc eungetc
+#define fgets np_fgets
+#define _fgets np_fgets
+#define fgetc np_fgetc
+#define _fgetc np_fgetc
+#define fscanf np_fscanf
+#define _fscanf np_fscanf
+#define fread np_fread
+#define _fread np_fread
+#define read np_read
+#define _read np_read
+#ifndef _WIN32
+#define pread np_pread
+#define getc_unlocked np_getc_unlocked
+#endif
+#define getc np_fgetc
+#define ungetc np_ungetc
+#define _ungetc np_ungetc
 
 /* File Output Functions */
-#define fputc eputc
-#define fputs eputs
-#define fprintf eprintf
-#define fwrite ewrite
-#define putc eputc
+#define fputc np_fputc
+#define _fputc np_fputc
+#define fputs np_fputs
+#define _fputs np_fputs
+#define fprintf np_fprintf
+#define _fprintf np_fprintf
+#define fwrite np_fwrite
+#define _fwrite np_fwrite
+#define putc np_fputc
+#define _putc np_fputc
 
 /* File Buffering */
-#define setbuf esetbuf
-#define setvbuf esetvbuf
+#define setbuf np_setbuf
+#define _setbuf np_setbuf
+#define setvbuf np_setvbuf
+#define _setvbuf np_setvbuf
 
 /* File Positioning */
-#define fseek eseek
-#define ftell etell
-#define rewind erewind
-#define fgetpos egetpos
-#define fsetpos esetpos
+#define fseek np_fseek
+#define _fseek np_fseek
+#define ftell np_ftell
+#define _ftell np_ftell
+#define rewind np_rewind
+#define _rewind np_rewind
+#define fgetpos np_fgetpos
+#define _fgetpos np_fgetpos
+#define fsetpos np_fsetpos
+#define _fsetpos np_fsetpos
 
 /* Error Handling & Other Utilities */
-#define clearerr eclearerr
-#define feof eeof
-#define ferror eerror
-#define fileno efileno
-#define fflush eflush
+#define clearerr np_clearerr
+#define _clearerr np_clearerr
+#define feof np_feof
+#define _feof np_feof
+#define ferror np_ferror
+#define _ferror np_ferror
+#define fileno np_fileno
+#define _fileno np_fileno
+#define fflush np_fflush
+#define _fflush np_fflush
 
+#ifndef _WIN32
 /* Locking Functions */
-#define flockfile elockfile
-#define funlockfile eunlockfile
-#define ftrylockfile etrylockfile
+#define flockfile np_flockfile
+#define funlockfile np_funlockfile
+#define ftrylockfile np_ftrylockfile
+#endif
 
 #endif
 

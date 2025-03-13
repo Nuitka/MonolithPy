@@ -27,8 +27,27 @@ del /S /Q output nuget-result-%NUGET_PYTHON_PACKAGE_NAME% >nul
 
 move .\Lib\pip.py .\Lib\pip.py.bak
 
+mkdir Embedded\embed_data\C\vfs\ssl 2>nul
+
+call "PCBuild\find_python.bat" "%PYTHON%"
+
+if NOT DEFINED PYTHON (
+    echo Python 3.6+ could not be found. Please make sure an existing Python version is available for use. && exit /B 1
+)
+
+%PYTHON% -c "import urllib.request; open('Embedded/embed_data/C/vfs/ssl/cert.pem', 'wb').write(urllib.request.urlopen('https://mkcert.org/generate/').read().decode('utf-8').encode('ascii', errors='backslashreplace'))"
+
+%PYTHON% Lib\mkembed.py Embedded Embedded\embed_data
+
+cl /c /Zi /FoEmbedded\np_embed.obj Embedded\np_embed.c /IInclude
+cl /c /FoEmbedded\np_embed_data.obj Embedded\np_embed_data.c
+
+lib /OUT:Embedded\np_embed.lib Embedded\np_embed.obj Embedded\np_embed_data.obj
+
+
 rem Build with nuget, it solves the directory structure for us.
 call .\Tools\nuget\build.bat %ARCH_OPT% %PGO_OPT% %REBUILD_OPT%
+if %errorlevel% neq 0 exit /b %errorlevel%
 
 rem Install with nuget into a build folder
 .\externals\windows-installer\nuget\nuget.exe install %NUGET_PYTHON_PACKAGE_NAME% -Source %~dp0\PCbuild\%ARCH_NAME% -OutputDirectory nuget-result-%NUGET_PYTHON_PACKAGE_NAME%
@@ -58,6 +77,8 @@ for /d %%d in (externals\openssl*) do (
 for /d %%d in (externals\libffi*) do (
    xcopy /i /q /s /y %SRC_LIB_DIR%\include %OUTPUT_DIR%\dependency_libs\libffi\include
 )
+
+copy Embedded\np_embed.lib %OUTPUT_DIR%\libs\np_embed.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython
 

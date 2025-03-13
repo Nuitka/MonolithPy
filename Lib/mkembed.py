@@ -26,7 +26,7 @@ def hash(key: str) -> int:  # Hash Function: MurmurOAAT64
 def mkfspath(filePath: str) -> str:
     if filePath == base_path:
         return "/"
-    return "/" + os.path.relpath(filePath, base_path).replace('\\', '/')
+    return "/" + os.path.relpath(filePath, base_path).replace('\\', '/').lower()
 
 ETYPE_DIRECTORY = 0
 ETYPE_FILE = 1
@@ -56,15 +56,15 @@ for dirpath, dnames, fnames in os.walk(base_path):
     data_temp_f.write(curr_dir_path.encode('utf-8'))
     data_temp_f.write(b"\0")
     path_size = data_temp_f.tell() - path_start_pos
-    
+
     dir_map_idx = curr_map_idx
     map_temp_f.write(struct.pack(map_format, path_hash, parent_node_idx, path_start_pos, path_size, ETYPE_DIRECTORY, data_temp_f.tell(), 0))
     curr_map_idx += 1
 
     path2mapidx[curr_dir_path] = dir_map_idx
 
-    for f in fnames:
-        curr_file_path = curr_dir_path + "/" + f
+    for fname in fnames:
+        curr_file_path = curr_dir_path + "/" + fname
         path_hash = hash(curr_file_path)
         if path_hash in knownHashes:
             print(f"Failed to pack {curr_dir_path} due to hash collision.")
@@ -77,10 +77,10 @@ for dirpath, dnames, fnames in os.walk(base_path):
         path_size = data_temp_f.tell() - path_start_pos
 
         data_start_pos = data_temp_f.tell()
-        with open(os.path.join(dirpath, f), 'rb') as f:
+        with open(os.path.join(dirpath, fname), 'rb') as f:
             data_temp_f.write(f.read())
         data_size = data_temp_f.tell() - data_start_pos
-        
+
         file_map_idx = curr_map_idx
         map_temp_f.write(struct.pack(map_format, path_hash, dir_map_idx, path_start_pos, path_size, ETYPE_FILE, data_start_pos, data_size))
         curr_map_idx += 1
@@ -110,7 +110,7 @@ with open(os.path.join(out_dir, "np_embed_data.c"), 'w') as f:
 
 const unsigned long nuitka_embed_map_len = """ + str(count) + """;
 
-const unsigned char nuitka_embed_data[] = 
+const unsigned char nuitka_embed_data[] =
 {
 """)
 

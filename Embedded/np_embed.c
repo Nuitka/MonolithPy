@@ -1,7 +1,8 @@
 #define NUITKAPYTHON_EMBED_BUILD
 
-#include <stdarg.h>
 #include "np_embed.h"
+#include <ctype.h>
+#include <stdarg.h>
 
 extern const char nuitka_embed_map;
 extern const long nuitka_embed_map_len;
@@ -12,13 +13,19 @@ extern const long nuitka_embed_data_len;
 struct FDMAP_S {    // Virtual File Stream
     int fd;
     EFILE *f;
-  };
+};
 typedef struct FDMAP_S FDMAP;
 
 FDMAP np_fd2file[512] = {};
 
-u_int32_t hash(char * key){   // Hash Function: MurmurOAAT64
-  u_int32_t h = 3323198485ul;
+#ifdef _WIN32
+#define NP_FOREIGN_PTR *(void**)e == NULL || (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE)
+#else
+#define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
+#endif
+
+uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
+  uint32_t h = 3323198485ul;
   for (;*key;++key) {
     h ^= *key;
     h *= 0x5bd1e995;
@@ -83,7 +90,95 @@ void np_get_absolute_path(const char *relative_path, char *absolute_path, size_t
 #endif
 }
 
-EFILE* efopen_native_fallback(const char* file, const char* mode) {
+static bool get_executable_path(char *execfolder, char *executable) {
+#ifdef _WIN32
+  if (GetModuleFileName(NULL, executable, PATH_MAX) == 0) return false;
+  if (GetModuleFileName(NULL, execfolder, PATH_MAX) == 0) return false;
+  if (!PathRemoveFileSpecA(execfolder)) return false;
+#elif defined(__APPLE__)
+  char path[PATH_MAX];
+  uint32_t bufsize = PATH_MAX;
+  if (_NSGetExecutablePath(path, &bufsize) != 0) return false;
+  char resolved_path[PATH_MAX];
+  if (realpath(path, resolved_path) == NULL) return false;
+  strncpy(executable, resolved_path, PATH_MAX);
+  strncpy(execfolder, dirname(resolved_path), PATH_MAX);
+#else
+  char path[PATH_MAX];
+  size_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+  if (len == -1) return false;
+  path[len] = '\0';
+  strncpy(executable, path, PATH_MAX);
+  strncpy(execfolder, dirname(path), PATH_MAX);
+#endif
+
+  return true;
+}
+
+static bool find_embedded_file(const char *search_path, EMAP **found_map) {
+  EMAP *map = (EMAP*)(&nuitka_embed_map);
+  const char *end = &nuitka_embed_map + nuitka_embed_map_len;
+  uint32_t key = hash((char*)search_path);
+
+  while ((char*)map < end) {
+    if (map->type == ETYPE_FILE && map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
+      *found_map = map;
+      return true;
+    }
+    map++;
+  }
+  return false;
+}
+
+static void get_virtual_path(char *search_path, const char *execfolder, const char *absolute_path) {
+  size_t execfolder_len = strlen(execfolder);
+  size_t absolute_path_len = strlen(absolute_path);
+
+  if (strncmp(absolute_path, execfolder, execfolder_len) == 0) {
+    search_path[0] = '~';
+    int pos = 0;
+    for (size_t i = execfolder_len; i < absolute_path_len; i++) {
+      pos = i - execfolder_len + 1;
+      search_path[pos] = (absolute_path[i] == '\\') ? '/' : tolower(absolute_path[i]);
+    }
+    search_path[pos + 1] = '\0';
+  } else {
+#ifdef _WIN32
+    int pos = 2;
+    search_path[0] = '/';
+    search_path[1] = tolower(absolute_path[0]);
+    for (size_t i = 2; i < absolute_path_len; i++) {
+#else
+    int pos = 0;
+    for (size_t i = 0; i < absolute_path_len; i++) {
+#endif
+      search_path[pos] = (absolute_path[i] == '\\') ? '/' : tolower(absolute_path[i]);
+      pos++;
+    }
+    search_path[pos] = '\0';
+  }
+}
+
+NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      EFILE *e = (EFILE *) malloc(sizeof *e);
+      e->handle_type = EHANDLE_VIRTUAL;
+      e->name = &nuitka_embed_data + map->pathpos;
+      e->pos = &nuitka_embed_data + map->pos;
+      e->end = &nuitka_embed_data + map->pos + map->size;
+      e->size = map->size;
+      return e;
+    }
+  }
+
   FILE* f = fopen(file, mode);
   if (f == NULL)
     return NULL;
@@ -95,236 +190,111 @@ EFILE* efopen_native_fallback(const char* file, const char* mode) {
   return e;
 }
 
-EFILE* efopen(const char* file, const char* mode) {
-  // We need to start by translating the given path to a virtual path.
-  char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, (char*)&absolute_path, PATH_MAX);
-  size_t absolute_path_len = strlen((char*)&absolute_path);
-
-  // Next, we need to special-case paths relative to the executable.
-  //So, lets get the path of our executable.+
-  char execfolder[PATH_MAX] = {};
+NP_DECL(int) np_open(const char *file, int flags, ...) {
 #ifdef _WIN32
-  if (GetModuleFileName(NULL, execfolder, (DWORD)PATH_MAX) == 0) {
-    return efopen_native_fallback(file, mode);
-  }
-  // Remove the executable name, leaving only the directory
-  if (!PathRemoveFileSpec(execfolder)) {
-    return efopen_native_fallback(file, mode);
-  }
-#elif defined(__APPLE__)
-  char path[PATH_MAX];
-  uint32_t bufsize = PATH_MAX;
-  // _NSGetExecutablePath returns a path that may contain symlinks
-  if (_NSGetExecutablePath(path, &bufsize) != 0) {
-    return efopen_native_fallback(file, mode);
-  }
-  // Resolve any symlinks to get the canonical path
-  char resolved_path[PATH_MAX];
-  if (realpath(path, resolved_path) == NULL) {
-    return efopen_native_fallback(file, mode);
-  }
-  // dirname() may modify its argument; use it to extract the directory
-  strncpy(execfolder, dirname(resolved_path), PATH_MAX);
+  int mode = 0;
 #else
-  char path[PATH_MAX];
-  // On Linux, read the symlink /proc/self/exe to get the executable path
-  size_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-  if (len == -1) {
-    return efopen_native_fallback(file, mode);
-  }
-  path[len] = '\0'; // Null-terminate the path
-  strncpy(execfolder, dirname(path), PATH_MAX);
-#endif
-  size_t execfolder_len = strlen(execfolder);
-
-  char search_path[PATH_MAX] = {};
-
-  if (strncmp(absolute_path, execfolder, execfolder_len) == 0) {
-    // We are trying to find a file next to the exe.
-    search_path[0] = '~';
-    int pos = 0;
-    for (size_t i = execfolder_len; i < absolute_path_len; i++) {
-      pos = i - execfolder_len + 1;
-      if (absolute_path[i] == '\\') {
-        search_path[pos] = '/';
-      } else {
-        search_path[pos] = absolute_path[i];
-      }
-    }
-    search_path[pos + 1] = '\0';
-  } else {
-#ifdef _WIN32
-    int pos = 2;
-    // We convert into POSIX style paths on windows.
-    search_path[0] = '/';
-    search_path[1] = absolute_path[0];
-    for (size_t i = 2; i < absolute_path_len; i++) {
-#else
-    int pos = 0;
-    for (size_t i = 0; i < absolute_path_len; i++) {
-#endif
-      if (absolute_path[i] == '\\') {
-        search_path[pos] = '/';
-      } else {
-        search_path[pos] = absolute_path[i];
-      }
-      pos++;
-    }
-    search_path[pos] = '\0';
-  }
-
-  EMAP* map = (EMAP*)(&nuitka_embed_map);
-  const char* end = &nuitka_embed_map + nuitka_embed_map_len;
-
-  if ( map == NULL || end == NULL ) {
-    return efopen_native_fallback(file, mode);
-  }
-
-  const u_int32_t key = hash((char*)search_path);
-  bool found = false;
-  while ( (char*)map < end ) {
-    if (map->type == ETYPE_FILE && map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
-      found = true;
-      break;
-    }
-    map++;
-  }
-
-  if (found) {
-    EFILE* e = (EFILE*)malloc(sizeof *e);
-    e->handle_type = EHANDLE_VIRTUAL;
-    e->name = (&nuitka_embed_data + map->pathpos);
-    e->pos = (&nuitka_embed_data + map->pos);
-    e->end = (&nuitka_embed_data + map->pos + map->size);
-    e->size = map->size;
-    return e;
-  }
-
-  return efopen_native_fallback(file, mode);
-}
-
-void efclose(EFILE* e) {
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    fclose(e->f);
-  }
-
-  free(e);
-  e = NULL;
-}
-
-int eopen(const char *file, int flags, ...) {
   mode_t mode = 0;
+#endif
   if (flags & O_CREAT) {
     va_list args;
     va_start(args, flags);
+#ifdef _WIN32
+    mode = va_arg(args, int);
+#else
     mode = va_arg(args, mode_t);
+#endif
     va_end(args);
   }
 
-  // We need to start by translating the given path to a virtual path.
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, (char*)&absolute_path, PATH_MAX);
-  size_t absolute_path_len = strlen((char*)&absolute_path);
-
-  // Next, we need to special-case paths relative to the executable.
-  //So, lets get the path of our executable.
-
-  char executable[PATH_MAX];
-  char execfolder[PATH_MAX] = {};
-#ifdef _WIN32
-  if (GetModuleFileName(NULL, executable, (DWORD)PATH_MAX) == 0) {
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (!get_executable_path(execfolder, executable)) {
     return open(file, flags, mode);
   }
-  if (GetModuleFileName(NULL, execfolder, (DWORD)PATH_MAX) == 0) {
-    return open(file, flags, mode);
-  }
-  // Remove the executable name, leaving only the directory
-  if (!PathRemoveFileSpec(execfolder)) {
-    return open(file, flags, mode);
-  }
-#elif defined(__APPLE__)
-  char path[PATH_MAX];
-  uint32_t bufsize = PATH_MAX;
-  // _NSGetExecutablePath returns a path that may contain symlinks
-  if (_NSGetExecutablePath(path, &bufsize) != 0) {
-    return open(file, flags, mode);
-  }
-  // Resolve any symlinks to get the canonical path
-  char resolved_path[PATH_MAX];
-  if (realpath(path, resolved_path) == NULL) {
-    return open(file, flags, mode);
-  }
-  strncpy(executable, resolved_path, PATH_MAX);
-  // dirname() may modify its argument; use it to extract the directory
-  strncpy(execfolder, dirname(resolved_path), PATH_MAX);
-#else
-  char path[PATH_MAX];
-  // On Linux, read the symlink /proc/self/exe to get the executable path
-  size_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-  if (len == -1) {
-    return open(file, flags, mode);
-  }
-  path[len] = '\0'; // Null-terminate the path
-  strncpy(executable, path, PATH_MAX);
-  strncpy(execfolder, dirname(path), PATH_MAX);
-#endif
-  size_t execfolder_len = strlen(execfolder);
-
   char search_path[PATH_MAX] = {};
+  get_virtual_path(search_path, execfolder, absolute_path);
 
-  if (strncmp(absolute_path, execfolder, execfolder_len) == 0) {
-    // We are trying to find a file next to the exe.
-    search_path[0] = '~';
-    int pos = 0;
-    for (size_t i = execfolder_len; i < absolute_path_len; i++) {
-      pos = i - execfolder_len + 1;
-      if (absolute_path[i] == '\\') {
-        search_path[pos] = '/';
-      } else {
-        search_path[pos] = absolute_path[i];
+  EMAP *map;
+  if (find_embedded_file(search_path, &map)) {
+    EFILE *e = (EFILE*)malloc(sizeof *e);
+    e->handle_type = EHANDLE_VIRTUAL;
+    e->name = &nuitka_embed_data + map->pathpos;
+    e->pos = &nuitka_embed_data + map->pos;
+    e->end = &nuitka_embed_data + map->pos + map->size;
+    e->size = map->size;
+    int fakefd = open(executable, O_RDONLY);
+    for (int i = 0; i < 512; i++) {
+      if (np_fd2file[i].fd == 0) {
+        np_fd2file[i].fd = fakefd;
+        np_fd2file[i].f = e;
+        break;
       }
     }
-    search_path[pos + 1] = '\0';
-  } else {
+    return fakefd;
+  }
+  return open(file, flags, mode);
+}
+
 #ifdef _WIN32
-    int pos = 2;
-    // We convert into POSIX style paths on windows.
-    search_path[0] = '/';
-    search_path[1] = absolute_path[0];
-    for (size_t i = 2; i < absolute_path_len; i++) {
-#else
-    int pos = 0;
-    for (size_t i = 0; i < absolute_path_len; i++) {
-#endif
-      if (absolute_path[i] == '\\') {
-        search_path[pos] = '/';
-      } else {
-        search_path[pos] = absolute_path[i];
-      }
-      pos++;
+NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
+  char file[PATH_MAX] = {};
+  wcstombs(file, wfile, PATH_MAX);
+
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      EFILE *e = (EFILE *) malloc(sizeof *e);
+      e->handle_type = EHANDLE_VIRTUAL;
+      e->name = &nuitka_embed_data + map->pathpos;
+      e->pos = &nuitka_embed_data + map->pos;
+      e->end = &nuitka_embed_data + map->pos + map->size;
+      e->size = map->size;
+      return e;
     }
-    search_path[pos] = '\0';
   }
 
-  EMAP* map = (EMAP*)(&nuitka_embed_map);
-  const char* end = &nuitka_embed_map + nuitka_embed_map_len;
+  FILE* f = _wfopen(wfile, mode);
+  if (f == NULL)
+    return NULL;
 
-  if ( map == NULL || end == NULL ) {
-    return open(file, flags, mode);
+  EFILE* e = (EFILE*)malloc(sizeof *e);
+  e->handle_type = EHANDLE_NATIVE;
+  e->f = f;
+
+  return e;
+}
+
+NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, ...) {
+  int mode = 0;
+  if (flags & O_CREAT) {
+    va_list args;
+    va_start(args, flags);
+    mode = va_arg(args, int);
+    va_end(args);
   }
 
-  const u_int32_t key = hash((char*)search_path);
-  bool found = false;
-  while ( (char*)map < end ) {
-    if (map->type == ETYPE_FILE && map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
-      found = true;
-      break;
-    }
-    map++;
-  }
+  char file[PATH_MAX] = {};
+  wcstombs((char*)&file, wfile, PATH_MAX);
 
-  if (found) {
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (!get_executable_path(execfolder, executable)) {
+    return _wopen(wfile, flags, mode);
+  }
+  char search_path[PATH_MAX] = {};
+  get_virtual_path(search_path, execfolder, absolute_path);
+
+  EMAP *map;
+  if (find_embedded_file(search_path, &map)) {
     EFILE* e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_VIRTUAL;
     e->name = (&nuitka_embed_data + map->pathpos);
@@ -333,20 +303,33 @@ int eopen(const char *file, int flags, ...) {
     e->size = map->size;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == 0) {
-            // This one is free.
-            np_fd2file[i].fd = fakefd;
-            np_fd2file[i].f = e;
-            break;
-        }
+      if (np_fd2file[i].fd == 0) {
+        np_fd2file[i].fd = fakefd;
+        np_fd2file[i].f = e;
+        break;
+      }
     }
     return fakefd;
   }
 
-  return open(file, flags, mode);
+  return _wopen(wfile, flags, mode);
+}
+#endif
+
+NP_DECL(void) np_fclose(void* e) {
+  if (NP_FOREIGN_PTR) {
+    fclose((FILE*)e);
+    return;
+  }
+  if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
+    fclose(((EFILE*)e)->f);
+  }
+
+  free(e);
+  e = NULL;
 }
 
-int eclose(int fd) {
+NP_DECL(int) np_close(int fd) {
   EFILE *e = NULL;
   int fd_idx = -1;
   for (int i = 0; i < 512; i++) {
@@ -363,52 +346,62 @@ int eclose(int fd) {
     fclose(e->f);
     return 0;
   }
-  
+
   free(e);
   e = NULL;
   return 0;
 }
 
-bool eeof(EFILE* e) {
+NP_DECL(bool) np_feof(void* e) {
+  if (NP_FOREIGN_PTR) {
+    return feof((FILE*)e);
+  }
   if(e == NULL){
     errno = EINVAL;
     return true;
   }
 
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    return feof(e->f);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return feof(((EFILE*)e)->f);
   }
 
-  if(e->end < e->pos){
+  if(((EFILE*)e)->end < ((EFILE*)e)->pos){
     errno = EINVAL;
     return true;
   }
-  if((e->end - e->pos) - e->size < 0){
+  if((((EFILE*)e)->end - ((EFILE*)e)->pos) - ((EFILE*)e)->size < 0){
     errno = EINVAL;
     return true;
   }
-  return (e->end == e->pos);
+  return (((EFILE*)e)->end == ((EFILE*)e)->pos);
 }
 
-size_t efread(void* ptr, size_t size, size_t count, EFILE* stream) {
-
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fread(ptr, size, count, stream->f);
+NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* e) {
+  if (NP_FOREIGN_PTR) {
+    return fread(ptr, size, count, (FILE*)e);
   }
 
-  if(stream->end - stream->pos < size*count){
-    size_t scount = stream->end - stream->pos;
-    memcpy(ptr, (void*)stream->pos, scount);
-    stream->pos = stream->end;
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fread(ptr, size, count, ((EFILE*)e)->f);
+  }
+
+  if(((EFILE*)e)->end - ((EFILE*)e)->pos < size*count){
+    size_t scount = ((EFILE*)e)->end - ((EFILE*)e)->pos;
+    memcpy(ptr, (void*)((EFILE*)e)->pos, scount);
+    ((EFILE*)e)->pos = ((EFILE*)e)->end;
     return (scount/size);
   }
 
-  memcpy(ptr, (void*)stream->pos, size*count);
-  stream->pos = (void*)stream->pos + size*count;
+  memcpy(ptr, (void*)((EFILE*)e)->pos, size*count);
+  ((EFILE*)e)->pos = (char*)((EFILE*)e)->pos + size*count;
   return count;
 }
 
-ssize_t eread(int fd, void *buf, size_t count) {
+#ifdef _WIN32
+NP_DECL(int) np_read(int fd, void *buf, unsigned int count) {
+#else
+NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count) {
+#endif
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
@@ -428,11 +421,11 @@ ssize_t eread(int fd, void *buf, size_t count) {
   }
 
   memcpy(buf, (void*)e->pos, count);
-  e->pos = (void*)e->pos + count;
+  e->pos = (char*)e->pos + count;
   return count;
 }
 
-ssize_t epread(int fd, void *buf, size_t count, off_t offset) {
+NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset) {
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
@@ -457,84 +450,107 @@ ssize_t epread(int fd, void *buf, size_t count, off_t offset) {
   return count;
 }
 
-int egetpos(EFILE* e, epos_t* pos) {
-
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    return fgetpos(e->f, pos);
+NP_DECL(int) np_fgetpos(void* e, epos_t* pos) {
+  if (NP_FOREIGN_PTR) {
+    return fgetpos((FILE*)e, pos);
   }
 
-  if(e->end <= e->pos){
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fgetpos(((EFILE*)e)->f, pos);
+  }
+
+  if(((EFILE*)e)->end <= ((EFILE*)e)->pos){
     pos = NULL;
     return 1;
   }
 
-  *pos = (epos_t)(e->end - e->pos);
+  *pos = (epos_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
   return 0;
 
 }
 
-char* egets(char* str, int num, EFILE* stream ) {
-
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fgets(str, num, stream->f);
+NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
+  if (NP_FOREIGN_PTR) {
+    return fgets(str, num, (FILE*)e);
   }
 
-  //if num 0 or 1 stream->pos will not advance
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fgets(str, num, ((EFILE*)e)->f);
+  }
+
+  //if num 0 or 1 e->pos will not advance
   if (num <= 1) return NULL;
-  if (eeof(stream)) return NULL;
+  if (np_feof(e)) return NULL;
 
   int i = 0;
 
   while (1)
   {
     //i < (num - 1) so still room for two characters: \n and \0
-    if ((str[i++] = *(stream->pos++)) == '\n') break;
-    if (eeof(stream) || (i == (num - 1))) break;
+    if ((str[i++] = *(((EFILE*)e)->pos++)) == '\n') break;
+    if (np_feof(e) || (i == (num - 1))) break;
   }
   str[i] = '\0';
   return str;
 }
 
-int egetc ( EFILE* stream ) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fgetc(stream->f);
+NP_DECL(int) np_fgetc(void* e) {
+  if (NP_FOREIGN_PTR) {
+    return fgetc((FILE*)e);
   }
 
-  if(eeof(stream))
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fgetc(((EFILE*)e)->f);
+  }
+
+  if(np_feof(e))
     return -1;
-  return (int)(*(stream->pos++));
+  return (int)(*(((EFILE*)e)->pos++));
 }
 
-int egetc_unlocked ( EFILE* e ) {
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    return getc_unlocked(e->f);
+#ifndef _WIN32
+NP_DECL(int) np_getc_unlocked(void* e) {
+  if (NP_FOREIGN_PTR) {
+    return getc_unlocked((FILE*)e);
   }
 
-  return egetc(e);
-}
-
-long int etell(EFILE* e) {
   if (e->handle_type != EHANDLE_VIRTUAL) {
-    return ftell(e->f);
+    return getc_unlocked(((EFILE*)e)->f);
   }
 
-  return (e->end - e->pos) - e->size;
+  return np_egetc(e);
+}
+#endif
+
+NP_DECL(long int) np_ftell(void* e) {
+  if (NP_FOREIGN_PTR) {
+    return ftell((FILE*)e);
+  }
+
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return ftell(((EFILE*)e)->f);
+  }
+
+  return (((EFILE*)e)->end - ((EFILE*)e)->pos) - ((EFILE*)e)->size;
 }
 
-int eseek(EFILE* stream, long int offset, int origin) {
+NP_DECL(int) np_fseek(void* e, long int offset, int origin) {
+  if (NP_FOREIGN_PTR) {
+    return fseek((FILE*)e, offset, origin);
+  }
 
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fseek(stream->f, offset, origin);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fseek(((EFILE*)e)->f, offset, origin);
   }
 
   if(origin == SEEK_SET)
-    stream->pos = stream->end - stream->size + offset;
+    ((EFILE*)e)->pos = ((EFILE*)e)->end - ((EFILE*)e)->size + offset;
   if(origin == SEEK_CUR)
-    stream->pos += offset;
+    ((EFILE*)e)->pos += offset;
   if(origin == SEEK_END)
-    stream->pos = stream->end + offset;
+    ((EFILE*)e)->pos = ((EFILE*)e)->end + offset;
 
-  if(stream->end < stream->pos || etell(stream) < 0) {
+  if(((EFILE*)e)->end < ((EFILE*)e)->pos || np_ftell(e) < 0) {
     errno = EINVAL;
     return true;
   }
@@ -542,138 +558,195 @@ int eseek(EFILE* stream, long int offset, int origin) {
   return 0;
 }
 
-int escanf(EFILE *stream, const char *format, ...) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
+NP_DECL(int) np_fscanf(void *e, const char *format, ...) {
+  if (NP_FOREIGN_PTR) {
     va_list args;
     va_start(args, format);
-    int result = vfscanf(stream->f, format, args);
+    int result = vfscanf(((FILE*)e), format, args);
+    va_end(args);
+    return result;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    va_list args;
+    va_start(args, format);
+    int result = vfscanf(((EFILE*)e)->f, format, args);
     va_end(args);
     return result;
   }
   return 0;
 }
 
-/* File Output Functions */
-int eputc(int character, EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fputc(character, stream->f);
+NP_DECL(int) np_fputc(int character, void *e) {
+  if (NP_FOREIGN_PTR) {
+    return fputc(character, (FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fputc(character, ((EFILE*)e)->f);
   }
   return 0;
 }
 
-int eputs(const char *str, EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fputs(str, stream->f);
+NP_DECL(int) np_fputs(const char *str, void *e) {
+  if (NP_FOREIGN_PTR) {
+    return fputs(str, (FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fputs(str, ((EFILE*)e)->f);
   }
   return 0;
 }
 
-int eprintf(EFILE *stream, const char *format, ...) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
+NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
+  if (NP_FOREIGN_PTR) {
     va_list args;
     va_start(args, format);
-    int result = vfprintf(stream->f, format, args);
+    int result = vfprintf((FILE*)e, format, args);
+    va_end(args);
+    return result;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    va_list args;
+    va_start(args, format);
+    int result = vfprintf(((EFILE*)e)->f, format, args);
     va_end(args);
     return result;
   }
   return 0;
 }
 
-size_t ewrite(const void *ptr, size_t size, size_t count, EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fwrite(ptr, size, count, stream->f);
+NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *e) {
+  if (NP_FOREIGN_PTR) {
+    return fwrite(ptr, size, count, (FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fwrite(ptr, size, count, ((EFILE*)e)->f);
   }
   return 0;
 }
 
-int eputchar(int character) {
-  return putchar(character);
-}
-
-/* File Buffering */
-void esetbuf(EFILE *stream, char *buffer) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    setbuf(stream->f, buffer);
+NP_DECL(void) np_setbuf(void *e, char *buffer) {
+  if (NP_FOREIGN_PTR) {
+    setbuf((FILE*)e, buffer);
+    return;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    setbuf(((EFILE*)e)->f, buffer);
   }
 }
 
-int esetvbuf(EFILE *stream, char *buffer, int mode, size_t size) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return setvbuf(stream->f, buffer, mode, size);
+NP_DECL(int) np_setvbuf(void *e, char *buffer, int mode, size_t size) {
+  if (NP_FOREIGN_PTR) {
+    return setvbuf((FILE*)e, buffer, mode, size);
   }
-  return 0;
-}
-
-/* File Positioning */
-void erewind(EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    rewind(stream->f);
-  }
-}
-
-int esetpos(EFILE *stream, const fpos_t *pos) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fsetpos(stream->f, pos);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return setvbuf(((EFILE*)e)->f, buffer, mode, size);
   }
   return 0;
 }
 
-/* Error Handling & Other Utilities */
-void eclearerr(EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    clearerr(stream->f);
+NP_DECL(void) np_rewind(void *e) {
+  if (NP_FOREIGN_PTR) {
+    rewind((FILE*)e);
+    return;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    rewind(((EFILE*)e)->f);
   }
 }
 
-int eerror(EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return ferror(stream->f);
+NP_DECL(int) np_fsetpos(void *e, const fpos_t *pos) {
+  if (NP_FOREIGN_PTR) {
+    return fsetpos((FILE*)e, pos);
   }
-  return 0;
-}
-
-int efileno(EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fileno(stream->f);
-  }
-  return 0;
-}
-
-int eflush(EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return fflush(stream->f);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fsetpos(((EFILE*)e)->f, pos);
   }
   return 0;
 }
 
-/* Locking Functions */
-void elockfile(EFILE *e) {
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    flockfile(e->f);
+NP_DECL(void) np_clearerr(void *e) {
+  if (NP_FOREIGN_PTR) {
+    clearerr((FILE*)e);
+    return;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    clearerr(((EFILE*)e)->f);
   }
 }
 
-void eunlockfile(EFILE *e) {
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    funlockfile(e->f);
+NP_DECL(int) np_ferror(void *e) {
+  if (NP_FOREIGN_PTR) {
+    return ferror((FILE*)e);
   }
-}
-
-int etrylockfile(EFILE *e) {
-  if (e->handle_type != EHANDLE_VIRTUAL) {
-    return ftrylockfile(e->f);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return ferror(((EFILE*)e)->f);
   }
   return 0;
 }
 
-int eungetc(int character, EFILE *stream) {
-  if (stream->handle_type != EHANDLE_VIRTUAL) {
-    return ungetc(character, stream->f);
+NP_DECL(int) np_fileno(void *e) {
+  if (NP_FOREIGN_PTR) {
+    return fileno((FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fileno(((EFILE*)e)->f);
+  }
+  return 0;
+}
+
+NP_DECL(int) np_fflush(void *e) {
+  if (NP_FOREIGN_PTR) {
+    return fflush((FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return fflush(((EFILE*)e)->f);
+  }
+  return 0;
+}
+
+#ifndef _WIN32
+NP_DECL(void) np_lockfile(void *e) {
+  if (NP_FOREIGN_PTR) {
+    flockfile((FILE*)e);
+    return;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    flockfile(((EFILE*)e)->f);
+  }
+}
+
+NP_DECL(void) np_unlockfile(EFILE *e) {
+  if (NP_FOREIGN_PTR) {
+    funlockfile((FILE*)e);
+    return;
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    funlockfile(((EFILE*)e)->f);
+  }
+}
+
+NP_DECL(int) np_trylockfile(void *e) {
+  if (NP_FOREIGN_PTR) {
+    return ftrylockfile((FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return ftrylockfile(((EFILE*)e)->f);
+  }
+  return 0;
+}
+#endif
+
+NP_DECL(int) np_ungetc(int character, void *e) {
+  if (NP_FOREIGN_PTR) {
+    return ungetc(character, (FILE*)e);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return ungetc(character, ((EFILE*)e)->f);
   }
   return character;
 }
 
-EFILE *efdopen(int fd, const char *mode) {
+NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
       return np_fd2file[i].f;
