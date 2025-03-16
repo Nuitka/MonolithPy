@@ -10,13 +10,31 @@ jobs:
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ../Nuitka-Python-Deps
+        key: ${{ runner.os }}-${{ hashFiles('build.mac.sh') }}
     - name: Run Build
       run: bash build.mac.sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Nuitka-Python311_arm64
+        path: ~/Library/Nuitka-Python311-arm64
   mac_x64:
     name: MacOS Intel Build
     runs-on: macos-latest
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ../Nuitka-Python-Deps
+        key: ${{ runner.os }}-${{ hashFiles('build.mac.sh') }}
     - name: Run Build
       run: arch -x86_64 bash build.mac.sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Nuitka-Python311_x86_64
+        path: ~/Library/Nuitka-Python311-x86_64
