@@ -8,11 +8,15 @@ jobs:
     name: MacOS ARM Build
     runs-on: macos-latest
     steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
     - name: Run Build
       run: bash build.mac.sh
   mac_x64:
     name: MacOS Intel Build
     runs-on: macos-latest
     steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
     - name: Run Build
       run: arch -x86_64 bash build.mac.sh
