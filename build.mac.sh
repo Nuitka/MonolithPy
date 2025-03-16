@@ -191,9 +191,9 @@ make install
 cd ..
 
 cd harfbuzz-8.3.0
-export FREETYPE_CFLAGS=-I/Users/m1/Nuitka-Python/../Nuitka-Python-Deps/include/freetype2
-export "FREETYPE_LIBS=-L/Users/m1/Nuitka-Python/../Nuitka-Python-Deps/lib -lfreetype"
-./configure --prefix=/Users/m1/Nuitka-Python/../Nuitka-Python-Deps --disable-shared --with-freetype=yes
+export FREETYPE_CFLAGS=-I${PREFIX}/include/freetype2
+export "FREETYPE_LIBS=-L${PREFIX}/lib -lfreetype"
+./configure --prefix=${PREFIX} --disable-shared --with-freetype=yes
 make -j$(sysctl -n hw.ncpu)
 make install
 cd ..
