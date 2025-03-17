@@ -22,7 +22,7 @@ jobs:
       run: bash build.mac.sh
     - uses: actions/upload-artifact@v4
       with:
-        name: Nuitka-Python311_arm64
+        name: Nuitka-Python311_mac_arm64
         path: ~/Library/Nuitka-Python311-arm64
   mac_x64:
     name: MacOS Intel Build
@@ -42,5 +42,18 @@ jobs:
       run: arch -x86_64 bash build.mac.sh
     - uses: actions/upload-artifact@v4
       with:
-        name: Nuitka-Python311_x86_64
+        name: Nuitka-Python311_mac_x86_64
         path: ~/Library/Nuitka-Python311-x86_64
+
+  windows:
+    name: Windows Build
+    runs-on: windows-latest
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+    - name: Run Build
+      run: build.bat
+    - uses: actions/upload-artifact@v4
+      with:
+        name: Nuitka-Python311_windows_x64
+        path: output
