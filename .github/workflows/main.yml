@@ -52,6 +52,7 @@ jobs:
     - name: Check out repository code
       uses: actions/checkout@v4
     - name: Run Build
+      shell: cmd
       run: build.bat
     - uses: actions/upload-artifact@v4
       with:
