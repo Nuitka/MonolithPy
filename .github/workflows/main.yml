@@ -57,6 +57,8 @@ jobs:
     - name: Run Build
       shell: cmd
       run: build.bat
+    - name: Cleanup rebuild interpreters
+      run: Get-ChildItem -Path $(Get-Location) -File -Include *.old_interp -Recurse | Remove-Item -Force -Verbose
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_windows_x64

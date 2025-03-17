@@ -477,7 +477,7 @@ extern "C" {
         if os.path.splitdrive(temp_path)[0] == os.path.splitdrive(sys.executable)[0]:
             shutil.move(sys.executable, temp_path)
         else:
-            shutil.move(sys.executable, sys.executable + uuid.uuid4().hex + ".old")
+            shutil.move(sys.executable, sys.executable + uuid.uuid4().hex + ".old_interp")
         ctypes.windll.kernel32.MoveFileExW(temp_path, None, MOVEFILE_DELAY_UNTIL_REBOOT)
 
         shutil.move(os.path.join(build_dir, "python.exe"), interpreter_path)
