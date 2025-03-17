@@ -14,7 +14,10 @@ jobs:
       with:
         path: |
           ../Nuitka-Python-Deps
+          dep-build
         key: ${{ runner.os }}-${{ hashFiles('build.mac.sh') }}
+    - name: Uninstall homebrew
+      run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
       run: bash build.mac.sh
     - uses: actions/upload-artifact@v4
@@ -31,7 +34,10 @@ jobs:
       with:
         path: |
           ../Nuitka-Python-Deps
+          dep-build
         key: ${{ runner.os }}-${{ hashFiles('build.mac.sh') }}
+    - name: Uninstall homebrew
+      run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
       run: arch -x86_64 bash build.mac.sh
     - uses: actions/upload-artifact@v4
