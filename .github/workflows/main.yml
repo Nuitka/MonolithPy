@@ -51,6 +51,9 @@ jobs:
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
+    - uses: TheMrMilchmann/setup-msvc-dev@v3
+      with:
+        arch: x64
     - name: Run Build
       shell: cmd
       run: build.bat
