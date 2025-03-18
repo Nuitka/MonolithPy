@@ -1,5 +1,5 @@
 #define NUITKAPYTHON_EMBED_BUILD
-#define _FILE_OFFSET_BITS=64
+#define _FILE_OFFSET_BITS 64
 #include "np_embed.h"
 #include <ctype.h>
 #include <stdarg.h>
