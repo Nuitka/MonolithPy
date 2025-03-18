@@ -1,5 +1,5 @@
 #define NUITKAPYTHON_EMBED_BUILD
-
+#define _FILE_OFFSET_BITS=64
 #include "np_embed.h"
 #include <ctype.h>
 #include <stdarg.h>
@@ -522,25 +522,42 @@ NP_DECL(int) np_getc_unlocked(void* e) {
 }
 #endif
 
-NP_DECL(long int) np_ftell(void* e) {
+
+int64_t np_ftell_priv(void* e) {
   if (NP_FOREIGN_PTR) {
-    return ftell((FILE*)e);
+#ifdef _WIN32
+    return _ftelli64((FILE*)e);
+#else
+    return ftello((FILE*)e);
+#endif
   }
 
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-    return ftell(((EFILE*)e)->f);
+#ifdef _WIN32
+    return _ftelli64(((EFILE*)e)->f);
+#else
+    return ftello(((EFILE*)e)->f);
+#endif
   }
 
   return (((EFILE*)e)->end - ((EFILE*)e)->pos) - ((EFILE*)e)->size;
 }
 
-NP_DECL(int) np_fseek(void* e, long int offset, int origin) {
+int np_fseek_priv(void* e, int64_t offset, int origin) {
   if (NP_FOREIGN_PTR) {
-    return fseek((FILE*)e, offset, origin);
+#ifdef _WIN32
+    return _fseeki64((FILE*)e, offset, origin);
+#else
+    return fseeko((FILE*)e, offset, origin);
+#endif
   }
 
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-    return fseek(((EFILE*)e)->f, offset, origin);
+#ifdef _WIN32
+    return _fseeki64(((EFILE*)e)->f, offset, origin);
+#else
+    return fseeko(((EFILE*)e)->f, offset, origin);
+#endif
   }
 
   if(origin == SEEK_SET)
@@ -552,10 +569,26 @@ NP_DECL(int) np_fseek(void* e, long int offset, int origin) {
 
   if(((EFILE*)e)->end < ((EFILE*)e)->pos || np_ftell(e) < 0) {
     errno = EINVAL;
-    return true;
+    return -1;
   }
 
   return 0;
+}
+
+NP_DECL(long int) np_ftell(void* e) {
+  return np_ftell_priv(e);
+}
+
+NP_DECL(int) np_fseek(void* e, long int offset, int origin) {
+  return np_fseek_priv(e, offset, origin);
+}
+
+NP_DECL(int64_t) np_ftello64(void *e) {
+  return np_ftell_priv(e);
+}
+
+NP_DECL(int) np_fseeko64(void *e, int64_t offset, int origin) {
+  return np_fseek_priv(e, offset, origin);
 }
 
 NP_DECL(int) np_fscanf(void *e, const char *format, ...) {

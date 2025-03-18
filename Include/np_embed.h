@@ -112,6 +112,8 @@ NP_DECL(int) np_setvbuf(void *stream, char *buffer, int mode, size_t size);
 /* File Positioning */
 NP_DECL(int) np_fseek(void *stream, long int offset, int origin);
 NP_DECL(long int) np_ftell(void *stream);
+NP_DECL(int) np_fseeko64(void *stream, int64_t offset, int origin);
+NP_DECL(int64_t) np_ftello64(void *stream);
 NP_DECL(void) np_rewind(void *stream);
 NP_DECL(int) np_fsetpos(void *stream, const fpos_t *pos);
 NP_DECL(int) np_ungetc(int character, void *stream);
@@ -194,6 +196,18 @@ NP_DECL(int) np_ftrylockfile(void *e);
 #define _fseek np_fseek
 #define ftell np_ftell
 #define _ftell np_ftell
+#ifdef _WIN32
+#define _fseeki64 np_fseeko64
+#define _ftelli64 np_ftello64
+#else
+#if defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64
+#define fseeko np_fseeko64
+#define ftello np_ftello64
+#else
+#define fseeko np_fseek
+#define ftello np_ftell
+#endif
+#endif
 #define rewind np_rewind
 #define _rewind np_rewind
 #define fgetpos np_fgetpos
