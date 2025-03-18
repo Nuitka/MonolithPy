@@ -129,7 +129,7 @@ NP_DECL(void) np_flockfile(void *e);
 NP_DECL(void) np_funlockfile(void *e);
 NP_DECL(int) np_ftrylockfile(void *e);
 
-#ifndef NUITKAPYTHON_EMBED_BUILD
+#if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(__cplusplus)
 // Preprocessor Translation
 #define FILE EFILE
 /* File Opening and Closing */
