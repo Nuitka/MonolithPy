@@ -20,6 +20,8 @@ jobs:
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
       run: bash build.mac.sh
+    - name: Cleanup artifact
+      run: find ~/Library/Nuitka-Python311-arm64 \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_arm64
@@ -40,6 +42,8 @@ jobs:
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
       run: arch -x86_64 bash build.mac.sh
+    - name: Cleanup artifact
+      run: find ~/Library/Nuitka-Python311-x86_64 \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_x86_64

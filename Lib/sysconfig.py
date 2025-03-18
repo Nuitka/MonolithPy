@@ -648,9 +648,11 @@ def get_config_vars(*args):
             _CONFIG_VARS['VPATH'] = sys._vpath
         if os.name == 'posix':
             _init_posix(_CONFIG_VARS)
+            orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
+            base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
             for var in _CONFIG_VARS:
                 if isinstance(_CONFIG_VARS[var], str):
-                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX)
+                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
 
         # Normalized versions of prefix and exec_prefix are handy to have;
         # in fact, these are the standard versions used most places in the

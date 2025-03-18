@@ -276,7 +276,8 @@ export "LDFLAGS=-L${PREFIX}/lib"
   CFLAGS="-g $CFLAGS" \
   LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS" \
   LIBS="-lffi -lbz2 -lsqlite3 -llzma -lnp_embed -lssl -lcrypto " \
-  ax_cv_c_float_words_bigendian=no
+  ax_cv_c_float_words_bigendian=no \
+  ___ORIG_DEPS_PREFIX=${PREFIX}___
 
 make -j 32 \
         PROFILE_TASK='./Lib/test/regrtest.py -j 8 -x test_bsddb3 test_compiler test_cpickle test_cprofile test_dbm_dumb test_dbm_ndbm test_distutils test_ensurepip test_gdb test_io test_linuxaudiodev test_multiprocessing test_ossaudiodev test_platform test_pydoc test_socketserver test_subprocess test_sundry test_thread test_threaded_import test_threadedtempfile test_threading test_threading_local test_threadsignals test_xmlrpc test_zipfile' \
