@@ -350,11 +350,11 @@ _close_open_fds_safe(int start_fd, int *fds_to_keep, Py_ssize_t fds_to_keep_len)
                 if (fd != fd_dir_fd && fd >= start_fd &&
                     !_is_fd_in_sorted_fd_sequence(fd, fds_to_keep,
                                                   fds_to_keep_len)) {
-                    close(fd);
+                    _close(fd);
                 }
             }
         }
-        close(fd_dir_fd);
+        _close(fd_dir_fd);
     }
 }
 
@@ -396,7 +396,7 @@ _close_open_fds_maybe_unsafe(int start_fd, int *fds_to_keep,
      * reuse that fd otherwise we might close opendir's file descriptor in
      * our loop.  This trick assumes that fd's are allocated on a lowest
      * available basis. */
-    close(start_fd);
+    _close(start_fd);
     ++start_fd;
 #endif
 
@@ -425,7 +425,7 @@ _close_open_fds_maybe_unsafe(int start_fd, int *fds_to_keep,
             if (fd != fd_used_by_opendir && fd >= start_fd &&
                 !_is_fd_in_sorted_fd_sequence(fd, fds_to_keep,
                                               fds_to_keep_len)) {
-                close(fd);
+                _close(fd);
             }
             errno = 0;
         }

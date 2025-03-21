@@ -187,7 +187,7 @@ internal_close(winconsoleio *self)
     if (self->fd != -1) {
         if (self->closefd) {
             _Py_BEGIN_SUPPRESS_IPH
-            close(self->fd);
+            _close(self->fd);
             _Py_END_SUPPRESS_IPH
         }
         self->fd = -1;

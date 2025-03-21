@@ -1552,7 +1552,7 @@ _Py_open_impl(const char *pathname, int flags, int gil_held)
 
 #ifndef MS_WINDOWS
     if (set_inheritable(fd, 0, gil_held, atomic_flag_works) < 0) {
-        close(fd);
+        _close(fd);
         return -1;
     }
 #endif
@@ -2384,7 +2384,7 @@ _Py_dup(int fd)
 
     if (_Py_set_inheritable(fd, 0, NULL) < 0) {
         _Py_BEGIN_SUPPRESS_IPH
-        close(fd);
+        _close(fd);
         _Py_END_SUPPRESS_IPH
         return -1;
     }
@@ -2412,7 +2412,7 @@ _Py_dup(int fd)
 
     if (_Py_set_inheritable(fd, 0, NULL) < 0) {
         _Py_BEGIN_SUPPRESS_IPH
-        close(fd);
+        _close(fd);
         _Py_END_SUPPRESS_IPH
         return -1;
     }
@@ -2635,7 +2635,7 @@ _fdwalk_close_func(void *lohi, int fd)
     }
     else if (fd >= lo) {
         /* Ignore errors */
-        (void)close(fd);
+        (void)_close(fd);
     }
     return 0;
 }
@@ -2674,7 +2674,7 @@ _Py_closerange(int first, int last)
     {
         for (int i = first; i <= last; i++) {
             /* Ignore errors */
-            (void)close(i);
+            (void)_close(i);
         }
     }
 #endif /* USE_FDWALK */

@@ -2199,7 +2199,7 @@ is_valid_fd(int fd)
 #elif defined(__linux__)
     int fd2 = dup(fd);
     if (fd2 >= 0) {
-        close(fd2);
+        _close(fd2);
     }
     return (fd2 >= 0);
 #elif defined(MS_WINDOWS)

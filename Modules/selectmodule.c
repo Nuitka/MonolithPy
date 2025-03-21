@@ -1029,7 +1029,7 @@ devpoll_internal_close(devpollObject *self)
         int fd = self->fd_devpoll;
         self->fd_devpoll = -1;
         Py_BEGIN_ALLOW_THREADS
-        if (close(fd) < 0)
+        if (_close(fd) < 0)
             save_errno = errno;
         Py_END_ALLOW_THREADS
     }

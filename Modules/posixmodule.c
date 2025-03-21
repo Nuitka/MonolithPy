@@ -4211,7 +4211,7 @@ _posix_listdir(path_t *path, PyObject *list)
 #ifdef HAVE_FDOPENDIR
         if (fd != -1) {
             Py_BEGIN_ALLOW_THREADS
-            close(fd);
+            _close(fd);
             Py_END_ALLOW_THREADS
         }
 #endif
@@ -7497,9 +7497,9 @@ posix_error:
     posix_error();
 error:
     if (master_fd != -1)
-        close(master_fd);
+        _close(master_fd);
     if (slave_fd != -1)
-        close(slave_fd);
+        _close(slave_fd);
     return NULL;
 }
 #endif /* defined(HAVE_OPENPTY) || defined(HAVE__GETPTY) || defined(HAVE_DEV_PTMX) */
@@ -7547,7 +7547,7 @@ os_login_tty_impl(PyObject *module, int fd)
         return posix_error();
     }
     if (fd > 2) {
-        close(fd);
+        _close(fd);
     }
 #endif /* HAVE_LOGIN_TTY */
     Py_RETURN_NONE;
@@ -9377,7 +9377,7 @@ os_open_impl(PyObject *module, path_t *path, int flags, int mode, int dir_fd)
             }
         } else
 #endif /* HAVE_OPENAT */
-            fd = open(path->narrow, flags, mode);
+            fd = _open(path->narrow, flags, mode);
 #endif /* !MS_WINDOWS */
         Py_END_ALLOW_THREADS
     } while (fd < 0 && errno == EINTR && !(async_err = PyErr_CheckSignals()));
@@ -9398,7 +9398,7 @@ os_open_impl(PyObject *module, path_t *path, int flags, int mode, int dir_fd)
 
 #ifndef MS_WINDOWS
     if (_Py_set_inheritable(fd, 0, atomic_flag_works) < 0) {
-        close(fd);
+        _close(fd);
         return -1;
     }
 #endif
@@ -9426,7 +9426,7 @@ os_close_impl(PyObject *module, int fd)
      */
     Py_BEGIN_ALLOW_THREADS
     _Py_BEGIN_SUPPRESS_IPH
-    res = close(fd);
+    res = _close(fd);
     _Py_END_SUPPRESS_IPH
     Py_END_ALLOW_THREADS
     if (res < 0)
@@ -9512,7 +9512,7 @@ os_dup2_impl(PyObject *module, int fd, int fd2, int inheritable)
 
     /* Character files like console cannot be make non-inheritable */
     if (!inheritable && _Py_set_inheritable(fd2, 0, NULL) < 0) {
-        close(fd2);
+        _close(fd2);
         return -1;
     }
 
@@ -9557,7 +9557,7 @@ os_dup2_impl(PyObject *module, int fd, int fd2, int inheritable)
         }
 
         if (!inheritable && _Py_set_inheritable(fd2, 0, NULL) < 0) {
-            close(fd2);
+            _close(fd2);
             return -1;
         }
 #ifdef HAVE_DUP3
@@ -10373,13 +10373,13 @@ os_pipe_impl(PyObject *module)
 
         if (res == 0) {
             if (_Py_set_inheritable(fds[0], 0, NULL) < 0) {
-                close(fds[0]);
-                close(fds[1]);
+                _close(fds[0]);
+                _close(fds[1]);
                 return NULL;
             }
             if (_Py_set_inheritable(fds[1], 0, NULL) < 0) {
-                close(fds[0]);
-                close(fds[1]);
+                _close(fds[0]);
+                _close(fds[1]);
                 return NULL;
             }
         }
@@ -11014,7 +11014,7 @@ os_truncate_impl(PyObject *module, path_t *path, Py_off_t length)
         result = -1;
     else {
         result = _chsize_s(fd, length);
-        close(fd);
+        _close(fd);
         if (result < 0)
             errno = result;
     }
@@ -14648,7 +14648,7 @@ os_scandir_impl(PyObject *module, path_t *path)
 #ifdef HAVE_FDOPENDIR
         if (fd != -1) {
             Py_BEGIN_ALLOW_THREADS
-            close(fd);
+            _close(fd);
             Py_END_ALLOW_THREADS
         }
 #endif
