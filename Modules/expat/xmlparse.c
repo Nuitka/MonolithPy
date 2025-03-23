@@ -844,7 +844,7 @@ writeRandomBytes_dev_urandom(void *target, size_t count) {
     }
   } while (! success && (errno == EINTR));
 
-  _close(fd);
+  close(fd);
   return success;
 }
 

@@ -114,7 +114,7 @@ internal_close(fileio *self)
         /* fd is accessible and someone else may have closed it */
         Py_BEGIN_ALLOW_THREADS
         _Py_BEGIN_SUPPRESS_IPH
-        err = _close(fd);
+        err = close(fd);
         if (err < 0)
             save_errno = errno;
         _Py_END_SUPPRESS_IPH
@@ -381,7 +381,7 @@ _Py_COMP_DIAG_POP
 #ifdef MS_WINDOWS
                 self->fd = _wopen(widename, flags, 0666);
 #else
-                self->fd = _open(name, flags, 0666);
+                self->fd = open(name, flags, 0666);
 #endif
                 Py_END_ALLOW_THREADS
             } while (self->fd < 0 && errno == EINTR &&
