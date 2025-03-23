@@ -19,9 +19,9 @@ echo Building for architecture $arch
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
-export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC"
-export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib"
+export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto=thin"
+export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC -flto=thin"
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -flto=thin"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -274,7 +274,7 @@ export "LDFLAGS=-L${PREFIX}/lib"
   CC="$CC" \
   CXX="$CXX" \
   CFLAGS="-g $CFLAGS" \
-  LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS" \
+  LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS -flto=thin" \
   LIBS="-lffi -lbz2 -lsqlite3 -llzma -lnp_embed -lssl -lcrypto " \
   ax_cv_c_float_words_bigendian=no \
   ___ORIG_DEPS_PREFIX=${PREFIX}___
