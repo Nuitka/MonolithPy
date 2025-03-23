@@ -18,12 +18,6 @@ typedef struct FDMAP_S FDMAP;
 
 FDMAP np_fd2file[512] = {};
 
-#ifdef _WIN32
-#define NP_FOREIGN_PTR *(void**)e == NULL || (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE)
-#else
-#define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
-#endif
-
 uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
   uint32_t h = 3323198485ul;
   for (;*key;++key) {
@@ -190,21 +184,14 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
   return e;
 }
 
-NP_DECL(int) np_open(const char *file, int flags, ...) {
+NP_DECL(int) np_open(const char *file, int flags, va_list args) {
 #ifdef _WIN32
   int mode = 0;
 #else
   mode_t mode = 0;
 #endif
   if (flags & O_CREAT) {
-    va_list args;
-    va_start(args, flags);
-#ifdef _WIN32
     mode = va_arg(args, int);
-#else
-    mode = va_arg(args, mode_t);
-#endif
-    va_end(args);
   }
 
   char absolute_path[PATH_MAX] = {};
@@ -272,13 +259,10 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
   return e;
 }
 
-NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, ...) {
+NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, va_list args) {
   int mode = 0;
   if (flags & O_CREAT) {
-    va_list args;
-    va_start(args, flags);
     mode = va_arg(args, int);
-    va_end(args);
   }
 
   char file[PATH_MAX] = {};
@@ -591,20 +575,12 @@ NP_DECL(int) np_fseeko64(void *e, int64_t offset, int origin) {
   return np_fseek_priv(e, offset, origin);
 }
 
-NP_DECL(int) np_fscanf(void *e, const char *format, ...) {
+NP_DECL(int) np_fscanf(void *e, const char *format, va_list args) {
   if (NP_FOREIGN_PTR) {
-    va_list args;
-    va_start(args, format);
-    int result = vfscanf(((FILE*)e), format, args);
-    va_end(args);
-    return result;
+    return vfscanf(((FILE*)e), format, args);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-    va_list args;
-    va_start(args, format);
-    int result = vfscanf(((EFILE*)e)->f, format, args);
-    va_end(args);
-    return result;
+    return vfscanf(((EFILE*)e)->f, format, args);
   }
   return 0;
 }
