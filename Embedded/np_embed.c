@@ -184,16 +184,11 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
   return e;
 }
 
-NP_DECL(int) np_open(const char *file, int flags, va_list args) {
 #ifdef _WIN32
-  int mode = 0;
+NP_DECL(int) np_open(const char *file, int flags, int mode)) {
 #else
-  mode_t mode = 0;
+NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
 #endif
-  if (flags & O_CREAT) {
-    mode = va_arg(args, int);
-  }
-
   char absolute_path[PATH_MAX] = {};
   np_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
@@ -259,12 +254,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
   return e;
 }
 
-NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, va_list args) {
-  int mode = 0;
-  if (flags & O_CREAT) {
-    mode = va_arg(args, int);
-  }
-
+NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
   char file[PATH_MAX] = {};
   wcstombs((char*)&file, wfile, PATH_MAX);
 
@@ -334,6 +324,18 @@ NP_DECL(int) np_close(int fd) {
   free(e);
   e = NULL;
   return 0;
+}
+
+NP_DECL(EFILE*) np_tmpfile() {
+  FILE* f = tmpfile();
+  if (f == NULL)
+    return NULL;
+
+  EFILE* e = (EFILE*)malloc(sizeof *e);
+  e->handle_type = EHANDLE_NATIVE;
+  e->f = f;
+
+  return e;
 }
 
 NP_DECL(bool) np_feof(void* e) {
@@ -434,7 +436,7 @@ NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset) {
   return count;
 }
 
-NP_DECL(int) np_fgetpos(void* e, epos_t* pos) {
+NP_DECL(int) np_fgetpos(void* e, fpos_t* pos) {
   if (NP_FOREIGN_PTR) {
     return fgetpos((FILE*)e, pos);
   }
@@ -448,7 +450,14 @@ NP_DECL(int) np_fgetpos(void* e, epos_t* pos) {
     return 1;
   }
 
-  *pos = (epos_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
+#ifdef __linux__
+  fpos_t temp = {};
+  temp.__pos = ((EFILE*)e)->end - ((EFILE*)e)->pos;
+  memcpy(pos, &temp, sizeof(fpos_t));
+#else
+  *pos = (fpos_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
+#endif
+
   return 0;
 
 }
@@ -575,12 +584,20 @@ NP_DECL(int) np_fseeko64(void *e, int64_t offset, int origin) {
   return np_fseek_priv(e, offset, origin);
 }
 
-NP_DECL(int) np_fscanf(void *e, const char *format, va_list args) {
+NP_DECL(int) np_fscanf(void *e, const char *format, ...) {
   if (NP_FOREIGN_PTR) {
-    return vfscanf(((FILE*)e), format, args);
+    va_list args;
+    va_start(args, format);
+    int result = vfscanf(((FILE*)e), format, args);
+    va_end(args);
+    return result;
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-    return vfscanf(((EFILE*)e)->f, format, args);
+    va_list args;
+    va_start(args, format);
+    int result = vfscanf(((EFILE*)e)->f, format, args);
+    va_end(args);
+    return result;
   }
   return 0;
 }
@@ -619,6 +636,15 @@ NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
     int result = vfprintf(((EFILE*)e)->f, format, args);
     va_end(args);
     return result;
+  }
+  return 0;
+}
+NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args) {
+  if (NP_FOREIGN_PTR) {
+    return vfprintf((FILE*)e, format, args);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return vfprintf(((EFILE*)e)->f, format, args);
   }
   return 0;
 }

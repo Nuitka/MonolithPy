@@ -11,6 +11,10 @@
 extern "C" {
 #endif
 
+#ifdef __linux
+# define _GNU_SOURCE
+#endif
+
 #ifdef FOPEN_MAX
 // This means that were were loaded too last so we can't intercept the necessary calls.
 // Don't even try in that case.
@@ -48,6 +52,7 @@ extern "C" {
 #define _wopen orig__wopen
 #define wfopen orig_wfopen
 #define _wfopen orig__wfopen
+#define tmpfile orig_tmpfile
 #define fgets orig_fgets
 #define _fgets orig__fgets
 #define getc orig_getc
@@ -102,9 +107,14 @@ extern "C" {
 #define flockfile orig_flockfile
 #define funlockfile orig_funlockfile
 #define ftrylockfile orig_ftrylockfile
+
+#define stdin orig_stdin
+#define stdout orig_stdout
+#define stderr orig_stderr
 #endif
-#include <fcntl.h>
+#define _BITS_STDIO_H
 #include <stdio.h>
+#include <fcntl.h>
 #ifdef _WIN32
     #include <windows.h>
     #define PATH_MAX MAX_PATH
@@ -130,6 +140,7 @@ extern "C" {
 #undef _wopen
 #undef wfopen
 #undef _wfopen
+#undef tmpfile
 #undef fgets
 #undef _fgets
 #undef getc
@@ -183,6 +194,9 @@ extern "C" {
 #undef flockfile
 #undef funlockfile
 #undef ftrylockfile
+#undef stdin
+#undef stdout
+#undef stderr
 
 #endif
 
@@ -194,7 +208,6 @@ extern "C" {
 #include <stdbool.h>
 #include <string.h>
 
-typedef fpos_t epos_t;
 
 struct EMAP_S {     // Map Indexing Struct
   uint32_t hash;
@@ -257,15 +270,14 @@ typedef struct EFILE_S EFILE;
 #endif
 
 NP_DECL(EFILE*) np_fopen(const char* file, const char* mode);
-NP_DECL(int) np_open(const char *pathname, int flags, va_list args
-    /* mode_t mode */ );
+NP_DECL(int) np_open(const char *pathname, int flags, mode_t mode);
 #ifdef _WIN32
 NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode);
-NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, va_list args
-        /* mode_t mode */ );
+NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, mode_t mode);
 #endif
 NP_DECL(int) np_fclose(void* e);
 NP_DECL(int) np_close(int fd);
+NP_DECL(EFILE*) np_tmpfile();
 NP_DECL(bool) np_feof(void* e);
 NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* stream);
 #ifdef _WIN32
@@ -274,7 +286,7 @@ NP_DECL(int) np_read(int fd, void *buf, unsigned int count);
 NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count);
 #endif
 NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset);
-NP_DECL(int) np_fgetpos(void* e, epos_t* pos);
+NP_DECL(int) np_fgetpos(void* e, fpos_t* pos);
 /* File Opening and Closing */
 NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, EFILE *stream);
 NP_DECL(EFILE*) np_fdopen(int fd, const char *mode);
@@ -282,13 +294,14 @@ NP_DECL(EFILE*) np_fdopen(int fd, const char *mode);
 /* File Input Functions */
 NP_DECL(int) np_fgetc(void *stream);
 NP_DECL(char*) np_fgets(char *str, int n, void *stream);
-NP_DECL(int) np_fscanf(void *stream, const char *format, va_list args);
+NP_DECL(int) np_fscanf(void *stream, const char *format, ...);
 NP_DECL(int) np_getc_unlocked(void *stream);  /* Unlocked version of egetc */
 
 /* File Output Functions */
 NP_DECL(int) np_fputc(int character, void *stream);
 NP_DECL(int) np_fputs(const char *str, void *stream);
 NP_DECL(int) np_fprintf(void *stream, const char *format, ... );
+NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args);
 NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *stream);
 
 /* File Buffering */
@@ -316,8 +329,97 @@ NP_DECL(void) np_funlockfile(void *e);
 NP_DECL(int) np_ftrylockfile(void *e);
 
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
+
+#define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
+#define PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
+
+#define IIF(c) PRIMITIVE_CAT(IIF_, c)
+#define IIF_0(t, ...) __VA_ARGS__
+#define IIF_1(t, ...) t
+
+#define COMPL(b) PRIMITIVE_CAT(COMPL_, b)
+#define COMPL_0 1
+#define COMPL_1 0
+
+#define INC(x) PRIMITIVE_CAT(INC_, x)
+#define INC_0 1
+#define INC_1 2
+#define INC_2 3
+#define INC_3 4
+#define INC_4 5
+#define INC_5 6
+#define INC_6 7
+#define INC_7 8
+#define INC_8 9
+#define INC_9 10
+#define INC_10 11
+#define INC_11 12
+#define INC_12 13
+#define INC_13 14
+#define INC_14 15
+#define INC_15 16
+#define INC_16 17
+#define INC_17 18
+#define INC_18 19
+#define INC_19 20
+
+#define DEC(x) PRIMITIVE_CAT(DEC_, x)
+#define DEC_0 0
+#define DEC_1 0
+#define DEC_2 1
+#define DEC_3 2
+#define DEC_4 3
+#define DEC_5 4
+#define DEC_6 5
+#define DEC_7 6
+#define DEC_8 7
+#define DEC_9 8
+#define DEC_10 9
+#define DEC_11 10
+#define DEC_12 11
+#define DEC_13 12
+#define DEC_14 13
+#define DEC_15 14
+#define DEC_16 15
+#define DEC_17 16
+#define DEC_18 17
+#define DEC_19 18
+#define DEC_20 19
+
+#define CHECK_N(x, n, ...) n
+#define CHECK(...) CHECK_N(__VA_ARGS__, 0,)
+#define PROBE(x) x, 1,
+
+#define IS_PAREN(x) CHECK(IS_PAREN_PROBE x)
+#define IS_PAREN_PROBE(...) PROBE(~)
+
+#define NOT(x) CHECK(PRIMITIVE_CAT(NOT_, x))
+#define NOT_0 PROBE(~)
+
+#define BOOL(x) COMPL(NOT(x))
+#define IF(c) IIF(BOOL(c))
+
+#define EAT(...)
+#define EXPAND(...) __VA_ARGS__
+#define WHEN(c) IF(c)(EXPAND, EAT)
+
+#define EMPTY()
+#define DEFER(id) id EMPTY()
+#define OBSTRUCT(...) __VA_ARGS__ DEFER(EMPTY)()
+#define EXPAND(...) __VA_ARGS__
+
+#define NUM_ARGS1(_20,_19,_18,_17,_16,_15,_14,_13,_12,_11,_10,_9,_8,_7,_6,_5,_4,_3,_2,_1, n, ...) n
+#define NUM_ARGS0(...) NUM_ARGS1(__VA_ARGS__,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define NUM_ARGS(...) IF(DEC(NUM_ARGS0(__VA_ARGS__)))(NUM_ARGS0(__VA_ARGS__),IF(IS_PAREN(__VA_ARGS__ ()))(0,1))
+
+
 // Preprocessor Translation
 #define FILE EFILE
+
+/* Standard streams.  */
+extern EFILE *stdin;		/* Standard input stream.  */
+extern EFILE *stdout;		/* Standard output stream.  */
+extern EFILE *stderr;		/* Standard error output stream.  */
 
 /* File Opening and Closing */
 ALWAYS_INLINE NP_DECL(EFILE*) fopen(const char* file, const char* mode) {
@@ -327,20 +429,50 @@ ALWAYS_INLINE NP_DECL(EFILE*) _fopen(const char* file, const char* mode) {
     return np_fopen(file, mode);
 }
 
-ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t mode */ ) {
-    va_list args;
-    va_start(args, flags);
-    int result = np_open(pathname, flags, args);
-    va_end(args);
-    return result;
+#ifdef _WIN32
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, int mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, int mode) {
+#endif
+#else
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode) {
+#endif
+#endif
+    return np_open(pathname, flags, mode);
 }
-ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, ... /* mode_t mode */ ) {
-    va_list args;
-    va_start(args, flags);
-    int result = np_open(pathname, flags, args);
-    va_end(args);
-    return result;
+#ifdef _WIN32
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, int mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, int mode) {
+#endif
+#else
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode) {
+#endif
+#endif
+  return np_open(pathname, flags, mode);
 }
+#ifndef __cplusplus
+// C does not support optional parameters so we are forced to rely on the mess below
+// because GCC does not support inlining vararg function. :(
+#define open0() open()
+#define open1(a) open(a)
+#define open2(a, b) open(a, b, 0)
+#define open3(a, b, c) open(a, b, c)
+#define open4(a, b, c, d) open(a, b, c, d)
+#define open5(a, b, c, d, e) open(a, b, c, d, e)
+#define open6(a, b, c, d, e, f) open(a, b, c, d, e, f)
+#define open7(a, b, c, d, e, f, g) open(a, b, c, d, e, f, g)
+#define open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#define _open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#endif
 
 ALWAYS_INLINE NP_DECL(EFILE*) fdopen(int fd, const char *mode) {
   return np_fdopen(fd, mode);
@@ -349,10 +481,10 @@ ALWAYS_INLINE NP_DECL(EFILE*) _fdopen(int fd, const char *mode) {
   return np_fdopen(fd, mode);
 }
 
-ALWAYS_INLINE NP_DECL(EFILE*) freopen(const char *filename, const char *mode, EFILE *stream) {
+ALWAYS_INLINE NP_DECL(EFILE*) freopen(const char *filename, const char *mode, void *stream) {
   return np_freopen(filename, mode, stream);
 }
-ALWAYS_INLINE NP_DECL(EFILE*) _freopen(const char *filename, const char *mode, EFILE *stream) {
+ALWAYS_INLINE NP_DECL(EFILE*) _freopen(const char *filename, const char *mode, void *stream) {
   return np_freopen(filename, mode, stream);
 }
 
@@ -371,20 +503,32 @@ ALWAYS_INLINE NP_DECL(int) _close(int fd) {
 }
 
 #ifdef _WIN32
-ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, ... /* mode_t mode */ ) {
-    va_list args;
-    va_start(args, flags);
-    int result = np_wopen(pathname, flags, args);
-    va_end(args);
-    return result;
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, int mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, int mode) {
+#endif
+  return np_wopen(pathname, flags, mode);
 }
-ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, ... /* mode_t mode */ ) {
-    va_list args;
-    va_start(args, flags);
-    int result = np_wopen(pathname, flags, args);
-    va_end(args);
-    return result;
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, int mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, int mode) {
+#endif
+  return np_wopen(pathname, flags, mode);
 }
+#ifndef __cplusplus
+#define wopen0() wopen()
+#define wopen1(a) wopen(a)
+#define wopen2(a, b) open(a, b, 0)
+#define wopen3(a, b, c) open(a, b, c)
+#define wopen4(a, b, c, d) wopen(a, b, c, d)
+#define wopen5(a, b, c, d, e) wopen(a, b, c, d, e)
+#define wopen6(a, b, c, d, e, f) wopen(a, b, c, d, e, f)
+#define wopen7(a, b, c, d, e, f, g) wopen(a, b, c, d, e, f, g)
+#define wopen(...) CAT( wopen, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#define _wopen(...) CAT( wopen, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#endif
 
 ALWAYS_INLINE NP_DECL(EFILE*) wfopen(const wchar_t* file, const wchar_t* mode) {
     return np_wfopen(file, mode);
@@ -394,38 +538,31 @@ ALWAYS_INLINE NP_DECL(EFILE*) _wfopen(const wchar_t* file, const wchar_t* mode) 
 }
 #endif
 
+ALWAYS_INLINE NP_DECL(EFILE*) tmpfile() {
+  return np_tmpfile();
+}
+
 /* File Input Functions */
-ALWAYS_INLINE NP_DECL(char*) fgets(char *str, int n, FILE *stream) {
+ALWAYS_INLINE NP_DECL(char*) fgets(char *str, int n, void *stream) {
     return np_fgets(str, n, stream);
 }
-ALWAYS_INLINE NP_DECL(char*) _fgets(char *str, int n, FILE *stream) {
+ALWAYS_INLINE NP_DECL(char*) _fgets(char *str, int n, void *stream) {
     return np_fgets(str, n, stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) getc(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) getc(void *stream) {
     return np_fgetc(stream);
 }
-ALWAYS_INLINE NP_DECL(int) fgetc(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) fgetc(void *stream) {
     return np_fgetc(stream);
 }
-ALWAYS_INLINE NP_DECL(int) _fgetc(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _fgetc(void *stream) {
     return np_fgetc(stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) fscanf(FILE *stream, const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    int result = np_fscanf(stream, format, args);
-    va_end(args);
-    return result;
-}
-ALWAYS_INLINE NP_DECL(int) _fscanf(FILE *stream, const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    int result = np_fscanf(stream, format, args);
-    va_end(args);
-    return result;
-}
+// Need to use a macro for this one due to varargs.
+#define fscanf np_fscanf
+#define _fscanf np_fscanf
 
 ALWAYS_INLINE NP_DECL(size_t) fread(void* ptr, size_t size, size_t count, FILE* stream) {
     return np_fread(ptr, size, count, stream);
@@ -453,88 +590,58 @@ ALWAYS_INLINE NP_DECL(ssize_t) _read(int fd, void *buf, size_t count) {
 ALWAYS_INLINE NP_DECL(ssize_t) pread(int fd, void *buf, size_t count, off_t offset) {
     return np_pread(fd, buf, count, offset);
 }
-ALWAYS_INLINE NP_DECL(int) getc_unlocked(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) getc_unlocked(void *stream) {
     return np_getc_unlocked(stream);
 }
 #endif
 
-ALWAYS_INLINE NP_DECL(int) ungetc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) ungetc(int character, void *stream) {
     return np_ungetc(character, stream);
 }
-ALWAYS_INLINE NP_DECL(int) _ungetc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _ungetc(int character, void *stream) {
     return np_ungetc(character, stream);
 }
 
 /* File Output Functions */
-ALWAYS_INLINE NP_DECL(int) putc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) putc(int character, void *stream) {
     return np_fputc(character, stream);
 }
-ALWAYS_INLINE NP_DECL(int) _putc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _putc(int character, void *stream) {
     return np_fputc(character, stream);
 }
-ALWAYS_INLINE NP_DECL(int) fputc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) fputc(int character, void *stream) {
     return np_fputc(character, stream);
 }
-ALWAYS_INLINE NP_DECL(int) _fputc(int character, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _fputc(int character, void *stream) {
     return np_fputc(character, stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) fputs(const char *str, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) fputs(const char *str, void *stream) {
     return np_fputs(str, stream);
 }
-ALWAYS_INLINE NP_DECL(int) _fputs(const char *str, FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _fputs(const char *str, void *stream) {
     return np_fputs(str, stream);
 }
 
+// Need to use a macro for this one due to varargs.
 #define fprintf np_fprintf
 #define _fprintf np_fprintf
-//ALWAYS_INLINE NP_DECL(int) fprintf(FILE *e, const char *format, ...) {
-//    if (NP_FOREIGN_PTR) {
-//        va_list args;
-//        va_start(args, format);
-//        int result = vfprintf((FILE*)e, format, args);
-//        va_end(args);
-//        return result;
-//    }
-//    if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-//        va_list args;
-//        va_start(args, format);
-//        int result = vfprintf(((EFILE*)e)->f, format, args);
-//        va_end(args);
-//        return result;
-//    }
-//    return 0;
-//}
-//ALWAYS_INLINE NP_DECL(int) _fprintf(FILE *e, const char *format, ...) {
-//    if (NP_FOREIGN_PTR) {
-//        va_list args;
-//        va_start(args, format);
-//        int result = vfprintf((FILE*)e, format, args);
-//        va_end(args);
-//        return result;
-//    }
-//    if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-//        va_list args;
-//        va_start(args, format);
-//        int result = vfprintf(((EFILE*)e)->f, format, args);
-//        va_end(args);
-//        return result;
-//    }
-//    return 0;
-//}
+#define vfprintf np_vfprintf
+#define _vfprintf np_vfprintf
 
-ALWAYS_INLINE NP_DECL(size_t) fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+
+ALWAYS_INLINE NP_DECL(size_t) fwrite(const void *ptr, size_t size, size_t count, void *stream) {
     return np_fwrite(ptr, size, count, stream);
 }
-ALWAYS_INLINE NP_DECL(size_t) _fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+ALWAYS_INLINE NP_DECL(size_t) _fwrite(const void *ptr, size_t size, size_t count, void *stream) {
     return np_fwrite(ptr, size, count, stream);
 }
 
 /* File Buffering */
-ALWAYS_INLINE NP_DECL(void) setbuf(FILE *stream, char *buffer) {
+ALWAYS_INLINE NP_DECL(void) setbuf(void *stream, char *buffer) {
     np_setbuf(stream, buffer);
 }
-ALWAYS_INLINE NP_DECL(void) _setbuf(FILE *stream, char *buffer) {
+ALWAYS_INLINE NP_DECL(void) _setbuf(void *stream, char *buffer) {
     np_setbuf(stream, buffer);
 }
 ALWAYS_INLINE NP_DECL(int) setvbuf(void *stream, char *buffer, int mode, size_t size) {
@@ -552,103 +659,103 @@ ALWAYS_INLINE NP_DECL(int) _fseek(void *stream, long int offset, int origin) {
     return np_fseek(stream, offset, origin);
 }
 
-ALWAYS_INLINE NP_DECL(long) ftell(FILE *stream) {
+ALWAYS_INLINE NP_DECL(long) ftell(void *stream) {
     return np_ftell(stream);
 }
-ALWAYS_INLINE NP_DECL(long) _ftell(FILE *stream) {
+ALWAYS_INLINE NP_DECL(long) _ftell(void *stream) {
     return np_ftell(stream);
 }
 #ifdef _WIN32
-ALWAYS_INLINE NP_DECL(int) _fseeki64(FILE *stream, int64_t offset, int origin) {
+ALWAYS_INLINE NP_DECL(int) _fseeki64(void *stream, int64_t offset, int origin) {
     return np_fseeko64(stream, offset, origin);
 }
-ALWAYS_INLINE NP_DECL(int64_t) _ftelli64(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int64_t) _ftelli64(void *stream) {
     return np_ftello64(stream);
 }
 #else
 #if defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64
-ALWAYS_INLINE NP_DECL(int) fseeko(FILE *stream, int64_t offset, int origin) {
+ALWAYS_INLINE NP_DECL(int) fseeko(void *stream, int64_t offset, int origin) {
     return np_fseeko64(stream, offset, origin);
 }
-ALWAYS_INLINE NP_DECL(int64_t) ftello(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int64_t) ftello(void *stream) {
     return np_ftello64(stream);
 }
 #else
-ALWAYS_INLINE NP_DECL(int) fseeko(FILE *stream, long int offset, int origin) {
+ALWAYS_INLINE NP_DECL(int) fseeko(void *stream, long int offset, int origin) {
     return np_fseek(stream, offset, origin);
 }
-ALWAYS_INLINE NP_DECL(long int) ftello(FILE *stream) {
+ALWAYS_INLINE NP_DECL(long int) ftello(void *stream) {
     return np_ftell(stream);
 }
 #endif
 #endif
 
-ALWAYS_INLINE NP_DECL(void) rewind(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) rewind(void *stream) {
     np_rewind(stream);
 }
-ALWAYS_INLINE NP_DECL(void) _rewind(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) _rewind(void *stream) {
     np_rewind(stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) fgetpos(FILE* e, fpos_t* pos) {
+ALWAYS_INLINE NP_DECL(int) fgetpos(void *e, fpos_t* pos) {
     return np_fgetpos(e, pos);
 }
-ALWAYS_INLINE NP_DECL(int) _fgetpos(FILE* e, fpos_t* pos) {
+ALWAYS_INLINE NP_DECL(int) _fgetpos(void *e, fpos_t* pos) {
     return np_fgetpos(e, pos);
 }
 
-ALWAYS_INLINE NP_DECL(int) fsetpos(FILE* e, fpos_t* pos) {
+ALWAYS_INLINE NP_DECL(int) fsetpos(void *e, fpos_t* pos) {
     return np_fsetpos(e, pos);
 }
-ALWAYS_INLINE NP_DECL(int) _fsetpos(FILE* e, fpos_t* pos) {
+ALWAYS_INLINE NP_DECL(int) _fsetpos(void *e, fpos_t* pos) {
     return np_fsetpos(e, pos);
 }
 
 /* Error Handling & Other Utilities */
-ALWAYS_INLINE NP_DECL(void) clearerr(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) clearerr(void *stream) {
     np_clearerr(stream);
 }
-ALWAYS_INLINE NP_DECL(void) _clearerr(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) _clearerr(void *stream) {
     np_clearerr(stream);
 }
 
-ALWAYS_INLINE NP_DECL(bool) feof(FILE* e) {
+ALWAYS_INLINE NP_DECL(bool) feof(void *e) {
     return np_feof(e);
 }
-ALWAYS_INLINE NP_DECL(bool) _feof(FILE* e) {
+ALWAYS_INLINE NP_DECL(bool) _feof(void *e) {
     return np_feof(e);
 }
 
-ALWAYS_INLINE NP_DECL(int) ferror(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) ferror(void *stream) {
     return np_ferror(stream);
 }
-ALWAYS_INLINE NP_DECL(int) _ferror(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _ferror(void *stream) {
     return np_ferror(stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) fileno(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) fileno(void *stream) {
     return np_fileno(stream);
 }
-ALWAYS_INLINE NP_DECL(int) _fileno(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _fileno(void *stream) {
     return np_fileno(stream);
 }
 
-ALWAYS_INLINE NP_DECL(int) fflush(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) fflush(void *stream) {
     return np_fflush(stream);
 }
-ALWAYS_INLINE NP_DECL(int) _fflush(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) _fflush(void *stream) {
     return np_fflush(stream);
 }
 
 #ifndef _WIN32
 /* Locking Functions */
-ALWAYS_INLINE NP_DECL(void) flockfile(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) flockfile(void *stream) {
     np_flockfile(stream);
 }
-ALWAYS_INLINE NP_DECL(void) funlockfile(FILE *stream) {
+ALWAYS_INLINE NP_DECL(void) funlockfile(void *stream) {
     np_funlockfile(stream);
 }
-ALWAYS_INLINE NP_DECL(int) ftrylockfile(FILE *stream) {
+ALWAYS_INLINE NP_DECL(int) ftrylockfile(void *stream) {
     return np_ftrylockfile(stream);
 }
 #endif

@@ -1911,14 +1911,14 @@ if test "$Py_LTO" = 'true' ; then
         AC_MSG_ERROR([thin lto is not supported under gcc compiler.])
       fi
       dnl flag to disable lto during linking
-      LDFLAGS_NOLTO="-fno-lto"
+      LDFLAGS_NOLTO=" "
       case $ac_sys_system in
         Darwin*)
           LTOFLAGS="-flto -Wl,-export_dynamic"
           LTOCFLAGS="-flto"
           ;;
         *)
-          LTOFLAGS="-flto -fuse-linker-plugin -ffat-lto-objects -flto-partition=none"
+          LTOFLAGS="-flto -fuse-linker-plugin -fno-fat-lto-objects"
           ;;
       esac
       ;;

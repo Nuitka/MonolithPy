@@ -8692,14 +8692,14 @@ printf "%s\n" "$as_me: llvm-ar found via xcrun: ${LLVM_AR}" >&6;}
       then
         as_fn_error $? "thin lto is not supported under gcc compiler." "$LINENO" 5
       fi
-            LDFLAGS_NOLTO="-fno-lto"
+            LDFLAGS_NOLTO=" "
       case $ac_sys_system in
         Darwin*)
           LTOFLAGS="-flto -Wl,-export_dynamic"
           LTOCFLAGS="-flto"
           ;;
         *)
-          LTOFLAGS="-flto -fuse-linker-plugin -ffat-lto-objects -flto-partition=none"
+          LTOFLAGS="-flto -fuse-linker-plugin -fno-fat-lto-objects"
           ;;
       esac
       ;;
@@ -31885,4 +31885,3 @@ Platform \"$host\" with compiler \"$ac_cv_cc_name\" is not supported by the
 CPython core team, see https://peps.python.org/pep-0011/ for more information.
 " >&2;}
 fi
-

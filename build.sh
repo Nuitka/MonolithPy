@@ -28,13 +28,42 @@ set -x
 # the python build process ends up running a find -delete that
 # happens to also delete all the static libraries that we built.
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
-export "CFLAGS=-I${PREFIX}/include -fPIC"
-export "CXXFLAGS=-I${PREFIX}/include -fPIC"
+export "PYTHON_BASE=$(pwd)"
+export "CFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CXXFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CPPFLAGS=-I${PREFIX}/include" 
-export "LDFLAGS=-L${PREFIX}/lib"
+export "LDFLAGS=-L${PREFIX}/lib -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
+
+# Allow to overload the compiler used via CC environment variable
+if [ "$CC" = "" ]
+then
+  CC=gcc
+  CXX=g++
+else
+  CXX=`echo "$CC" | sed -e 's#cc#++#'`
+fi
+
+export CC
+export CXX
+
+ELEVATE=
+if [ ! -w "$(dirname "$target")" ]
+then
+  export "ELEVATE=sudo \"CC=$CC\" \"CXX=$CXX\""
+  sudo echo
+fi
+
 mkdir -p ${PREFIX}/lib
+
+# Preparing embedded resources
+mkdir -p Embedded/embed_data/vfs/ssl
+curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
+python3 Lib/mkembed.py Embedded Embedded/embed_data
+$CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
+$CC -c -o Embedded/np_embed_data.o Embedded/np_embed_data.c
+ar rcs ${PREFIX}/lib/libnp_embed.a Embedded/np_embed.o Embedded/np_embed_data.o
 
 if [ ! -h ${PREFIX}/lib64 ]; then
   ln -s lib ${PREFIX}/lib64
@@ -48,8 +77,8 @@ curl https://ftp.gnu.org/gnu/ncurses/ncurses-6.4.tar.gz -o ncurses.tar.gz
 tar -xf ncurses.tar.gz
 cd ncurses-6.4
 ./configure --prefix=${PREFIX} --disable-shared --enable-termcap --enable-widec --enable-getcap
-make -j$(nproc --all)
-make install
+make libs -j$(nproc --all)
+make install.libs install.includes
 for header in ${PREFIX}/include/ncursesw/*; do
     ln -s ncursesw/$(basename $header) ${PREFIX}/include/;
 done
@@ -76,13 +105,19 @@ make install
 cd ..
 fi
 
-if [ ! -d openssl-3.1.4 ]; then
-curl https://www.openssl.org/source/openssl-3.1.4.tar.gz -o openssl.tar.gz
+if [ ! -d openssl-3.1.8 ]; then
+curl -L https://www.openssl.org/source/openssl-3.1.8.tar.gz -o openssl.tar.gz
 tar -xf openssl.tar.gz
-cd openssl-3.1.4
+cd openssl-3.1.8
+export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests
-make depend all -j$(nproc --all)
-make install
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
+else
+    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+fi
+make install_dev -j$(nproc --all)
+unset CPPINCLUDES
 cd ..
 fi
 
@@ -351,7 +386,6 @@ cd ..
 long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
 short_version=$(echo $long_version | sed -e 's#\.##')
 
-# Have this as a standard path. We are not yet relocatable, but that will come hopefully.
 target=/opt/nuitka-python${short_version}
 
 if [ ! -z "$1" ]
@@ -359,36 +393,19 @@ then
   target="$1"
 fi
 
-# Allow to overload the compiler used via CC environment variable
-if [ "$CC" = "" ]
-then
-  CC=gcc
-  CXX=g++
-else
-  CXX=`echo "$CC" | sed -e 's#cc#++#'`
-fi
-
-export CC
-export CXX
-
-ELEVATE=
-if [ ! -w "$(dirname "$target")" ]
-then
-  export "ELEVATE=sudo \"CC=$CC\" \"CXX=$CXX\""
-  sudo echo
-fi
-
 # The UCS4 has best compatibility with wheels on PyPI it seems.
 ./configure "--prefix=$target" --disable-shared --enable-ipv6 --enable-unicode=ucs4 \
   --enable-optimizations --with-lto --with-computed-gotos --with-fpectl --without-readline \
-  --with-system-expat --with-system-libmpdec
+  --with-system-expat --with-system-libmpdec \
   CC="$CC" \
   CXX="$CXX" \
   CFLAGS="-g $CFLAGS" \
   LDFLAGS="-g -Xlinker -export-dynamic -rdynamic -Bsymbolic-functions -Wl,-z,relro -Wl,-allow-multiple-definition $LDFLAGS" \
-  LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a"
+  LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a -l:libnp_embed.a" \
+  ax_cv_c_float_words_bigendian=no \
+  ___ORIG_DEPS_PREFIX=${PREFIX}___
 
-make -j 32 \
+make -j $(nproc --all) \
         EXTRA_CFLAGS="-flto -fuse-linker-plugin -fno-fat-lto-objects" \
         profile-opt
 
@@ -431,4 +448,3 @@ $ELEVATE ln -s base "$target/dependency_libs/zlib"
 
 
 $ELEVATE "$target/bin/python${long_version}" -m rebuildpython
-$ELEVATE "$target/bin/python${long_version}" -m pip install cffi
