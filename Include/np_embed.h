@@ -108,11 +108,15 @@ extern "C" {
 #define funlockfile orig_funlockfile
 #define ftrylockfile orig_ftrylockfile
 
+#ifdef __linux
 #define stdin orig_stdin
 #define stdout orig_stdout
 #define stderr orig_stderr
 #endif
+#endif
+#ifdef __linux
 #define _BITS_STDIO_H
+#endif
 #include <stdio.h>
 #include <fcntl.h>
 #ifdef _WIN32
@@ -194,9 +198,11 @@ extern "C" {
 #undef flockfile
 #undef funlockfile
 #undef ftrylockfile
+#ifdef __linux
 #undef stdin
 #undef stdout
 #undef stderr
+#endif
 
 #endif
 
@@ -270,10 +276,12 @@ typedef struct EFILE_S EFILE;
 #endif
 
 NP_DECL(EFILE*) np_fopen(const char* file, const char* mode);
-NP_DECL(int) np_open(const char *pathname, int flags, mode_t mode);
 #ifdef _WIN32
+NP_DECL(int) np_open(const char *pathname, int flags, int mode);
 NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode);
-NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, mode_t mode);
+NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, int mode);
+#else
+NP_DECL(int) np_open(const char *pathname, int flags, mode_t mode);
 #endif
 NP_DECL(int) np_fclose(void* e);
 NP_DECL(int) np_close(int fd);
@@ -416,10 +424,12 @@ NP_DECL(int) np_ftrylockfile(void *e);
 // Preprocessor Translation
 #define FILE EFILE
 
+#ifdef __linux
 /* Standard streams.  */
 extern EFILE *stdin;		/* Standard input stream.  */
 extern EFILE *stdout;		/* Standard output stream.  */
 extern EFILE *stderr;		/* Standard error output stream.  */
+#endif
 
 /* File Opening and Closing */
 ALWAYS_INLINE NP_DECL(EFILE*) fopen(const char* file, const char* mode) {
