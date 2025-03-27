@@ -473,7 +473,11 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode) {
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t mode */ ) {
     va_list args;
     va_start(args, flags);
+#ifdef _WIN32
+    int mode = 0;
+#else
     mode_t mode = 0;
+#endif
     if (flags & O_CREAT) {
         mode = va_arg(args, int);
     }
@@ -483,7 +487,11 @@ ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t m
 ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, ... /* mode_t mode */ ) {
     va_list args;
     va_start(args, flags);
+#ifdef _WIN32
+    int mode = 0;
+#else
     mode_t mode = 0;
+#endif
     if (flags & O_CREAT) {
         mode = va_arg(args, int);
     }
@@ -521,32 +529,26 @@ ALWAYS_INLINE NP_DECL(int) _close(int fd) {
 }
 
 #ifdef _WIN32
-#ifdef __cplusplus
-ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, int mode = 0) {
-#else
-ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, int mode) {
-#endif
-  return np_wopen(pathname, flags, mode);
+ALWAYS_INLINE NP_DECL(int) wopen(const wchar_t *pathname, int flags, ... /* int mode */ ) {
+    va_list args;
+    va_start(args, flags);
+    int mode = 0;
+    if (flags & O_CREAT) {
+        mode = va_arg(args, int);
+    }
+    va_end(args);
+    return np_wopen(pathname, flags, mode);
 }
-#ifdef __cplusplus
-ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, int mode = 0) {
-#else
-ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, int mode) {
-#endif
-  return np_wopen(pathname, flags, mode);
+ALWAYS_INLINE NP_DECL(int) _wopen(const wchar_t *pathname, int flags, ... /* int mode */ ) {
+    va_list args;
+    va_start(args, flags);
+    int mode = 0;
+    if (flags & O_CREAT) {
+        mode = va_arg(args, int);
+    }
+    va_end(args);
+    return np_wopen(pathname, flags, mode);
 }
-#ifndef __cplusplus
-#define wopen0() wopen()
-#define wopen1(a) wopen(a)
-#define wopen2(a, b) open(a, b, 0)
-#define wopen3(a, b, c) open(a, b, c)
-#define wopen4(a, b, c, d) wopen(a, b, c, d)
-#define wopen5(a, b, c, d, e) wopen(a, b, c, d, e)
-#define wopen6(a, b, c, d, e, f) wopen(a, b, c, d, e, f)
-#define wopen7(a, b, c, d, e, f, g) wopen(a, b, c, d, e, f, g)
-#define wopen(...) CAT( wopen, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
-#define _wopen(...) CAT( wopen, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
-#endif
 
 ALWAYS_INLINE NP_DECL(EFILE*) wfopen(const wchar_t* file, const wchar_t* mode) {
     return np_wfopen(file, mode);

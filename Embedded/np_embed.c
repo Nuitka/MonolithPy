@@ -185,7 +185,7 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
 }
 
 #ifdef _WIN32
-NP_DECL(int) np_open(const char *file, int flags, int mode)) {
+NP_DECL(int) np_open(const char *file, int flags, int mode) {
 #else
 NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
 #endif
