@@ -19,13 +19,13 @@ jobs:
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
-      run: bash build.mac.sh "${{ github.workspace }}/../Nuitka-Python-Out"
+      run: bash build.mac.sh "${{ github.workspace }}/Nuitka-Python-Out"
     - name: Cleanup artifact
-      run: find "${{ github.workspace }}/../Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_arm64
-        path: ${{ github.workspace }}/../Nuitka-Python-Out
+        path: ${{ github.workspace }}/Nuitka-Python-Out
   mac_x64:
     name: MacOS Intel Build
     runs-on: macos-latest
@@ -35,19 +35,19 @@ jobs:
     - uses: actions/cache@v4
       with:
         path: |
-          ${{ github.workspace }}/../Nuitka-Python-Deps
+          ${{ github.workspace }}/Nuitka-Python-Deps
           dep-build
         key: ${{ runner.os }}-intel-${{ hashFiles('build.mac.sh') }}
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
-      run: arch -x86_64 bash build.mac.sh "${{ github.workspace }}/../Nuitka-Python-Out"
+      run: arch -x86_64 bash build.mac.sh "${{ github.workspace }}/Nuitka-Python-Out"
     - name: Cleanup artifact
-      run: find "${{ github.workspace }}/../Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_x86_64
-        path: ${{ github.workspace }}/../Nuitka-Python-Out
+        path: ${{ github.workspace }}/Nuitka-Python-Out
 
   linux:
     name: Ubuntu Build
