@@ -115,6 +115,8 @@ extern "C" {
 #endif
 #endif
 #ifdef __linux
+#include <features.h>
+#undef __USE_EXTERN_INLINES
 #define _BITS_STDIO_H
 #endif
 #include <stdio.h>
