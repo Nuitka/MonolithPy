@@ -62,13 +62,13 @@ jobs:
             dep-build
           key: ${{ runner.os }}-${{ hashFiles('build.sh') }}
       - name: Run Build
-        run: bash build.sh "${{ github.workspace }}/../Nuitka-Python-Out"
+        run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
       - name: Cleanup artifact
-        run: find "${{ github.workspace }}/../Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+        run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
       - uses: actions/upload-artifact@v4
         with:
           name: Nuitka-Python311_ubuntu
-          path: ${{ github.workspace }}/../Nuitka-Python-Out
+          path: ${{ github.workspace }}/Nuitka-Python-Out
 
   windows:
     name: Windows Build
