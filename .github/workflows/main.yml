@@ -60,7 +60,7 @@ jobs:
           path: |
             ${{ github.workspace }}/../Nuitka-Python-Deps
             dep-build
-          key: ${{ runner.os }}-arm-${{ hashFiles('build.mac.sh') }}
+          key: ${{ runner.os }}-arm-no_lto-${{ hashFiles('build.mac.sh') }}
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
       - name: Run Build
@@ -82,7 +82,7 @@ jobs:
           path: |
             ${{ github.workspace }}/Nuitka-Python-Deps
             dep-build
-          key: ${{ runner.os }}-intel-${{ hashFiles('build.mac.sh') }}
+          key: ${{ runner.os }}-intel-no_lto-${{ hashFiles('build.mac.sh') }}
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
       - name: Run Build
