@@ -340,7 +340,7 @@ NP_DECL(int) np_ftrylockfile(void *e);
 
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
 #define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
 #define PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
 
@@ -422,7 +422,7 @@ NP_DECL(int) np_ftrylockfile(void *e);
 #define NUM_ARGS1(_20,_19,_18,_17,_16,_15,_14,_13,_12,_11,_10,_9,_8,_7,_6,_5,_4,_3,_2,_1, n, ...) n
 #define NUM_ARGS0(...) NUM_ARGS1(__VA_ARGS__,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
 #define NUM_ARGS(...) IF(DEC(NUM_ARGS0(__VA_ARGS__)))(NUM_ARGS0(__VA_ARGS__),IF(IS_PAREN(__VA_ARGS__ ()))(0,1))
-#endif  // __GNUC__
+#endif  // GCC only
 
 // Preprocessor Translation
 #define FILE EFILE
@@ -442,7 +442,7 @@ ALWAYS_INLINE NP_DECL(EFILE*) _fopen(const char* file, const char* mode) {
     return np_fopen(file, mode);
 }
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
 #ifdef __cplusplus
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode = 0) {
 #else
@@ -471,7 +471,7 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode) {
 #define open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 #define _open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 #endif  // !__cplusplus
-#else  // __GNUC__
+#else  // GCC only
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t mode */ ) {
     va_list args;
     va_start(args, flags);
@@ -500,7 +500,7 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, ... /* mode_t 
     va_end(args);
     return np_open(pathname, flags, mode);
 }
-#endif  // !__GNUC__
+#endif  // !GCC
 
 ALWAYS_INLINE NP_DECL(EFILE*) fdopen(int fd, const char *mode) {
   return np_fdopen(fd, mode);
