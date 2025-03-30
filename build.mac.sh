@@ -13,15 +13,23 @@ fi
 
 echo Building for architecture $arch
 
+export "LTO_OPTS=-flto=thin"
+export "LTO=1"
+if [[ $1 == "--no-lto" ]]; then
+    export "LTO_OPTS="
+    export "LTO=0"
+    shift
+fi
+
 # The dependencies must be outside of the build folder because
 # the python build process ends up running a find -delete that
 # happens to also delete all the static libraries that we built.
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
-export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto=thin"
-export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC -flto=thin"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib -flto=thin"
+export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
+export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC ${LTO_OPTS}"
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib ${LTO_OPTS}"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -35,6 +43,14 @@ fi
 
 export CC
 export CXX
+
+# Have this as a standard path. We are not yet relocatable, but that will come hopefully.
+target=~/Library/Nuitka-Python${short_version}-$arch
+
+if [ ! -z "$1" ]
+then
+  target="$1"
+fi
 
 ELEVATE=
 if [ ! -w "$(dirname "$target")" ]
@@ -256,25 +272,21 @@ cd ..
 long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
 short_version=$(echo $long_version | sed -e 's#\.##')
 
-# Have this as a standard path. We are not yet relocatable, but that will come hopefully.
-target=~/Library/Nuitka-Python${short_version}-$arch
-
-if [ ! -z "$1" ]
-then
-  target="$1"
-fi
-
 cp Modules/Setup.macos Modules/Setup
 
 export "LDFLAGS=-L${PREFIX}/lib"
 
+if [[ "$LTO" == "1" ]]; then
+    LTO_BUILD_OPT=--with-lto
+fi
+
 ./configure "--prefix=$target" --disable-shared --enable-ipv6 --enable-unicode=ucs4 \
-  --enable-optimizations --with-lto --with-computed-gotos --with-fpectl --without-readline \
+  --enable-optimizations $LTO_BUILD_OPT --with-computed-gotos --with-fpectl --without-readline \
   --with-system-expat --with-system-libmpdec \
   CC="$CC" \
   CXX="$CXX" \
   CFLAGS="-g $CFLAGS" \
-  LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS -flto=thin" \
+  LDFLAGS="-arch $arch -g -Xlinker $LDFLAGS ${LTO_OPTS}" \
   LIBS="-lffi -lbz2 -lsqlite3 -llzma -lnp_embed -lssl -lcrypto " \
   ax_cv_c_float_words_bigendian=no \
   ___ORIG_DEPS_PREFIX=${PREFIX}___
