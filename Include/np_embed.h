@@ -298,7 +298,7 @@ NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count);
 NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset);
 NP_DECL(int) np_fgetpos(void* e, fpos_t* pos);
 /* File Opening and Closing */
-NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, EFILE *stream);
+NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *stream);
 NP_DECL(EFILE*) np_fdopen(int fd, const char *mode);
 
 /* File Input Functions */

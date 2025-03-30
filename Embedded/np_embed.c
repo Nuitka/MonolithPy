@@ -326,6 +326,17 @@ NP_DECL(int) np_close(int fd) {
   return 0;
 }
 
+NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *stream) {
+  if (NP_FOREIGN_PTR) {
+    return freopen(filename, mode, (FILE*)stream);
+  }
+  if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
+    return freopen(filename, mode, ((EFILE*)stream)->f);
+  }
+
+  return NULL;
+}
+
 NP_DECL(EFILE*) np_tmpfile() {
   FILE* f = tmpfile();
   if (f == NULL)
