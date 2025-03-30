@@ -326,12 +326,12 @@ NP_DECL(int) np_close(int fd) {
   return 0;
 }
 
-NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *stream) {
+NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *e) {
   if (NP_FOREIGN_PTR) {
-    return freopen(filename, mode, (FILE*)stream);
+    return freopen(filename, mode, (FILE*)e);
   }
   if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
-    return freopen(filename, mode, ((EFILE*)stream)->f);
+    return freopen(filename, mode, ((EFILE*)e)->f);
   }
 
   return NULL;
