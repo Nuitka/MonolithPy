@@ -127,9 +127,9 @@ cd ..
 fi
 
 if [ ! -d bzip2-1.0.8 ]; then
-curl -L https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz -o bzip2.tar.gz
+curl -L https://gitlab.com/bzip2/bzip2/-/archive/bzip2-1.0.8/bzip2-bzip2-1.0.8.tar.gz -o bzip2.tar.gz
 tar -xf bzip2.tar.gz
-cd bzip2-1.0.8
+cd bzip2-bzip2-1.0.8
 make install "PREFIX=$PREFIX" -j$(sysctl -n hw.ncpu)
 cd ..
 fi
