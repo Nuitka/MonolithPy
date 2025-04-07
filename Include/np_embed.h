@@ -6,7 +6,7 @@
 #ifndef NUITKAEMBED
 #define NUITKAEMBED
 
-#ifndef __ASSEMBLER__
+#if !defined(__ASSEMBLER__) && !defined(BYPASS_NP_EMBED)
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,12 +16,13 @@ extern "C" {
 #endif
 
 #ifdef FOPEN_MAX
-// This means that were were loaded too last so we can't intercept the necessary calls.
+// This means that we were loaded too late so we can't intercept the necessary calls.
 // Don't even try in that case.
 #define NP_STDIO_ALREADY_LOADED
 #include <fcntl.h>
 #ifdef _WIN32
-    #include <windows.h>
+    #include <wchar.h>
+    #include <BaseTsd.h>
     #define PATH_MAX MAX_PATH
     typedef SSIZE_T ssize_t;
 #else
@@ -33,7 +34,6 @@ extern "C" {
 
 #ifdef _WIN32
 #define _CRTIMP
-#include <WinSock2.h>
 #endif
 #ifndef NUITKAPYTHON_EMBED_BUILD
 #define open orig_open
@@ -122,7 +122,8 @@ extern "C" {
 #include <stdio.h>
 #include <fcntl.h>
 #ifdef _WIN32
-    #include <windows.h>
+    #include <wchar.h>
+    #include <BaseTsd.h>
     #define PATH_MAX MAX_PATH
     typedef SSIZE_T ssize_t;
 #else

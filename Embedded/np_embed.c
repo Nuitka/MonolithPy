@@ -1,6 +1,9 @@
 #define NUITKAPYTHON_EMBED_BUILD
 #define _FILE_OFFSET_BITS 64
 #include "np_embed.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <ctype.h>
 #include <stdarg.h>
 
