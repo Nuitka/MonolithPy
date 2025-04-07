@@ -30,7 +30,7 @@ def getPackageUrl(section, name):
             section += "/np{0}{1}-macos".format(sys.version_info.major, sys.version_info.minor)
 
     return "{PACKAGE_BASE_URL}/{section}/{name}".format(
-        PACKAGE_BASE_URL=PACKAGE_BASE_URL, section=section, name=name
+        PACKAGE_BASE_URL=PACKAGE_BASE_URL, section=section, name=name.lower()
     )
 
 
