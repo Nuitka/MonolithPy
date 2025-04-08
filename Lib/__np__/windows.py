@@ -184,3 +184,24 @@ def rename_symbols_in_wheel_file(wheel, filename, prefix, protected_symbols = []
         rename_symbols_in_file(os.path.join(tmpdir, filename), prefix, protected_symbols)
         with WheelFile(wheel, 'a') as wf:
             wf.write(os.path.join(tmpdir, filename), filename)
+
+
+import os
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+    _GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
+    _GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    _GetShortPathNameW.restype = wintypes.DWORD
+
+def get_short_path(path):
+    output_buf_size = 0
+    while True:
+        output_buf = ctypes.create_unicode_buffer(output_buf_size)
+        needed = _GetShortPathNameW(path, output_buf, output_buf_size)
+        if needed == 0:
+            raise ctypes.WinError()
+        if output_buf_size >= needed:
+            return output_buf.value
+        else:
+            output_buf_size = needed

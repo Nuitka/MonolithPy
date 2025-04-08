@@ -131,16 +131,31 @@ class NoSuchURL(Exception):
     pass
 
 
-def copytree(src, dst, symlinks=False, ignore=None, executable=False):
+def copytree(src, dst, symlinks=False, ignore_errors=None, executable=False):
     if not os.path.exists(dst):
         os.makedirs(dst)
     for item in os.listdir(src):
         s = os.path.join(src, item)
+        if os.name == "nt":
+            from __np__.windows import get_short_path
+            try:
+                s = get_short_path(os.path.dirname(s))
+            except:
+                pass
         d = os.path.join(dst, item)
+        if os.name == "nt":
+            try:
+                d = get_short_path(os.path.dirname(d))
+            except:
+                pass
         if os.path.isdir(s):
-            copytree(s, d, symlinks, ignore)
+            copytree(s, d, symlinks, ignore_errors)
         else:
-            shutil.copy2(s, d)
+            try:
+                shutil.copy2(s, d)
+            except:
+                if not ignore_errors:
+                    raise
             if executable:
                 os.chmod(d, 509)  # 775
 
@@ -281,6 +296,7 @@ def run_with_output(*args, **kwargs):
 def install_files(dst, *files, **kwargs):
     base_dir = kwargs.pop("base_dir", None)
     executable = kwargs.pop("executable", None)
+    ignore_errors = kwargs.pop("ignore_errors", None)
     assert not kwargs
 
     if not os.path.isdir(dst):
@@ -294,7 +310,7 @@ def install_files(dst, *files, **kwargs):
             if not os.path.exists(os.path.dirname(file_dst)):
                 os.makedirs(os.path.dirname(file_dst))
             if os.path.isdir(file):
-                copytree(file, os.path.join(dst, destination_filename), executable=executable)
+                copytree(file, os.path.join(dst, destination_filename), executable=executable, ignore_errors=ignore_errors)
             else:
                 shutil.copy(file, os.path.join(dst, destination_filename))
                 if executable:
@@ -323,10 +339,11 @@ def install_dep_libs(dependency_name, *files, **kwargs):
 
 def install_build_tool(tool_name, *files, **kwargs):
     base_dir = kwargs.pop("base_dir", None)
+    ignore_errors = kwargs.pop("ignore_errors", None)
     assert not kwargs
 
     dependency_location = os.path.join(getToolsInstallDir(), tool_name)
-    install_files(dependency_location, *files, base_dir=base_dir, executable=True)
+    install_files(dependency_location, *files, base_dir=base_dir, executable=True, ignore_errors=ignore_errors)
 
 
 def find_build_tool_exe(tool_name, exe):
