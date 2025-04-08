@@ -35,6 +35,8 @@ def getPackageUrl(section, name):
 
 
 def getPackageJson(section, name):
+    if name is None:
+        raise __np__.NoSuchURL("")
     package_dir_url = getPackageUrl(section, name)
     with __np__.TemporaryDirectory() as temp_dir:
         data_filename = __np__.download_file(
