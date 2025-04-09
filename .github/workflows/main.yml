@@ -183,7 +183,7 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.sh') }}.zip"
+          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           rm -rf ${file_name}
           zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build

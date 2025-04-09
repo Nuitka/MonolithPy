@@ -139,13 +139,13 @@ def copytree(src, dst, symlinks=False, ignore_errors=None, executable=False):
         if os.name == "nt":
             from __np__.windows import get_short_path
             try:
-                s = get_short_path(os.path.dirname(s))
+                s = os.path.join(get_short_path(os.path.dirname(s)), os.path.basename(s))
             except:
                 pass
         d = os.path.join(dst, item)
         if os.name == "nt":
             try:
-                d = get_short_path(os.path.dirname(d))
+                d = os.path.join(get_short_path(os.path.dirname(d)), os.path.basename(d))
             except:
                 pass
         if os.path.isdir(s):
