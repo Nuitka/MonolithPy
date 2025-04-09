@@ -10,12 +10,16 @@ jobs:
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ${{ github.workspace }}/../Nuitka-Python-Deps
-          dep-build
-        key: ${{ runner.os }}-arm-${{ hashFiles('build.mac.sh') }}
+    - name: Download cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        curl -L "$file_url" -o "$file_name" || exit 0
+        unzip -q "$file_name" || exit 0
+        rm ${file_name} || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
@@ -26,18 +30,33 @@ jobs:
       with:
         name: Nuitka-Python311_mac_arm64
         path: ${{ github.workspace }}/Nuitka-Python-Out
+    - name: Store cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        rm -rf ${file_name}
+        zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+        rm -rf ${file_name}
   mac_x64:
     name: MacOS Intel Build
     runs-on: macos-latest
     steps:
     - name: Check out repository code
       uses: actions/checkout@v4
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ${{ github.workspace }}/Nuitka-Python-Deps
-          dep-build
-        key: ${{ runner.os }}-intel-${{ hashFiles('build.mac.sh') }}
+    - name: Download cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        curl -L "$file_url" -o "$file_name" || exit 0
+        unzip -q "$file_name" || exit 0
+        rm ${file_name} || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
@@ -48,6 +67,17 @@ jobs:
       with:
         name: Nuitka-Python311_mac_x86_64
         path: ${{ github.workspace }}/Nuitka-Python-Out
+    - name: Store cache
+      env:
+        CACHE_SAS: ${{ secrets.CACHE_SAS }}
+      run: |
+        cd ..
+        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+        rm -rf ${file_name}
+        zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+        rm -rf ${file_name}
 
   mac_arm_no_lto:
     name: MacOS ARM Build No LTO
@@ -55,12 +85,16 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/../Nuitka-Python-Deps
-            dep-build
-          key: ${{ runner.os }}-arm-no_lto-${{ hashFiles('build.mac.sh') }}
+      - name: Download cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          curl -L "$file_url" -o "$file_name" || exit 0
+          unzip -q "$file_name" || exit 0
+          rm ${file_name} || exit 0
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
       - name: Run Build
@@ -71,18 +105,33 @@ jobs:
         with:
           name: Nuitka-Python311_mac_arm64_No_LTO
           path: ${{ github.workspace }}/Nuitka-Python-Out
+      - name: Store cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          rm -rf ${file_name}
+          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+          rm -rf ${file_name}
   mac_x64_no_lto:
     name: MacOS Intel Build No LTO
     runs-on: macos-latest
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/Nuitka-Python-Deps
-            dep-build
-          key: ${{ runner.os }}-intel-no_lto-${{ hashFiles('build.mac.sh') }}
+      - name: Download cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          curl -L "$file_url" -o "$file_name" || exit 0
+          unzip -q "$file_name" || exit 0
+          rm ${file_name} || exit 0
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
       - name: Run Build
@@ -93,6 +142,17 @@ jobs:
         with:
           name: Nuitka-Python311_mac_x86_64_No_LTO
           path: ${{ github.workspace }}/Nuitka-Python-Out
+      - name: Store cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          rm -rf ${file_name}
+          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+          rm -rf ${file_name}
 
   linux:
     name: Ubuntu Build
@@ -100,12 +160,16 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ${{ github.workspace }}/../Nuitka-Python-Deps
-            dep-build
-          key: ${{ runner.os }}-${{ hashFiles('build.sh') }}
+      - name: Download cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          curl -L "$file_url" -o "$file_name" || exit 0
+          unzip -q "$file_name" || exit 0
+          rm ${file_name} || exit 0
       - name: Run Build
         run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
       - name: Cleanup artifact
@@ -114,6 +178,17 @@ jobs:
         with:
           name: Nuitka-Python311_ubuntu
           path: ${{ github.workspace }}/Nuitka-Python-Out
+      - name: Store cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.sh') }}.zip"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          rm -rf ${file_name}
+          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+          rm -rf ${file_name}
 
   windows:
     name: Windows Build
