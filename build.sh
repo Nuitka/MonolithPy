@@ -131,7 +131,7 @@ unset CPPINCLUDES
 cd ..
 fi
 
-if [ ! -d bzip2-1.0.8 ]; then
+if [ ! -d bzip2-bzip2-1.0.8 ]; then
 download_file https://gitlab.com/bzip2/bzip2/-/archive/bzip2-1.0.8/bzip2-bzip2-1.0.8.tar.gz bzip2.tar.gz
 tar -xf bzip2.tar.gz
 cd bzip2-bzip2-1.0.8
