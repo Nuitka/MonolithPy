@@ -15,10 +15,10 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         curl -L "$file_url" -o "$file_name" || exit 0
-        unzip -q "$file_name" || exit 0
+        tar -xf "$file_name" || exit 0
         rm ${file_name} || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
@@ -35,10 +35,10 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         rm -rf ${file_name}
-        zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
         curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
         rm -rf ${file_name}
   mac_x64:
@@ -52,10 +52,10 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         curl -L "$file_url" -o "$file_name" || exit 0
-        unzip -q "$file_name" || exit 0
+        tar -xf "$file_name" || exit 0
         rm ${file_name} || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
@@ -72,10 +72,10 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.zip"
+        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         rm -rf ${file_name}
-        zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+        tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
         curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
         rm -rf ${file_name}
 
@@ -90,10 +90,10 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           curl -L "$file_url" -o "$file_name" || exit 0
-          unzip -q "$file_name" || exit 0
+          tar -xf "$file_name" || exit 0
           rm ${file_name} || exit 0
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
@@ -110,10 +110,10 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           rm -rf ${file_name}
-          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+          tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
           curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
           rm -rf ${file_name}
   mac_x64_no_lto:
@@ -127,10 +127,10 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
+          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           curl -L "$file_url" -o "$file_name" || exit 0
-          unzip -q "$file_name" || exit 0
+          tar -xf "$file_name" || exit 0
           rm ${file_name} || exit 0
       - name: Uninstall homebrew
         run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
@@ -150,7 +150,7 @@ jobs:
           export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           rm -rf ${file_name}
-          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+          tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
           curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
           rm -rf ${file_name}
 
