@@ -249,6 +249,9 @@ def main():
             print("Overriding CXX variable to Nuitka-Python used '%s' ..." % cxx_config_var)
         os.environ["CXX"] = cxx_config_var
 
+    if platform.system() == "Darwin":
+        os.environ["MACOSX_DEPLOYMENT_TARGET"] = "10.9"
+
     import site
 
     for path in site.getsitepackages():
