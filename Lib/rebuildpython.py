@@ -195,8 +195,6 @@ def run_rebuild():
                 if "site-packages" in relativePath:
                     continue
                 dirpath, filename = os.path.split(relativePath)
-                if platform.system() != "Windows" and filename.startswith("lib"):
-                    filename = filename[3:]
                 if filename.endswith(".a.a"):
                     filename = filename[:-2]
                 if ext_suffix and filename.endswith(ext_suffix):
@@ -205,6 +203,8 @@ def run_rebuild():
                     filename = filename[:-2]
                 if filename.endswith(".lib"):
                     filename = filename[:-4]
+                if platform.system() != "Windows" and filename.startswith("lib") and len(filename) > 5:
+                    filename = filename[3:]
                 relative_path = filename
                 if dirpath:
                     relative_path = dirpath.replace("\\", ".").replace("/", ".") + "." + relative_path
