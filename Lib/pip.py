@@ -252,6 +252,10 @@ def main():
     if platform.system() == "Darwin":
         os.environ["MACOSX_DEPLOYMENT_TARGET"] = "10.9"
 
+    # pkg-config uses absolute paths, which do not allow for
+    if platform.system() != "Windows":
+        os.environ["PKG_CONFIG"] = "/disabled"
+
     import site
 
     for path in site.getsitepackages():

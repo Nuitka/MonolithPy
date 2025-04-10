@@ -25,7 +25,7 @@ jobs:
     - name: Run Build
       run: bash build.mac.sh "${{ github.workspace }}/Nuitka-Python-Out"
     - name: Cleanup artifact
-      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_arm64
