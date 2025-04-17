@@ -4,8 +4,20 @@ on:
     - 3.11
 
 jobs:
-  mac_arm:
-    name: MacOS ARM Build
+  mac:
+    strategy:
+      matrix:
+        architecture:
+          - arch: arm64
+          - arch: x86_64
+        lto:
+          - lto: With LTO
+            lto_arg: ""
+            artifact_tag: ""
+          - lto: No LTO
+            lto_arg: "--no-lto"
+            artifact_tag: "_No_LTO"
+    name: MacOS Build
     runs-on: macos-latest
     steps:
     - name: Check out repository code
@@ -15,144 +27,34 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.lto_arg }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         curl -L "$file_url" -o "$file_name" || exit 0
         tar -xf "$file_name" || exit 0
         rm ${file_name} || exit 0
+        ln -s lib Nuitka-Python-Deps/lib64 || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
     - name: Run Build
-      run: bash build.mac.sh "${{ github.workspace }}/Nuitka-Python-Out"
+      run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/Nuitka-Python-Out"
     - name: Cleanup artifact
       run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
-        name: Nuitka-Python311_mac_arm64
+        name: Nuitka-Python311_mac_${{ matrix.architecture.arch }}${{ matrix.lto.lto_arg }}
         path: ${{ github.workspace }}/Nuitka-Python-Out
     - name: Store cache
       env:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-arm-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.lto_arg }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         rm -rf ${file_name}
+        rm -f Nuitka-Python-Deps/lib64
         tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
         curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
         rm -rf ${file_name}
-  mac_x64:
-    name: MacOS Intel Build
-    runs-on: macos-latest
-    steps:
-    - name: Check out repository code
-      uses: actions/checkout@v4
-    - name: Download cache
-      env:
-        CACHE_SAS: ${{ secrets.CACHE_SAS }}
-      run: |
-        cd ..
-        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.tar.gz"
-        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-        curl -L "$file_url" -o "$file_name" || exit 0
-        tar -xf "$file_name" || exit 0
-        rm ${file_name} || exit 0
-    - name: Uninstall homebrew
-      run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
-    - name: Run Build
-      run: arch -x86_64 bash build.mac.sh "${{ github.workspace }}/Nuitka-Python-Out"
-    - name: Cleanup artifact
-      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
-    - uses: actions/upload-artifact@v4
-      with:
-        name: Nuitka-Python311_mac_x86_64
-        path: ${{ github.workspace }}/Nuitka-Python-Out
-    - name: Store cache
-      env:
-        CACHE_SAS: ${{ secrets.CACHE_SAS }}
-      run: |
-        cd ..
-        export "file_name=NP_mac-intel-${{ hashFiles('build.mac.sh') }}.tar.gz"
-        export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-        rm -rf ${file_name}
-        tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
-        curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
-        rm -rf ${file_name}
-
-  mac_arm_no_lto:
-    name: MacOS ARM Build No LTO
-    runs-on: macos-latest
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Download cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          curl -L "$file_url" -o "$file_name" || exit 0
-          tar -xf "$file_name" || exit 0
-          rm ${file_name} || exit 0
-      - name: Uninstall homebrew
-        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
-      - name: Run Build
-        run: bash build.mac.sh --no-lto "${{ github.workspace }}/Nuitka-Python-Out"
-      - name: Cleanup artifact
-        run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Nuitka-Python311_mac_arm64_No_LTO
-          path: ${{ github.workspace }}/Nuitka-Python-Out
-      - name: Store cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_mac-arm-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          rm -rf ${file_name}
-          tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
-          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
-          rm -rf ${file_name}
-  mac_x64_no_lto:
-    name: MacOS Intel Build No LTO
-    runs-on: macos-latest
-    steps:
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - name: Download cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.tar.gz"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          curl -L "$file_url" -o "$file_name" || exit 0
-          tar -xf "$file_name" || exit 0
-          rm ${file_name} || exit 0
-      - name: Uninstall homebrew
-        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
-      - name: Run Build
-        run: arch -x86_64 bash build.mac.sh --no-lto "${{ github.workspace }}/Nuitka-Python-Out"
-      - name: Cleanup artifact
-        run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Nuitka-Python311_mac_x86_64_No_LTO
-          path: ${{ github.workspace }}/Nuitka-Python-Out
-      - name: Store cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_mac-intel-no_lto-${{ hashFiles('build.mac.sh') }}.zip"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          rm -rf ${file_name}
-          tar -cf ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
-          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
-          rm -rf ${file_name}
 
   linux:
     name: Ubuntu Build
@@ -170,6 +72,7 @@ jobs:
           curl -L "$file_url" -o "$file_name" || exit 0
           unzip -q "$file_name" || exit 0
           rm ${file_name} || exit 0
+          ln -s lib Nuitka-Python-Deps/lib64 || exit 0
       - name: Run Build
         run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
       - name: Cleanup artifact
@@ -186,6 +89,7 @@ jobs:
           export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           rm -rf ${file_name}
+          rm -f Nuitka-Python-Deps/lib64
           zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
           curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
           rm -rf ${file_name}
