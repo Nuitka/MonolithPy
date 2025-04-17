@@ -94,9 +94,6 @@ def get_lib_hash():
 
 def is_lib_valid(path):
     if os.path.isfile(path):
-        if __np__.getToolsInstallDir() in path:
-            # Disqualify libs from inside build tools.
-            return False
         if "/~" in path or "\\~" in path:
             # Disqualify libs that were removed by pip.
             return False
@@ -354,6 +351,8 @@ extern "C" {
     inittab_code = ""
 
     for module_fullname, filename in foundLibs.items():
+        if __np__.getToolsInstallDir() in filename:
+            continue
         if not is_lib_valid(filename):
             continue
 
