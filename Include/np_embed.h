@@ -253,11 +253,7 @@ typedef struct EFILE_S EFILE;
 #endif
 
 #if defined(_MSC_VER)
-#ifdef __cplusplus
-#define ALWAYS_INLINE __forceinline
-#else
 #define ALWAYS_INLINE static __forceinline
-#endif
 #elif defined(__GNUC__) || defined(__clang__)
 #ifdef __cplusplus
 #define ALWAYS_INLINE __attribute__((always_inline)) inline
