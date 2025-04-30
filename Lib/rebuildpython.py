@@ -445,6 +445,13 @@ extern "C" {
 
         link_libs = [x for x in final_lib_list if is_lib_valid(x)]
 
+        for file in find_files(
+            interpreter_prefix, "*.res"
+        ):
+            if __np__.getToolsInstallDir() in file:
+                continue
+            link_flags += [file]
+
         compiler.compile(
             ["python.c"], output_dir=build_dir, include_dirs=include_dirs, macros=macros
         )
