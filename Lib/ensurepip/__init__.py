@@ -12,7 +12,7 @@ __all__ = ["version", "bootstrap", "_PROJECTS", "_get_packages"]
 _PACKAGE_NAMES = ('setuptools', 'packaging', 'pip', 'wheel')
 _SETUPTOOLS_VERSION = "78.1.0"
 _PACKAGING_VERSION = "24.2"
-_PIP_VERSION = "23.3.2"
+_PIP_VERSION = "25.1.1"
 _WHEEL_VERSION = "0.42.0"
 _PROJECTS = [
     ("setuptools", _SETUPTOOLS_VERSION, "py3"),

@@ -7,6 +7,7 @@ import warnings
 import platform
 import rebuildpython
 import re
+import importlib.machinery
 
 import __np__
 import __np__.packaging
@@ -17,14 +18,11 @@ if "pip" in sys.modules:
     _this_module = sys.modules["pip"]
     del sys.modules["pip"]
 
+loader = importlib.machinery.SourceFileLoader('pip', os.path.join(os.path.dirname(__file__), "site-packages", "pip", "__init__.py"))
+pip = loader.load_module()
+sys.modules["pip"] = pip
+loader.exec_module(pip)
 real_pip_dir = os.path.join(os.path.dirname(__file__), "site-packages")
-sys.path.insert(0, real_pip_dir)
-import pip as _pip
-
-del sys.path[0]
-sys.modules["pip"] = _pip
-sys.path.append(real_pip_dir)
-
 
 import ensurepip
 builtin_packages = ensurepip._get_packages()
@@ -78,7 +76,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
 
             requires = []
             if 'requires' in package_data['script_metadata']:
-                requires = package_data['script_metadata']['requires']
+                requires = package_data['script_metadata']['build_requires']
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__np__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
 
@@ -113,7 +111,6 @@ def SourceDistribution_get_build_requires_wheel(self):
         return our_source["build_requires"]
 
     return orig_SourceDistribution_get_build_requires_wheel(self)
-
 
 
 pip._internal.distributions.sdist.SourceDistribution._get_build_requires_wheel = SourceDistribution_get_build_requires_wheel
@@ -227,6 +224,14 @@ def _prepare_distribution(self):
     return result
 
 pip._internal.resolution.resolvelib.candidates.LinkCandidate._prepare_distribution = _prepare_distribution
+
+
+import pip._vendor.packaging.tags
+
+def our_generic_abi():
+    return [pip._vendor.packaging.tags._normalize_string(sysconfig.get_config_var("SOABI"))]
+
+pip._vendor.packaging.tags._generic_abi = our_generic_abi
 
 
 def main():
