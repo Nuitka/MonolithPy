@@ -75,7 +75,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
             package_data = data[package_name]
 
             requires = []
-            if 'requires' in package_data['script_metadata']:
+            if 'build_requires' in package_data['script_metadata']:
                 requires = package_data['script_metadata']['build_requires']
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__np__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])

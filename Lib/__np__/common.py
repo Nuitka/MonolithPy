@@ -246,6 +246,8 @@ def run(*args, **kwargs):
 
     # Don't use the pip path customization here. Just replicate our current path.
     env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
 
     p = subprocess.Popen(
         args,
@@ -270,6 +272,8 @@ def run_with_output(*args, **kwargs):
 
     # Don't use the pip path customization here. Just replicate our current path.
     env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
 
     p = subprocess.Popen(
         args,
