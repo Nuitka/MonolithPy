@@ -9,8 +9,13 @@ def get_compiler_module():
 def get_vs_version():
     compiler_module = get_compiler_module()
     from distutils.util import get_host_platform, get_platform
-    from distutils.compilers.C import msvc
-    vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
+    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
+        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
+    elif hasattr(compiler_module, "_get_vcvars_spec"):
+        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
+    else:
+        from distutils.compilers.C import msvc
+        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
     vc_env = compiler_module._get_vc_env(vcargs)
     return float(vc_env.get("visualstudioversion"))
 
@@ -18,18 +23,31 @@ def get_vs_version():
 def find_compiler_exe(exe):
     compiler_module = get_compiler_module()
     from distutils.util import get_host_platform, get_platform
-    from distutils.compilers.C import msvc
-    vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
+    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
+        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
+    elif hasattr(compiler_module, "_get_vcvars_spec"):
+        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
+    else:
+        from distutils.compilers.C import msvc
+        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
+        vc_env = compiler_module._get_vc_env(vcargs)
+        paths = vc_env.get("path", "").split(os.pathsep)
+        return msvc._find_exe(exe, paths)
     vc_env = compiler_module._get_vc_env(vcargs)
     paths = vc_env.get("path", "").split(os.pathsep)
-    return msvc._find_exe(exe, paths)
+    return compiler_module._find_exe(exe, paths)
 
 
 def setup_compiler_env():
     compiler_module = get_compiler_module()
     from distutils.util import get_host_platform, get_platform
-    from distutils.compilers.C import msvc
-    vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
+    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
+        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
+    elif hasattr(compiler_module, "_get_vcvars_spec"):
+        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
+    else:
+        from distutils.compilers.C import msvc
+        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
     vc_env = compiler_module._get_vc_env(vcargs)
     os.environ.update(vc_env)
 
