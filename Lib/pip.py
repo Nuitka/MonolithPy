@@ -76,7 +76,9 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
 
             requires = []
             if 'build_requires' in package_data['script_metadata']:
-                requires = package_data['script_metadata']['build_requires']
+                requires += package_data['script_metadata']['build_requires']
+            if 'dist_requires' in package_data['script_metadata']:
+                requires += package_data['script_metadata']['dist_requires']
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__np__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
 
@@ -107,8 +109,13 @@ orig_SourceDistribution_get_build_requires_wheel = pip._internal.distributions.s
 def SourceDistribution_get_build_requires_wheel(self):
     our_source = __np__.packaging.find_source_by_link(self.req.name,self.req.link.url)
 
-    if our_source is not None and "build_requires" in our_source:
-        return our_source["build_requires"]
+    if our_source is not None:
+        requires = []
+        if 'build_requires' in our_source['script_metadata']:
+            requires += our_source['script_metadata']['build_requires']
+        if 'dist_requires' in our_source['script_metadata']:
+            requires += our_source['script_metadata']['dist_requires']
+        return requires
 
     return orig_SourceDistribution_get_build_requires_wheel(self)
 
