@@ -76,9 +76,8 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols = []):
             for obj in obj_list:
                 try:
                     run_build_tool_exe("clang", "llvm-objcopy", "--redefine-syms", rename_arg_file, obj, cwd=tmpdir)
-                except subprocess.CalledProcessError as e:
-                    if 'The file was not recognized as a valid object file' not in str(e):
-                        raise
+                except subprocess.CalledProcessError:
+                    pass
 
         os.rename(target_lib, target_lib + ".orig")
         subprocess.run(["libtool", "-static", "-o", target_lib] + obj_list)
