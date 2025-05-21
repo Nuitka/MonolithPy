@@ -54,6 +54,10 @@ with warnings.catch_warnings():
     from distutils.errors import CCompilerError, DistutilsError
     from distutils.spawn import find_executable
 
+def rename_init_symbol_in_file(target_lib):
+    pass
+import __np__
+__np__.rename_init_symbol_in_file = rename_init_symbol_in_file
 
 # This global variable is used to hold the list of modules to be disabled.
 DISABLED_MODULE_LIST = []
