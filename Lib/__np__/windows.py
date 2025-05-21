@@ -1,3 +1,4 @@
+import hashlib
 from .common import *
 
 
@@ -169,6 +170,71 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols = []):
 
         os.rename(target_lib, target_lib + ".orig")
         subprocess.run(["lib", "/OUT:" + target_lib] + obj_list)
+
+
+def rename_init_symbol_in_file(target_lib):
+    import __np__.packaging
+    __np__.packaging.install_build_tool("clang")
+    target_lib_abs = os.path.abspath(target_lib)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        hasher = hashlib.md5()
+        with open(target_lib_abs, "rb") as f_lib:
+            for chunk in iter(lambda: f_lib.read(65536), b""):
+                hasher.update(chunk)
+        file_hash = hasher.hexdigest()
+
+        run("7z", "e", target_lib_abs, "-o" + tmpdir, cwd=os.getcwd())
+
+        obj_paths_in_tmpdir = []
+        modified_any_obj = False
+
+        for item_name in os.listdir(tmpdir):
+            if item_name.lower().endswith(".obj"):
+                obj_full_path = os.path.join(tmpdir, item_name)
+                obj_paths_in_tmpdir.append(obj_full_path)  # Keep track for re-archiving
+
+                symbols_to_rename_map = {}  # old_sym -> new_sym
+
+                symbol_data_str = run_with_output("nm", obj_full_path, cwd=tmpdir)
+                symbol_data = symbol_data_str.splitlines()
+
+                for line in symbol_data:
+                    line = line.strip()
+                    if not line or ' ' not in line: continue
+                    try:
+                        sym_name = line[line.rindex(' ') + 1:]
+                        if not sym_name or sym_name.startswith('.'): continue
+                    except ValueError:
+                        continue  # Skip lines not matching expected format
+
+                    # Check if it's a PyInit symbol and if it's defined (not 'U')
+                    if (sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_")) and \
+                            not (' u ' in line.lower() or line.lower().startswith('u ')):
+                        symbols_to_rename_map[sym_name] = f"{sym_name}__np__{file_hash}"
+
+                if not symbols_to_rename_map:
+                    continue
+
+                modified_any_obj = True
+                with tempfile.TemporaryDirectory() as rename_tmpdir_init:  # Unique temp dir name
+                    rename_arg_file_path = os.path.join(rename_tmpdir_init, "rename_init_args.txt")
+                    with open(rename_arg_file_path, "w") as f_rename:
+                        for old_sym, new_sym in symbols_to_rename_map.items():
+                            print(f"Renaming {old_sym} to {new_sym} in {item_name}")
+                            f_rename.write(f"{old_sym} {new_sym}\n")
+
+                    run("llvm-objcopy.exe", "--redefine-syms", rename_arg_file_path, obj_full_path, cwd=tmpdir)
+
+        if not modified_any_obj:
+            print(f"No PyInit_ symbols found or requiring rename in {target_lib}")
+            return
+
+        backup_lib_path = target_lib_abs + ".orig"
+        if os.path.exists(backup_lib_path):
+            os.remove(backup_lib_path)
+        os.rename(target_lib_abs, backup_lib_path)
+
+        run("lib", "/NOLOGO", "/OUT:" + target_lib_abs, *obj_paths_in_tmpdir)
 
 
 def remove_symbols_in_file(target_lib, object_file, symbols):

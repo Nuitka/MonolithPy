@@ -157,6 +157,9 @@ class UnixCCompiler(CCompiler):
         else:
             log.debug("skipping %s (up-to-date)", output_filename)
 
+        import __np__
+        __np__.rename_init_symbol_in_file(output_filename)
+
     def link(self, target_desc, objects,
              output_filename, output_dir=None, libraries=None,
              library_dirs=None, runtime_library_dirs=None,
