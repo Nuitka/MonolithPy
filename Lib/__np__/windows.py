@@ -185,7 +185,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
                 run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file, obj, cwd=tmpdir)
 
         os.rename(target_lib, target_lib + ".orig")
-        subprocess.run(["lib", "/OUT:" + target_lib] + obj_list)
+        run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + target_lib, *obj_list)
 
 
 def rename_init_symbol_in_file(target_lib):
@@ -252,7 +252,7 @@ def rename_init_symbol_in_file(target_lib):
             os.remove(backup_lib_path)
         os.rename(target_lib_abs, backup_lib_path)
 
-        run("lib", "/NOLOGO", "/OUT:" + target_lib_abs, *obj_paths_in_tmpdir)
+        run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + target_lib_abs, *obj_paths_in_tmpdir)
 
 
 def remove_symbols_in_file(target_lib, object_file, symbols):
