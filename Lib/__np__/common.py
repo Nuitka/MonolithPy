@@ -361,7 +361,7 @@ def find_build_tool_exe(tool_name, exe):
 
 
 def run_build_tool_exe(tool_name, exe, *args, **kwargs):
-    run(find_build_tool_exe(tool_name, exe), *args, **kwargs)
+    return run_with_output(find_build_tool_exe(tool_name, exe), *args, **kwargs)
 
 
 def apply_patch(patch_file, directory):

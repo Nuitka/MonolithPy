@@ -132,17 +132,33 @@ def auto_patch_MD_MT(folder):
             auto_patch_MD_MT_file(fpath)
 
 
-def rename_symbols_in_file(target_lib, prefix, protected_symbols = []):
+def get_object_symbols(obj):
+    try:
+        return run_build_tool_exe("clang", "llvm-nm.exe", obj).split("\n")
+    except subprocess.CalledProcessError:
+        return None
+
+
+def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
+    if protected_symbols is None:
+        protected_symbols = []
+    import __np__.packaging
+    __np__.packaging.install_build_tool("clang")
+    __np__.packaging.install_build_tool("7zip")
+    target_lib_abs = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
-        subprocess.run(["7z", "e", target_lib], cwd=tmpdir)
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
         keep_symbols = set()
         for obj in os.listdir(tmpdir):
             if obj.endswith(".obj"):
-                obj_list.append(os.path.join(tmpdir, obj))
-                symbol_data = subprocess.check_output(["nm", obj], cwd=tmpdir, text=True).split("\n")
+                obj_abs = os.path.abspath(os.path.join(tmpdir, obj))
+                obj_list.append(obj_abs)
+                symbol_data = get_object_symbols(obj_abs)
+                if symbol_data is None:
+                    continue
                 obj_symbols = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if len(x) > 3]
                 obj_symbols = [x for x in obj_symbols if not x[0].startswith(".")]
                 for sym in obj_symbols:
@@ -175,6 +191,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols = []):
 def rename_init_symbol_in_file(target_lib):
     import __np__.packaging
     __np__.packaging.install_build_tool("clang")
+    __np__.packaging.install_build_tool("7zip")
     target_lib_abs = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
         hasher = hashlib.md5()
@@ -183,7 +200,7 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        run("7z", "e", target_lib_abs, "-o" + tmpdir, cwd=os.getcwd())
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=os.getcwd())
 
         obj_paths_in_tmpdir = []
         modified_any_obj = False
@@ -195,8 +212,9 @@ def rename_init_symbol_in_file(target_lib):
 
                 symbols_to_rename_map = {}  # old_sym -> new_sym
 
-                symbol_data_str = run_with_output("nm", obj_full_path, cwd=tmpdir)
-                symbol_data = symbol_data_str.splitlines()
+                symbol_data = get_object_symbols(obj_full_path)
+                if symbol_data is None:
+                    continue
 
                 for line in symbol_data:
                     line = line.strip()
@@ -223,7 +241,7 @@ def rename_init_symbol_in_file(target_lib):
                             print(f"Renaming {old_sym} to {new_sym} in {item_name}")
                             f_rename.write(f"{old_sym} {new_sym}\n")
 
-                    run("llvm-objcopy.exe", "--redefine-syms", rename_arg_file_path, obj_full_path, cwd=tmpdir)
+                    run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file_path, obj_full_path, cwd=tmpdir)
 
         if not modified_any_obj:
             print(f"No PyInit_ symbols found or requiring rename in {target_lib}")
@@ -238,8 +256,12 @@ def rename_init_symbol_in_file(target_lib):
 
 
 def remove_symbols_in_file(target_lib, object_file, symbols):
+    target_lib_abs = os.path.abspath(target_lib)
+    import __np__.packaging
+    __np__.packaging.install_build_tool("clang")
+    __np__.packaging.install_build_tool("7zip")
     with tempfile.TemporaryDirectory() as tmpdir:
-        subprocess.run(["7z", "e", target_lib], cwd=tmpdir)
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=tmpdir)
 
         obj_list = [os.path.join(tmpdir, x) for x in os.listdir(tmpdir) if x.endswith(".obj")]
 
