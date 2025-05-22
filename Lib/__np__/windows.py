@@ -134,7 +134,7 @@ def auto_patch_MD_MT(folder):
 
 def get_object_symbols(obj):
     try:
-        return run_build_tool_exe("clang", "llvm-nm.exe", obj).split("\n")
+        return run_build_tool_exe("clang", "llvm-nm.exe", obj, quiet=True).split("\n")
     except subprocess.CalledProcessError:
         return None
 
