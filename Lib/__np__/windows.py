@@ -164,7 +164,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
                 for sym in obj_symbols:
                     if any(re.fullmatch(x, sym[0]) for x in protected_symbols):
                         keep_symbols.add(sym[0])
-                    if sym[0].startswith("PyInit_") or not re.fullmatch(r"[a-zA-Z0-9_-]+", sym[0]):
+                    if sym[0].startswith("PyInit_") or (not re.fullmatch(r"[a-zA-Z0-9_-]+", sym[0]) and "pybind" not in sym[0]):
                         keep_symbols.add(sym[0])
                     if ' u ' in sym[1].lower():
                         unmatched_symbols.add(sym[0])
