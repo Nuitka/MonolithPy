@@ -60,8 +60,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
                 for sym_name, full_line in obj_symbols:
                     if any(re.fullmatch(pattern, sym_name) for pattern in protected_symbols):
                         keep_symbols.add(sym_name)
-                    if sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_") or \
-                       not re.fullmatch(r"[a-zA-Z0-9_.-]+", sym_name):
+                    if sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_") or (not re.fullmatch(r"[a-zA-Z0-9_-]+", sym_name) and "pybind" not in sym_name):
                         keep_symbols.add(sym_name)
                     if ' U ' in full_line or full_line.strip().startswith('U '):
                         unmatched_symbols.add(sym_name)
