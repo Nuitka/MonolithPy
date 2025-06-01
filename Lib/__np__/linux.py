@@ -42,6 +42,9 @@ def auto_patch_Cython_memcpy(folder):
 
 
 def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
+    target_lib = os.path.abspath(target_lib)
+    import __np__.packaging
+    __np__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
         run("ar", "-x", target_lib, cwd=tmpdir)
         obj_list = []
@@ -93,6 +96,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
 
 
 def rename_init_symbol_in_file(target_lib):
+    target_lib = os.path.abspath(target_lib)
     import __np__.packaging
     __np__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
