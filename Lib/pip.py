@@ -241,6 +241,11 @@ def our_generic_abi():
 pip._vendor.packaging.tags._generic_abi = our_generic_abi
 
 
+import pip._vendor.distlib.scripts
+
+pip._vendor.distlib.scripts._DEFAULT_MANIFEST = pip._vendor.distlib.scripts.ScriptMaker.manifest = __np__.EXE_MANIFEST
+
+
 def main():
     # Work around the error reported in #9540, pending a proper fix.
     # Note: It is essential the warning filter is set *before* importing
