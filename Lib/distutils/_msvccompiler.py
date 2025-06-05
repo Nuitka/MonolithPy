@@ -15,6 +15,7 @@ for older versions in distutils.msvc9compiler and distutils.msvccompiler.
 
 import os
 import subprocess
+import tempfile
 import winreg
 
 from distutils.errors import DistutilsExecError, DistutilsPlatformError, \
@@ -478,8 +479,8 @@ class MSVCCompiler(CCompiler) :
 
             export_opts = ["/EXPORT:" + sym for sym in (export_symbols or [])]
 
-            ld_args = (ldflags + lib_opts + export_opts +
-                       objects + ['/OUT:' + output_filename])
+            ld_args = (ldflags + export_opts +
+                       ['/OUT:' + output_filename])
 
             # The MSVC linker generates .lib and .exp files, which cannot be
             # suppressed by any linker switches. The .lib files may even be
@@ -497,16 +498,43 @@ class MSVCCompiler(CCompiler) :
 
             if extra_preargs:
                 ld_args[:0] = extra_preargs
-            if extra_postargs:
-                ld_args.extend(extra_postargs)
 
-            output_dir = os.path.dirname(os.path.abspath(output_filename))
-            self.mkpath(output_dir)
             try:
-                log.debug('Executing "%s" %s', self.linker, ' '.join(ld_args))
-                self.spawn([self.linker] + ld_args)
-            except DistutilsExecError as msg:
-                raise LinkError(msg)
+                # Create a temporary response file in the linker_temp_dir
+                # Giving it a recognizable prefix and suffix, and ensuring text mode.
+                # Using mkstemp to get a file descriptor and path, then opening with fdopen.
+                fd, response_file_path = tempfile.mkstemp(
+                    prefix='lnk', suffix='.rsp', text=True
+                )
+                with os.fdopen(fd, 'w') as resp_file:
+                    for arg in lib_opts + objects:
+                        # Quote arguments containing spaces for robustness with link.exe
+                        if ' ' in arg and not (arg.startswith('"') and arg.endswith('"')):
+                            resp_file.write('"%s"\n' % arg)
+                        else:
+                            resp_file.write("%s\n" % arg)
+
+                # Add the response file to the command line arguments
+                ld_args.append('@' + response_file_path)
+
+                if extra_postargs:
+                    ld_args.extend(extra_postargs)
+
+                output_dir = os.path.dirname(os.path.abspath(output_filename))
+                self.mkpath(output_dir)
+                try:
+                    log.debug('Executing "%s" %s', self.linker, ' '.join(ld_args))
+                    self.spawn([self.linker] + ld_args)
+                except DistutilsExecError as msg:
+                    raise LinkError(msg)
+            finally:
+                # Clean up the response file
+                if response_file_path and os.path.exists(response_file_path):
+                    try:
+                        os.remove(response_file_path)
+                    except OSError as e:
+                        pass
+
         else:
             log.debug("skipping %s (up-to-date)", output_filename)
 
