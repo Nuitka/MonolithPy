@@ -4,6 +4,7 @@
 #define PATH_MAX 4096
 #ifdef _WIN32
 #include <windows.h>
+#include <shlwapi.h>
 #endif
 #include <ctype.h>
 #include <stdarg.h>
@@ -62,12 +63,166 @@ void np_normalize_path(char *path) {
   strcpy(path, resolved);
 }
 
+#ifdef _WIN32
+
+/**
+ * @brief Frees the memory allocated for the path components array.
+ * * @param components The array of path components.
+ * @param count The number of components in the array.
+ */
+inline void FreePathComponents(char** components, int count) {
+    if (components == NULL) {
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        free(components[i]); // Free each individual string.
+    }
+    free(components); // Free the array of pointers itself.
+}
+
+/**
+ * @brief Decomposes a file path into its constituent parts (directories/file).
+ * * @param path The wide character string path to decompose.
+ * @param out_component_count Pointer to an integer that will receive the number of components.
+ * @return A dynamically allocated array of wide character strings. The caller is responsible
+ * for freeing this array and its contents using FreePathComponents().
+ * Returns NULL on failure.
+ */
+inline char** DecomposePath(const char* path, int* out_component_count) {
+    if (path == NULL || out_component_count == NULL) {
+        return NULL;
+    }
+
+    // Create a mutable copy of the path because wcstok_s modifies the string.
+    char* path_copy = _strdup(path);
+    if (path_copy == NULL) {
+        perror("Failed to duplicate path string");
+        return NULL;
+    }
+
+    // Initial allocation for component pointers. We'll reallocate if more space is needed.
+    int capacity = 8;
+    char** components = (char**)malloc(capacity * sizeof(char*));
+    if (components == NULL) {
+        perror("Failed to allocate memory for components");
+        free(path_copy);
+        return NULL;
+    }
+
+    int count = 0;
+    char* context = NULL; // For wcstok_s
+    char* token = strtok_s(path_copy, "\\/", &context);
+
+    while (token != NULL) {
+        // If we've run out of space, double the capacity.
+        if (count >= capacity) {
+            capacity *= 2;
+            char** new_components = (char**)realloc(components, capacity * sizeof(char*));
+            if (new_components == NULL) {
+                perror("Failed to reallocate memory for components");
+                FreePathComponents(components, count); // Clean up what we have so far
+                free(path_copy);
+                return NULL;
+            }
+            components = new_components;
+        }
+
+        // Duplicate the token and store it.
+        components[count] = _strdup(token);
+        if (components[count] == NULL) {
+             perror("Failed to duplicate path component");
+             FreePathComponents(components, count);
+             free(path_copy);
+             return NULL;
+        }
+        count++;
+        token = strtok_s(NULL, "\\/", &context);
+    }
+
+    free(path_copy); // Free the mutable copy of the path.
+    *out_component_count = count;
+    return components;
+}
+
+
+/**
+ * @brief Expands a short path to its longest possible form, even for non-existent files.
+ * * @param short_path The path to expand, which may contain short names (e.g., "PROGRA~1").
+ * @param long_path_buffer A buffer to store the expanded long path.
+ * @param buffer_size The size of the long_path_buffer in characters.
+ * @return TRUE on success, FALSE on failure.
+ */
+inline BOOL ExpandShortPath(const char* short_path, char* long_path_buffer, DWORD buffer_size) {
+    // First, try to get the long path directly. This works if the path exists.
+    if (GetLongPathNameA(short_path, long_path_buffer, buffer_size) > 0) {
+        return TRUE;
+    }
+
+    // If GetLongPathNameW fails, it's likely because the path does not exist.
+    // We'll expand it component by component.
+    int component_count = 0;
+    char** components = DecomposePath(short_path, &component_count);
+    if (components == NULL || component_count == 0) {
+        // If decomposition fails, copy original path as a fallback.
+        strcpy_s(long_path_buffer, buffer_size, short_path);
+        return FALSE;
+    }
+
+    char current_path[PATH_MAX] = { 0 };
+    int start_index = 0;
+
+    // Handle drive letter paths (e.g., "C:").
+    if (strlen(components[0]) == 2 && components[0][1] == L':') {
+        strcpy_s(current_path, PATH_MAX, components[0]);
+        start_index = 1;
+    }
+
+    BOOL found_non_existent = FALSE;
+    for (int i = start_index; i < component_count; ++i) {
+        char temp_path[PATH_MAX];
+
+        // Append the next component to the current path.
+        if (strlen(current_path) > 0 && current_path[strlen(current_path) - 1] != L'\\') {
+            strcat_s(current_path, PATH_MAX, "\\");
+        }
+        strcat_s(current_path, PATH_MAX, components[i]);
+
+        // Try to get the long name for the path constructed so far.
+        if (GetLongPathNameA(current_path, temp_path, PATH_MAX) > 0) {
+            // If successful, update current_path with the expanded version.
+            strcpy_s(current_path, PATH_MAX, temp_path);
+        } else {
+            // This is the first component that doesn't exist.
+            // We append the rest of the components without further expansion.
+            for (int j = i + 1; j < component_count; ++j) {
+                strcat_s(current_path, PATH_MAX, "\\");
+                strcat_s(current_path, PATH_MAX, components[j]);
+            }
+            found_non_existent = TRUE;
+            break;
+        }
+    }
+
+    // Copy the final constructed path to the output buffer.
+    strcat_s(long_path_buffer, buffer_size, current_path);
+
+    // Clean up the memory allocated by DecomposePath.
+    FreePathComponents(components, component_count);
+
+    return TRUE;
+}
+#endif
+
 // Cross-platform function to get absolute path without requiring the path to exist
 void np_get_absolute_path(const char *relative_path, char *absolute_path, size_t size) {
 #ifdef _WIN32
+  char full_path[PATH_MAX] = {};
   // Windows: _fullpath resolves ".." and "." even if path does not exist
-  if (_fullpath(absolute_path, relative_path, size) == NULL) {
-      perror("_fullpath failed");
+  if (_fullpath(full_path, relative_path, size) == NULL) {
+    perror("_fullpath failed");
+  }
+  if (!ExpandShortPath(full_path, absolute_path, size)) {
+    perror("Failed to expand the path.");
   }
 #else
   // Linux/macOS: Use getcwd() and manual normalization
@@ -809,3 +964,393 @@ NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
   e->f = fdopen(fd, mode);
   return e;
 }
+
+
+
+#ifdef _WIN32
+
+NP_DECL(int) np__stat32(const char *file, struct _stat32 *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat32 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _stat32(file, buf);
+}
+
+NP_DECL(int) np__wstat32(const wchar_t *file, struct _stat32 *buf) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, file, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat32 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _wstat32(file, buf);
+}
+
+NP_DECL(int) np__stat64(const char *file, struct _stat64 *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat64 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _stat64(file, buf);
+}
+
+NP_DECL(int) np__wstat64(const wchar_t *file, struct _stat64 *buf) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, file, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat64 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _wstat64(file, buf);
+}
+
+NP_DECL(int) np__stat32i64(const char *file, struct _stat32i64 *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat32i64 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _stat32i64(file, buf);
+}
+
+NP_DECL(int) np__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, file, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat32i64 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _wstat32i64(file, buf);
+}
+
+NP_DECL(int) np__stat64i32(const char *file, struct _stat64i32 *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat64i32 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _stat64i32(file, buf);
+}
+
+NP_DECL(int) np__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, file, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct _stat64i32 tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IREAD | S_IEXEC;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return _wstat64i32(file, buf);
+}
+
+NP_STD(DWORD) np_GetFileAttributesA(LPCSTR lpFileName) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(lpFileName, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            DWORD attributes = FILE_ATTRIBUTE_READONLY;
+            if (map->type == ETYPE_DIRECTORY) {
+                attributes |= FILE_ATTRIBUTE_DIRECTORY;
+            }
+            return attributes;
+        }
+    }
+    return GetFileAttributesA(lpFileName);
+}
+
+NP_STD(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            DWORD attributes = FILE_ATTRIBUTE_READONLY;
+            if (map->type == ETYPE_DIRECTORY) {
+                attributes |= FILE_ATTRIBUTE_DIRECTORY;
+            }
+            return attributes;
+        }
+    }
+    return GetFileAttributesW(lpFileName);
+}
+
+NP_STD(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+    // This logic only supports the standard information level.
+    if (fInfoLevelId != GetFileExInfoStandard || !lpFileInformation) {
+        return GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
+    }
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(lpFileName, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            WIN32_FILE_ATTRIBUTE_DATA *pData = (WIN32_FILE_ATTRIBUTE_DATA *)lpFileInformation;
+            memset(pData, 0, sizeof(WIN32_FILE_ATTRIBUTE_DATA));
+
+            pData->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+            if (map->type == ETYPE_DIRECTORY) {
+                pData->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+            }
+
+            // Populate file size
+            ULARGE_INTEGER fileSize;
+            fileSize.QuadPart = map->size;
+            pData->nFileSizeHigh = fileSize.HighPart;
+            pData->nFileSizeLow = fileSize.LowPart;
+
+            // Timestamps are zeroed by memset, which is acceptable for a virtual file.
+            return TRUE;
+        }
+    }
+    return GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
+}
+
+NP_STD(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+    // This logic only supports the standard information level.
+    if (fInfoLevelId != GetFileExInfoStandard || !lpFileInformation) {
+        return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+    }
+
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            WIN32_FILE_ATTRIBUTE_DATA *pData = (WIN32_FILE_ATTRIBUTE_DATA *)lpFileInformation;
+            memset(pData, 0, sizeof(WIN32_FILE_ATTRIBUTE_DATA));
+
+            pData->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+            if (map->type == ETYPE_DIRECTORY) {
+                pData->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+            }
+
+            // Populate file size
+            ULARGE_INTEGER fileSize;
+            fileSize.QuadPart = map->size;
+            pData->nFileSizeHigh = fileSize.HighPart;
+            pData->nFileSizeLow = fileSize.LowPart;
+
+            // Timestamps are zeroed by memset.
+            return TRUE;
+        }
+    }
+    return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+}
+
+#else
+NP_DECL(int) np_stat(const char *file, struct stat *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct stat tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return stat(file, buf);
+}
+
+NP_DECL(int) np_lstat(const char *file, struct stat *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            struct stat tmp;
+            memset(&tmp, 0, sizeof(tmp));
+            tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+            switch (map->type) {
+                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+            }
+            tmp.st_size = map->size;
+            memcpy(buf, &tmp, sizeof(tmp));
+            return 0;
+        }
+    }
+    return lstat(file, buf);
+}
+
+NP_DECL(int) np_fstat(int fd, struct stat *buf) {
+    return fstat(fd, buf);
+}
+#endif

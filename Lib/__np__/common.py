@@ -457,3 +457,13 @@ def importFileAsModule(modulename, filename):
     build_script_module = importlib.util.module_from_spec(build_script_spec)
     build_script_spec.loader.exec_module(build_script_module)
     return build_script_module
+
+def patchAllSource(path):
+    for subdir, _, files in os.walk(path):
+        for file in files:
+            if file.endswith(('.c', '.cxx', '.cpp')):
+                filepath = os.path.join(subdir, file)
+                with open(filepath, 'r+') as f:
+                    content = f.read()
+                    f.seek(0, 0)
+                    f.write("#include <np_embed.h>\n" + content)

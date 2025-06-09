@@ -7,9 +7,6 @@
 #define NUITKAEMBED
 
 #if !defined(__ASSEMBLER__) && !defined(BYPASS_NP_EMBED)
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifdef __linux
 # define _GNU_SOURCE
@@ -21,7 +18,9 @@ extern "C" {
 #define NP_STDIO_ALREADY_LOADED
 #include <fcntl.h>
 #ifdef _WIN32
+	#define NOMINMAX
     #include <wchar.h>
+    #include <sal.h>
     #include <BaseTsd.h>
     #define PATH_MAX MAX_PATH
     typedef SSIZE_T ssize_t;
@@ -108,6 +107,22 @@ extern "C" {
 #define funlockfile orig_funlockfile
 #define ftrylockfile orig_ftrylockfile
 
+#define _stat32 orig__stat32
+#define _wstat32 orig__wstat32
+#define _stat64 orig__stat64
+#define _wstat64 orig__wstat64
+#define _stat32i64 orig__stat32i64
+#define _wstat32i64 orig__wstat32i64
+#define _stat64i32 orig__stat64i32
+#define _wstat64i32 orig__wstat64i32
+#define GetFileAttributesA orig_GetFileAttributesA
+#define GetFileAttributesExA orig_GetFileAttributesExA
+#define GetFileAttributesExW orig_GetFileAttributesExW
+#define GetFileAttributesW orig_GetFileAttributesW
+#define stat orig_stat
+#define fstat orig_fstat
+#define lstat orig_lstat
+
 #ifdef __linux
 #define stdin orig_stdin
 #define stdout orig_stdout
@@ -121,16 +136,36 @@ extern "C" {
 #endif
 #include <stdio.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #ifdef _WIN32
-    #include <wchar.h>
-    #include <BaseTsd.h>
-    #define PATH_MAX MAX_PATH
-    typedef SSIZE_T ssize_t;
+#define NOMINMAX
+#include <wchar.h>
+#include <basetsd.h>
+#include <intsafe.h>
+#if defined(_M_IX86)
+#define _X86_
+#elif defined(_M_X64)
+#define _AMD64_
+#elif defined(_M_ARM)
+#define _ARM_
+    #elif defined(_M_ARM64)
+    #define _ARM64_
+#endif
+
+#include <fileapi.h>
+typedef int BOOL;
+typedef const char *LPCSTR;
+typedef const wchar_t *LPCWSTR;
+typedef void *LPVOID;
+#define PATH_MAX MAX_PATH
+typedef SSIZE_T ssize_t;
 #else
-    #include <limits.h>
+#include <limits.h>
     #include <unistd.h>
     #include <libgen.h>
 #endif
+#ifndef NUITKAPYTHON_EMBED_BUILD
 #undef open
 #undef _open
 #undef fopen
@@ -201,12 +236,28 @@ extern "C" {
 #undef flockfile
 #undef funlockfile
 #undef ftrylockfile
+#undef _stat32
+#undef _wstat32
+#undef _stat64
+#undef _wstat64
+#undef _stat32i64
+#undef _wstat32i64
+#undef _stat64i32
+#undef _wstat64i32
+#undef GetFileAttributesA
+#undef GetFileAttributesExA
+#undef GetFileAttributesExW
+#undef GetFileAttributesW
+#undef stat
+#undef fstat
+#undef lstat
+
 #ifdef __linux
 #undef stdin
 #undef stdout
 #undef stderr
 #endif
-
+#endif
 #endif
 
 #include <errno.h>
@@ -219,24 +270,24 @@ extern "C" {
 
 
 struct EMAP_S {     // Map Indexing Struct
-  uint32_t hash;
-  uint32_t parentidx;
-  uint32_t pathpos;
-  uint32_t pathsize;
-  uint8_t type;
-  uint32_t pos;
-  uint32_t size;
+    uint32_t hash;
+    uint32_t parentidx;
+    uint32_t pathpos;
+    uint32_t pathsize;
+    uint8_t type;
+    uint32_t pos;
+    uint32_t size;
 };
 typedef struct EMAP_S EMAP;
 
 struct EFILE_S {    // Virtual File Stream
-  uint32_t handle_type;
-  const char* name;
-  const char* pos;
-  const char* end;
-  size_t size;
-  int err;
-  FILE* f;
+    uint32_t handle_type;
+    const char* name;
+    const char* pos;
+    const char* end;
+    size_t size;
+    int err;
+    FILE* f;
 };
 typedef struct EFILE_S EFILE;
 
@@ -248,6 +299,7 @@ typedef struct EFILE_S EFILE;
 
 #ifdef _WIN32
 #define NP_DECL(x) _ACRTIMP x __cdecl
+#define NP_STD(x) _ACRTIMP x __stdcall
 #else
 #define NP_DECL(x) x
 #endif
@@ -272,6 +324,100 @@ typedef struct EFILE_S EFILE;
 #define NP_FOREIGN_PTR *(void**)e == NULL || (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE)
 #else
 #define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
+#endif
+
+#if defined(_WIN32) && !defined(NUITKAPYTHON_EMBED_BUILD)
+struct _stat32
+{
+    _dev_t         st_dev;
+    _ino_t         st_ino;
+    unsigned short st_mode;
+    short          st_nlink;
+    short          st_uid;
+    short          st_gid;
+    _dev_t         st_rdev;
+    _off_t         st_size;
+    __time32_t     st_atime;
+    __time32_t     st_mtime;
+    __time32_t     st_ctime;
+};
+
+struct _stat32i64
+{
+    _dev_t         st_dev;
+    _ino_t         st_ino;
+    unsigned short st_mode;
+    short          st_nlink;
+    short          st_uid;
+    short          st_gid;
+    _dev_t         st_rdev;
+    __int64        st_size;
+    __time32_t     st_atime;
+    __time32_t     st_mtime;
+    __time32_t     st_ctime;
+};
+
+struct _stat64i32
+{
+    _dev_t         st_dev;
+    _ino_t         st_ino;
+    unsigned short st_mode;
+    short          st_nlink;
+    short          st_uid;
+    short          st_gid;
+    _dev_t         st_rdev;
+    _off_t         st_size;
+    __time64_t     st_atime;
+    __time64_t     st_mtime;
+    __time64_t     st_ctime;
+};
+
+struct _stat64
+{
+    _dev_t         st_dev;
+    _ino_t         st_ino;
+    unsigned short st_mode;
+    short          st_nlink;
+    short          st_uid;
+    short          st_gid;
+    _dev_t         st_rdev;
+    __int64        st_size;
+    __time64_t     st_atime;
+    __time64_t     st_mtime;
+    __time64_t     st_ctime;
+};
+
+#define __stat64 _stat64 // For legacy compatibility
+
+struct stat
+{
+    _dev_t         st_dev;
+    _ino_t         st_ino;
+    unsigned short st_mode;
+    short          st_nlink;
+    short          st_uid;
+    short          st_gid;
+    _dev_t         st_rdev;
+    _off_t         st_size;
+    time_t         st_atime;
+    time_t         st_mtime;
+    time_t         st_ctime;
+};
+#ifdef _USE_32BIT_TIME_T
+    #define _stat       _stat32
+    #define _stati64    _stat32i64
+    #define _wstat      _wstat32
+    #define _wstati64   _wstat32i64
+#else
+    #define _stat       _stat64i32
+    #define _stati64    _stat64
+    #define _wstat      _wstat64i32
+    #define _wstati64   _wstat64
+#endif
+#endif
+
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 NP_DECL(EFILE*) np_fopen(const char* file, const char* mode);
@@ -334,6 +480,25 @@ NP_DECL(int) np_fflush(void *stream);
 NP_DECL(void) np_flockfile(void *e);
 NP_DECL(void) np_funlockfile(void *e);
 NP_DECL(int) np_ftrylockfile(void *e);
+
+#ifdef _WIN32
+NP_DECL(int) np__stat32(const char *path, struct __stat32 *buffer);
+NP_DECL(int) np__stat64(const char *path, struct __stat64 *buffer);
+NP_DECL(int) np__stat32i64(const char *path, struct _stat32i64 *buffer);
+NP_DECL(int) np__stat64i32(const char *path, struct _stat64i32 *buffer);
+NP_DECL(int) np__wstat32(const wchar_t *path, struct __stat32 *buffer);
+NP_DECL(int) np__wstat64(const wchar_t *path, struct __stat64 *buffer);
+NP_DECL(int) np__wstat32i64(const wchar_t *path, struct _stat32i64 *buffer);
+NP_DECL(int) np__wstat64i32(const wchar_t *path, struct _stat64i32 *buffer);
+NP_DECL(DWORD) np_GetFileAttributesA(LPCSTR lpFileName);
+NP_DECL(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
+NP_DECL(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
+NP_DECL(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName);
+#else
+NP_DECL(int) np_stat(const char *path, struct stat *buf);
+NP_DECL(int) np_fstat(int fd, struct stat *buf);
+NP_DECL(int) np_lstat(const char *path, struct stat *buf);
+#endif
 
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
 
@@ -766,7 +931,73 @@ ALWAYS_INLINE NP_DECL(int) _fflush(void *stream) {
     return np_fflush(stream);
 }
 
-#ifndef _WIN32
+#ifdef _WIN32
+ALWAYS_INLINE NP_DECL(int) _stat32(const char *path, struct __stat32 *buffer) {
+    return np__stat32(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _stat64(const char *path, struct __stat64 *buffer) {
+    return np__stat64(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _stat32i64(const char *path, struct _stat32i64 *buffer) {
+    return np__stat32i64(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _stat64i32(const char *path, struct _stat64i32 *buffer) {
+    return np__stat64i32(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _wstat32(const wchar_t *path, struct __stat32 *buffer) {
+    return np__wstat32(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _wstat64(const wchar_t *path, struct __stat64 *buffer) {
+    return np__wstat64(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _wstat32i64(const wchar_t *path, struct _stat32i64 *buffer) {
+    return np__wstat32i64(path, buffer);
+}
+
+ALWAYS_INLINE NP_DECL(int) _wstat64i32(const wchar_t *path, struct _stat64i32 *buffer) {
+    return np__wstat64i32(path, buffer);
+}
+
+ALWAYS_INLINE NP_STD(DWORD) GetFileAttributesA(_In_ LPCSTR lpFileName) {
+    return np_GetFileAttributesA(lpFileName);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) GetFileAttributesExA(
+        _In_ LPCSTR lpFileName,
+        _In_ GET_FILEEX_INFO_LEVELS fInfoLevelId,
+        _Out_writes_bytes_(sizeof(WIN32_FILE_ATTRIBUTE_DATA)) LPVOID lpFileInformation) {
+    return np_GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) GetFileAttributesExW(
+        _In_ LPCWSTR lpFileName,
+        _In_ GET_FILEEX_INFO_LEVELS fInfoLevelId,
+        _Out_writes_bytes_(sizeof(WIN32_FILE_ATTRIBUTE_DATA)) LPVOID lpFileInformation) {
+    return np_GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+}
+
+ALWAYS_INLINE NP_STD(DWORD) GetFileAttributesW(_In_ LPCWSTR lpFileName) {
+    return np_GetFileAttributesW(lpFileName);
+}
+#else
+ALWAYS_INLINE NP_DECL(int) stat(const char *path, struct stat *buf) {
+    return np_stat(path, buf);
+}
+
+ALWAYS_INLINE NP_DECL(int) fstat(int fd, struct stat *buf) {
+    return np_fstat(fd, buf);
+}
+
+ALWAYS_INLINE NP_DECL(int) lstat(const char *path, struct stat *buf) {
+    return np_lstat(path, buf);
+}
+
 /* Locking Functions */
 ALWAYS_INLINE NP_DECL(void) flockfile(void *stream) {
     np_flockfile(stream);

@@ -26,7 +26,10 @@ def hash(key: str) -> int:  # Hash Function: MurmurOAAT64
 def mkfspath(filePath: str) -> str:
     if filePath == base_path:
         return "/"
-    return "/" + os.path.relpath(filePath, base_path).replace('\\', '/').lower()
+    path = "/" + os.path.relpath(filePath, base_path).replace('\\', '/').lower()
+    if path.startswith("/__relative__"):
+        path = "~" + path[len("/__relative__"):]
+    return path
 
 ETYPE_DIRECTORY = 0
 ETYPE_FILE = 1
