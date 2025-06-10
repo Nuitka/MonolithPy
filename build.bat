@@ -78,6 +78,9 @@ for /d %%d in (externals\libffi*) do (
    xcopy /i /q /s /y %SRC_LIB_DIR%\include %OUTPUT_DIR%\dependency_libs\libffi\include
 )
 
+mkdir %OUTPUT_DIR%\Embedded
+xcopy /i /q /s /y Embedded\embed_data %OUTPUT_DIR%\Embedded\embed_data
+copy Embedded\np_embed.obj %OUTPUT_DIR%\Embedded\np_embed.obj
 copy Embedded\np_embed.lib %OUTPUT_DIR%\libs\np_embed.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython

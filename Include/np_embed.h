@@ -119,6 +119,11 @@
 #define GetFileAttributesExA orig_GetFileAttributesExA
 #define GetFileAttributesExW orig_GetFileAttributesExW
 #define GetFileAttributesW orig_GetFileAttributesW
+#define CloseHandle orig_CloseHandle
+#define CreateFileW orig_CreateFileW
+#define GetFileInformationByHandle orig_GetFileInformationByHandle
+#define GetFileInformationByHandleEx orig_GetFileInformationByHandleEx
+#define GetFileType orig_GetFileType
 #define stat orig_stat
 #define fstat orig_fstat
 #define lstat orig_lstat
@@ -154,6 +159,9 @@
 #endif
 
 #include <fileapi.h>
+#include <handleapi.h>
+#include <windef.h>
+#include <WinBase.h>
 typedef int BOOL;
 typedef const char *LPCSTR;
 typedef const wchar_t *LPCWSTR;
@@ -248,6 +256,11 @@ typedef SSIZE_T ssize_t;
 #undef GetFileAttributesExA
 #undef GetFileAttributesExW
 #undef GetFileAttributesW
+#undef CloseHandle
+#undef CreateFileW
+#undef GetFileInformationByHandle
+#undef GetFileInformationByHandleEx
+#undef GetFileType
 #undef stat
 #undef fstat
 #undef lstat
@@ -288,6 +301,7 @@ struct EFILE_S {    // Virtual File Stream
     size_t size;
     int err;
     FILE* f;
+    EMAP* map;
 };
 typedef struct EFILE_S EFILE;
 
@@ -494,6 +508,11 @@ NP_DECL(DWORD) np_GetFileAttributesA(LPCSTR lpFileName);
 NP_DECL(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
 NP_DECL(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
 NP_DECL(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName);
+NP_STD(BOOL) np_CloseHandle(HANDLE hObject);
+NP_STD(HANDLE) np_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+NP_STD(BOOL) np_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
+NP_STD(BOOL) np_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize);
+NP_STD(DWORD) np_GetFileType(HANDLE hFile);
 #else
 NP_DECL(int) np_stat(const char *path, struct stat *buf);
 NP_DECL(int) np_fstat(int fd, struct stat *buf);
@@ -985,6 +1004,47 @@ ALWAYS_INLINE NP_STD(BOOL) GetFileAttributesExW(
 ALWAYS_INLINE NP_STD(DWORD) GetFileAttributesW(_In_ LPCWSTR lpFileName) {
     return np_GetFileAttributesW(lpFileName);
 }
+
+ALWAYS_INLINE NP_STD(BOOL) CloseHandle(
+    _In_ HANDLE hObject
+) {
+    return np_CloseHandle(hObject);
+}
+
+ALWAYS_INLINE NP_STD(HANDLE) CreateFileW(
+    _In_ LPCWSTR lpFileName,
+    _In_ DWORD dwDesiredAccess,
+    _In_ DWORD dwShareMode,
+    _In_opt_ LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+    _In_ DWORD dwCreationDisposition,
+    _In_ DWORD dwFlagsAndAttributes,
+    _In_opt_ HANDLE hTemplateFile
+) {
+    return np_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) GetFileInformationByHandle(
+    _In_ HANDLE hFile,
+    _Out_ LPBY_HANDLE_FILE_INFORMATION lpFileInformation
+) {
+    return np_GetFileInformationByHandle(hFile, lpFileInformation);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) GetFileInformationByHandleEx(
+    _In_ HANDLE hFile,
+    _In_ FILE_INFO_BY_HANDLE_CLASS FileInformationClass,
+    _Out_writes_bytes_(dwBufferSize) LPVOID lpFileInformation,
+    _In_ DWORD dwBufferSize
+) {
+    return np_GetFileInformationByHandleEx(hFile, FileInformationClass, lpFileInformation, dwBufferSize);
+}
+
+ALWAYS_INLINE NP_STD(DWORD) GetFileType(
+    _In_ HANDLE hFile
+) {
+    return np_GetFileType(hFile);
+}
+
 #else
 ALWAYS_INLINE NP_DECL(int) stat(const char *path, struct stat *buf) {
     return np_stat(path, buf);

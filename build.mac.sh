@@ -318,7 +318,10 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
 
 # Copy embedded data
 $ELEVATE mv ${PREFIX}/lib/libnp_embed.a "$target/lib/libnp_embed.a"
-$ELEVATE cp -r "Embedded/embed_data" "$target/"
+
+$ELEVATE mkdir -p "$target/Embedded"
+$ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
+$ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
 # Copy over the compiled dependencies.
 $ELEVATE mkdir -p "$target/dependency_libs"

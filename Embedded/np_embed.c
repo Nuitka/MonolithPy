@@ -274,7 +274,7 @@ static bool find_embedded_file(const char *search_path, EMAP **found_map) {
   uint32_t key = hash((char*)search_path);
 
   while ((char*)map < end) {
-    if (map->type == ETYPE_FILE && map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
+    if (map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
       *found_map = map;
       return true;
     }
@@ -321,7 +321,7 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
     get_virtual_path(search_path, execfolder, absolute_path);
 
     EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
+    if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
       EFILE *e = (EFILE *) malloc(sizeof *e);
       e->handle_type = EHANDLE_VIRTUAL;
       e->name = &nuitka_embed_data + map->pathpos;
@@ -358,13 +358,14 @@ NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
   get_virtual_path(search_path, execfolder, absolute_path);
 
   EMAP *map;
-  if (find_embedded_file(search_path, &map)) {
+  if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
     EFILE *e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_VIRTUAL;
     e->name = &nuitka_embed_data + map->pathpos;
     e->pos = &nuitka_embed_data + map->pos;
     e->end = &nuitka_embed_data + map->pos + map->size;
     e->size = map->size;
+    e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
       if (np_fd2file[i].fd == 0) {
@@ -391,7 +392,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
     get_virtual_path(search_path, execfolder, absolute_path);
 
     EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
+    if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
       EFILE *e = (EFILE *) malloc(sizeof *e);
       e->handle_type = EHANDLE_VIRTUAL;
       e->name = &nuitka_embed_data + map->pathpos;
@@ -427,13 +428,14 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
   get_virtual_path(search_path, execfolder, absolute_path);
 
   EMAP *map;
-  if (find_embedded_file(search_path, &map)) {
+  if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
     EFILE* e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_VIRTUAL;
     e->name = (&nuitka_embed_data + map->pathpos);
     e->pos = (&nuitka_embed_data + map->pos);
     e->end = (&nuitka_embed_data + map->pos + map->size);
     e->size = map->size;
+    e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
       if (np_fd2file[i].fd == 0) {
@@ -1297,6 +1299,289 @@ NP_STD(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS 
         }
     }
     return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
+}
+
+// A map to associate native HANDLEs with our virtual EFILE structs.
+struct HNDMAP_S {   // Virtual File Handle
+    HANDLE h;
+    EFILE *f;
+};
+typedef struct HNDMAP_S HNDMAP;
+
+// An array to store the mappings for open virtual files.
+HNDMAP np_handle2file[512] = {};
+
+
+/**
+ * @brief Closes an open object handle. This can be a handle to a file,
+ * mapping, process, thread, etc.
+ * @param hObject A valid handle to an open object.
+ * @return If the function succeeds, the return value is nonzero.
+ *
+ * This implementation intercepts handles to virtual files and cleans up
+ * the associated resources before closing the underlying native handle.
+ */
+NP_STD(BOOL) np_CloseHandle(HANDLE hObject) {
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hObject) {
+            // This is a handle to one of our virtual files.
+            // Free the memory for the EFILE struct.
+            free(np_handle2file[i].f);
+
+            // Clear the entry in our map.
+            np_handle2file[i].h = NULL;
+            np_handle2file[i].f = NULL;
+
+            // Now, close the underlying native handle we created.
+            return CloseHandle(hObject);
+        }
+    }
+
+    // If it's not a handle we're managing, pass it to the real API.
+    return CloseHandle(hObject);
+}
+
+
+/**
+ * @brief Creates or opens a file or I/O device.
+ * @return If the function succeeds, the return value is an open handle to the
+ * specified file. If the function fails, the return value is INVALID_HANDLE_VALUE.
+ *
+ * This wrapper checks if the requested file exists in the embedded data.
+ * If so, it creates a virtual file handle. Otherwise, it calls the original
+ * CreateFileW API.
+ */
+NP_STD(HANDLE) np_CreateFileW(
+        LPCWSTR lpFileName,
+        DWORD dwDesiredAccess,
+        DWORD dwShareMode,
+        LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+        DWORD dwCreationDisposition,
+        DWORD dwFlagsAndAttributes,
+        HANDLE hTemplateFile
+) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, sizeof(file_mb));
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
+    if (!get_executable_path(execfolder, executable)) {
+        return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    }
+
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+        // Virtual files are read-only. If write access is requested, return access denied.
+        if (dwDesiredAccess & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA)) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return INVALID_HANDLE_VALUE;
+        }
+
+        // Virtual files can only be opened if they exist, not created.
+        if (dwCreationDisposition == CREATE_NEW || dwCreationDisposition == CREATE_ALWAYS || dwCreationDisposition == TRUNCATE_EXISTING) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return INVALID_HANDLE_VALUE;
+        }
+
+        if (!(dwFlagsAndAttributes & FILE_FLAG_BACKUP_SEMANTICS) && map->type != ETYPE_FILE) {
+            // We are supposed to allow opening a handle to a directory only if
+            // FILE_FLAG_BACKUP_SEMANTICS is specified because windows. ¯\_(ツ)_/¯
+            SetLastError(ERROR_ACCESS_DENIED);
+            return INVALID_HANDLE_VALUE;
+        }
+        // We do intentionally allow to "open" a directory.
+
+        // The file exists in our virtual file system.
+        EFILE* e = (EFILE*)malloc(sizeof *e);
+        if (!e) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return INVALID_HANDLE_VALUE;
+        }
+
+        e->handle_type = EHANDLE_VIRTUAL;
+        e->name = (&nuitka_embed_data + map->pathpos);
+        e->pos = (&nuitka_embed_data + map->pos);
+        e->end = (&nuitka_embed_data + map->pos + map->size);
+        e->size = map->size;
+        e->map = map; // Store map pointer for retrieving info later.
+
+        // Create a real, underlying handle by opening the executable itself.
+        // This gives us a valid system handle to return to the caller.
+        HANDLE hFake = CreateFileA(executable, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFake == INVALID_HANDLE_VALUE) {
+            free(e);
+            return INVALID_HANDLE_VALUE; // Let caller get the error from CreateFileA.
+        }
+
+        // Find an empty slot in our handle map to store the association.
+        for (int i = 0; i < 512; i++) {
+            if (np_handle2file[i].h == NULL) {
+                np_handle2file[i].h = hFake;
+                np_handle2file[i].f = e;
+                return hFake; // Return the fake handle to the caller.
+            }
+        }
+
+        // No free slots in our map.
+        free(e);
+        CloseHandle(hFake);
+        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    // File not found in virtual FS, call the real API.
+    return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+
+/**
+ * @brief Retrieves information about the specified file.
+ * @param hFile A handle to the file.
+ * @param lpFileInformation A pointer to a BY_HANDLE_FILE_INFORMATION structure.
+ * @return Nonzero on success, zero on failure.
+ *
+ * Intercepts handles to virtual files and provides the file information from
+ * the embedded data map.
+ */
+NP_STD(BOOL) np_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // Handle belongs to a virtual file.
+        if (lpFileInformation == NULL) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+
+        memset(lpFileInformation, 0, sizeof(BY_HANDLE_FILE_INFORMATION));
+
+        // Set attributes.
+        lpFileInformation->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+        if (e->map->type == ETYPE_DIRECTORY) {
+            lpFileInformation->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+        }
+
+        // Set file size.
+        ULARGE_INTEGER fileSize;
+        fileSize.QuadPart = e->size;
+        lpFileInformation->nFileSizeHigh = fileSize.HighPart;
+        lpFileInformation->nFileSizeLow = fileSize.LowPart;
+
+        // Set link count.
+        lpFileInformation->nNumberOfLinks = 1;
+
+        // Use the address of the map entry as a unique file index.
+        uintptr_t fileIndex = (uintptr_t)(e->map);
+        lpFileInformation->nFileIndexHigh = (DWORD)(fileIndex >> 32);
+        lpFileInformation->nFileIndexLow = (DWORD)(fileIndex & 0xFFFFFFFF);
+
+        // Timestamps and volume serial are zeroed by memset.
+        return TRUE;
+    }
+
+    // Not a virtual handle, fall back to the real API.
+    return GetFileInformationByHandle(hFile, lpFileInformation);
+}
+
+/**
+ * @brief Retrieves information for the specified file.
+ * @param hFile A handle to the file.
+ * @param FileInformationClass The type of information to retrieve.
+ * @param lpFileInformation Pointer to the buffer to receive the information.
+ * @param dwBufferSize Size of the lpFileInformation buffer.
+ * @return Nonzero on success, zero on failure.
+ *
+ * Supports retrieving basic and standard information for virtual files.
+ */
+NP_STD(BOOL) np_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // It's a virtual file.
+        if (lpFileInformation == NULL) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+
+        switch (FileInformationClass) {
+            case FileBasicInfo: {
+                if (dwBufferSize < sizeof(FILE_BASIC_INFO)) {
+                    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                    return FALSE;
+                }
+                FILE_BASIC_INFO* info = (FILE_BASIC_INFO*)lpFileInformation;
+                memset(info, 0, sizeof(FILE_BASIC_INFO));
+                info->FileAttributes = FILE_ATTRIBUTE_READONLY;
+                if (e->map->type == ETYPE_DIRECTORY) {
+                    info->FileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+                }
+                // Timestamps are zeroed by memset.
+                return TRUE;
+            }
+
+            case FileStandardInfo: {
+                if (dwBufferSize < sizeof(FILE_STANDARD_INFO)) {
+                    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                    return FALSE;
+                }
+                FILE_STANDARD_INFO* info = (FILE_STANDARD_INFO*)lpFileInformation;
+                memset(info, 0, sizeof(FILE_STANDARD_INFO));
+                info->AllocationSize.QuadPart = e->size;
+                info->EndOfFile.QuadPart = e->size;
+                info->NumberOfLinks = 1;
+                info->DeletePending = FALSE;
+                info->Directory = (e->map->type == ETYPE_DIRECTORY);
+                return TRUE;
+            }
+
+                // Other information levels are not supported for our virtual files.
+            default:
+                SetLastError(ERROR_NOT_SUPPORTED);
+                return FALSE;
+        }
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFileInformationByHandleEx(hFile, FileInformationClass, lpFileInformation, dwBufferSize);
+}
+
+
+/**
+ * @brief Retrieves the type of the specified file.
+ * @param hFile A handle to the file.
+ * @return One of the following values: FILE_TYPE_CHAR, FILE_TYPE_DISK,
+ * FILE_TYPE_PIPE, FILE_TYPE_REMOTE, or FILE_TYPE_UNKNOWN.
+ *
+ * Reports virtual files as being of type FILE_TYPE_DISK.
+ */
+NP_STD(DWORD) np_GetFileType(HANDLE hFile) {
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            // This handle belongs to one of our virtual files.
+            // They behave like disk files.
+            return FILE_TYPE_DISK;
+        }
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFileType(hFile);
 }
 
 #else

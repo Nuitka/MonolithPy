@@ -432,6 +432,9 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
     $ELEVATE "$target/bin/python${long_version}" install_ssl.py && \
     $ELEVATE mv "$target/lib/python${long_version}/pip.py.bak" "$target/lib/python${long_version}/pip.py"
 
+$ELEVATE mkdir -p "$target/Embedded"
+$ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
+$ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
 $ELEVATE mkdir -p "$target/dependency_libs"
 $ELEVATE cp -r "$(pwd)/../Nuitka-Python-Deps" "$target/dependency_libs/base"
