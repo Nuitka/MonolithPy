@@ -22,7 +22,6 @@
     #include <wchar.h>
     #include <sal.h>
     #include <BaseTsd.h>
-    #define PATH_MAX MAX_PATH
     typedef SSIZE_T ssize_t;
 #else
     #include <limits.h>
@@ -120,13 +119,50 @@
 #define GetFileAttributesExW orig_GetFileAttributesExW
 #define GetFileAttributesW orig_GetFileAttributesW
 #define CloseHandle orig_CloseHandle
+#define CreateFileA orig_CreateFileA
 #define CreateFileW orig_CreateFileW
+#define DeleteFileA orig_DeleteFileA
+#define DeleteFileW orig_DeleteFileW
 #define GetFileInformationByHandle orig_GetFileInformationByHandle
 #define GetFileInformationByHandleEx orig_GetFileInformationByHandleEx
 #define GetFileType orig_GetFileType
+#define GetFinalPathNameByHandleW orig_GetFinalPathNameByHandleW
+#define GetFullPathNameW orig_GetFullPathNameW
+#define GetVolumePathNameW orig_GetVolumePathNameW
+#define GetDiskFreeSpaceExW orig_GetDiskFreeSpaceExW
+#define FindFirstFileA orig_FindFirstFileA
+#define FindFirstFileW orig_FindFirstFileW
+#define FindNextFileA orig_FindNextFileA
+#define FindNextFileW orig_FindNextFileW
+#define FindClose orig_FindClose
+#define GetFileSizeEx orig_GetFileSizeEx
+#define GetFileSize orig_GetFileSize
+#define CreateFileMappingA orig_CreateFileMappingA
+#define CreateFileMappingW orig_CreateFileMappingW
+#define MapViewOfFile orig_MapViewOfFile
+#define UnmapViewOfFile orig_UnmapViewOfFile
 #define stat orig_stat
 #define fstat orig_fstat
 #define lstat orig_lstat
+#define access orig_access
+#define faccessat orig_faccessat
+#define statvfs orig_statvfs
+#define fstatvfs orig_fstatvfs
+#define readv orig_readv
+#define preadv orig_preadv
+#define preadv2 orig_preadv2
+#define writev orig_writev
+#define pwritev orig_pwritev
+#define pwritev2 orig_pwritev2
+#define pwrite orig_pwrite
+#define lseek orig_lseek
+#define _lseek orig__lseek
+#define _lseeki64 orig__lseeki64
+#define opendir orig_opendir
+#define fdopendir orig_fdopendir
+#define readdir orig_readdir
+#define closedir orig_closedir
+#define rewinddir orig_rewinddir
 
 #ifdef __linux
 #define stdin orig_stdin
@@ -166,12 +202,14 @@ typedef int BOOL;
 typedef const char *LPCSTR;
 typedef const wchar_t *LPCWSTR;
 typedef void *LPVOID;
-#define PATH_MAX MAX_PATH
 typedef SSIZE_T ssize_t;
 #else
 #include <limits.h>
-    #include <unistd.h>
-    #include <libgen.h>
+#include <unistd.h>
+#include <libgen.h>
+#include <dirent.h>
+#include <sys/uio.h>
+#include <sys/statvfs.h>
 #endif
 #ifndef NUITKAPYTHON_EMBED_BUILD
 #undef open
@@ -257,13 +295,50 @@ typedef SSIZE_T ssize_t;
 #undef GetFileAttributesExW
 #undef GetFileAttributesW
 #undef CloseHandle
+#undef CreateFileA
 #undef CreateFileW
+#undef DeleteFileA
+#undef DeleteFileW
 #undef GetFileInformationByHandle
 #undef GetFileInformationByHandleEx
 #undef GetFileType
+#undef GetFinalPathNameByHandleW
+#undef GetFullPathNameW
+#undef GetVolumePathNameW
+#undef GetDiskFreeSpaceExW
+#undef FindFirstFileA
+#undef FindFirstFileW
+#undef FindNextFileA
+#undef FindNextFileW
+#undef FindClose
+#undef GetFileSizeEx
+#undef GetFileSize
+#undef CreateFileMappingA
+#undef CreateFileMappingW
+#undef MapViewOfFile
+#undef UnmapViewOfFile
 #undef stat
 #undef fstat
 #undef lstat
+#undef access
+#undef faccessat
+#undef statvfs
+#undef fstatvfs
+#undef readv
+#undef preadv
+#undef preadv2
+#undef writev
+#undef pwritev
+#undef pwritev2
+#undef pwrite
+#undef lseek
+#undef _lseek
+#undef _lseeki64
+#undef opendir
+#undef fdopendir
+#undef readdir
+#undef closedir
+#undef rewinddir
 
 #ifdef __linux
 #undef stdin
@@ -335,7 +410,7 @@ typedef struct EFILE_S EFILE;
 #endif
 
 #ifdef _WIN32
-#define NP_FOREIGN_PTR *(void**)e == NULL || (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE)
+#define NP_FOREIGN_PTR e == NULL || *(void**)e == NULL || (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE)
 #else
 #define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
 #endif
@@ -483,6 +558,11 @@ NP_DECL(int64_t) np_ftello64(void *stream);
 NP_DECL(void) np_rewind(void *stream);
 NP_DECL(int) np_fsetpos(void *stream, const fpos_t *pos);
 NP_DECL(int) np_ungetc(int character, void *stream);
+#ifdef _WIN32
+NP_DECL(__int64) np_lseeki64(int fd, __int64 offset, int whence);
+#else
+NP_DECL(ssize_t) np_lseek(int fd, off_t offset, int whence);
+#endif
 
 /* Error Handling & Other Utilities */
 NP_DECL(void) np_clearerr(void *stream);
@@ -509,14 +589,48 @@ NP_DECL(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS 
 NP_DECL(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation);
 NP_DECL(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName);
 NP_STD(BOOL) np_CloseHandle(HANDLE hObject);
+NP_STD(HANDLE) np_CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 NP_STD(HANDLE) np_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+NP_STD(BOOL) np_DeleteFileA(LPCSTR lpFileName);
+NP_STD(BOOL) np_DeleteFileW(LPCWSTR lpFileName);
 NP_STD(BOOL) np_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
 NP_STD(BOOL) np_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize);
+NP_STD(DWORD) np_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
 NP_STD(DWORD) np_GetFileType(HANDLE hFile);
+NP_STD(DWORD) np_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart);
+NP_STD(BOOL) np_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength);
+NP_STD(BOOL) np_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller, PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes);
+NP_STD(HANDLE) np_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData);
+NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData);
+NP_STD(BOOL) np_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData);
+NP_STD(BOOL) np_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData);
+NP_STD(BOOL) np_FindClose(HANDLE hFindFile);
+NP_STD(BOOL) np_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize);
+NP_STD(DWORD) np_GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh);
+NP_STD(HANDLE) np_CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect, DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCSTR lpName);
+NP_STD(HANDLE) np_CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect, DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName);
+NP_STD(LPVOID) np_MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh, DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap);
+NP_STD(BOOL) np_UnmapViewOfFile(LPCVOID lpBaseAddress);
 #else
 NP_DECL(int) np_stat(const char *path, struct stat *buf);
 NP_DECL(int) np_fstat(int fd, struct stat *buf);
 NP_DECL(int) np_lstat(const char *path, struct stat *buf);
+NP_DECL(int) np_access(const char *pathname, int mode);
+NP_DECL(int) np_faccessat(int dirfd, const char *pathname, int mode, int flags);
+NP_DECL(int) np_statvfs(const char *path, struct statvfs *buf);
+NP_DECL(int) np_fstatvfs(int fd, struct statvfs *buf);
+NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt);
+NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset);
+NP_DECL(ssize_t) np_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags);
+NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt);
+NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset);
+NP_DECL(ssize_t) np_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags);
+NP_DECL(ssize_t) np_pwrite(int fd, const void *buf, size_t count, off_t offset);
+NP_DECL(DIR*) np_opendir(const char* name);
+NP_DECL(DIR*) np_fdopendir(int fd);
+NP_DECL(struct dirent*) np_readdir(DIR *dirp);
+NP_DECL(int) np_closedir(DIR *dirp);
+NP_DECL(void) np_rewinddir(DIR *dirp);
 #endif
 
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
@@ -875,6 +989,15 @@ ALWAYS_INLINE NP_DECL(int) _fseeki64(void *stream, int64_t offset, int origin) {
 ALWAYS_INLINE NP_DECL(int64_t) _ftelli64(void *stream) {
     return np_ftello64(stream);
 }
+ALWAYS_INLINE NP_DECL(long) lseek(int fd, long offset, int whence) {
+    return (long)np_lseeki64(fd, offset, whence);
+}
+ALWAYS_INLINE NP_DECL(long) _lseek(int fd, long offset, int whence) {
+    return (long)np_lseeki64(fd, offset, whence);
+}
+ALWAYS_INLINE NP_DECL(__int64) _lseeki64(int fd, __int64 offset, int whence) {
+    return np_lseeki64(fd, offset, whence);
+}
 #else
 #if defined _FILE_OFFSET_BITS && _FILE_OFFSET_BITS == 64
 ALWAYS_INLINE NP_DECL(int) fseeko(void *stream, int64_t offset, int origin) {
@@ -891,6 +1014,9 @@ ALWAYS_INLINE NP_DECL(long int) ftello(void *stream) {
     return np_ftell(stream);
 }
 #endif
+ALWAYS_INLINE NP_DECL(off_t) lseek(int fd, off_t offset, int whence) {
+    return np_lseek(fd, offset, whence);
+}
 #endif
 
 ALWAYS_INLINE NP_DECL(void) rewind(void *stream) {
@@ -1011,6 +1137,18 @@ ALWAYS_INLINE NP_STD(BOOL) CloseHandle(
     return np_CloseHandle(hObject);
 }
 
+ALWAYS_INLINE NP_STD(HANDLE) CreateFileA(
+        _In_     LPCSTR                lpFileName,
+        _In_     DWORD                 dwDesiredAccess,
+        _In_     DWORD                 dwShareMode,
+        _In_opt_ LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+        _In_     DWORD                 dwCreationDisposition,
+        _In_     DWORD                 dwFlagsAndAttributes,
+        _In_opt_ HANDLE                hTemplateFile
+) {
+    return np_CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
 ALWAYS_INLINE NP_STD(HANDLE) CreateFileW(
     _In_ LPCWSTR lpFileName,
     _In_ DWORD dwDesiredAccess,
@@ -1021,6 +1159,18 @@ ALWAYS_INLINE NP_STD(HANDLE) CreateFileW(
     _In_opt_ HANDLE hTemplateFile
 ) {
     return np_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) DeleteFileA(
+        _In_ LPCSTR lpFileName
+) {
+    return np_DeleteFileA(lpFileName);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) DeleteFileW(
+        _In_ LPCWSTR lpFileName
+) {
+    return np_DeleteFileW(lpFileName);
 }
 
 ALWAYS_INLINE NP_STD(BOOL) GetFileInformationByHandle(
@@ -1045,6 +1195,166 @@ ALWAYS_INLINE NP_STD(DWORD) GetFileType(
     return np_GetFileType(hFile);
 }
 
+ALWAYS_INLINE NP_STD(DWORD) GetFinalPathNameByHandleW(
+    _In_ HANDLE hFile,
+    _Out_writes_(cchFilePath) LPWSTR lpszFilePath,
+    _In_ DWORD cchFilePath,
+    _In_ DWORD dwFlags
+) {
+    return np_GetFinalPathNameByHandleW(hFile, lpszFilePath, cchFilePath, dwFlags);
+}
+
+/**
+ * @brief Inline wrapper for GetFullPathNameW to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(DWORD) GetFullPathNameW(
+    _In_ LPCWSTR lpFileName,
+    _In_ DWORD nBufferLength,
+    _Out_writes_to_(nBufferLength, return + 1) LPWSTR lpBuffer,
+    _Out_opt_ LPWSTR *lpFilePart
+) {
+    return np_GetFullPathNameW(lpFileName, nBufferLength, lpBuffer, lpFilePart);
+}
+
+/**
+ * @brief Inline wrapper for GetVolumePathNameW to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(BOOL) GetVolumePathNameW(
+    _In_ LPCWSTR lpszFileName,
+    _Out_writes_to_(cchBufferLength, return != 0 ? wcslen(lpszVolumePathName) + 1 : 0) LPWSTR lpszVolumePathName,
+    _In_ DWORD cchBufferLength
+) {
+    return np_GetVolumePathNameW(lpszFileName, lpszVolumePathName, cchBufferLength);
+}
+
+/**
+ * @brief Inline wrapper for GetDiskFreeSpaceExW to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(BOOL) GetDiskFreeSpaceExW(
+    _In_opt_ LPCWSTR lpDirectoryName,
+    _Out_opt_ PULARGE_INTEGER lpFreeBytesAvailableToCaller,
+    _Out_opt_ PULARGE_INTEGER lpTotalNumberOfBytes,
+    _Out_opt_ PULARGE_INTEGER lpTotalNumberOfFreeBytes
+) {
+    return np_GetDiskFreeSpaceExW(lpDirectoryName, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+}
+
+ALWAYS_INLINE NP_STD(HANDLE) FindFirstFileA(
+        _In_  LPCSTR             lpFileName,
+        _Out_ LPWIN32_FIND_DATAA lpFindFileData
+) {
+    return np_FindFirstFileA(lpFileName, lpFindFileData);
+}
+
+/**
+ * @brief Inline wrapper for FindFirstFileW to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(HANDLE) FindFirstFileW(
+    _In_ LPCWSTR lpFileName,
+    _Out_ LPWIN32_FIND_DATAW lpFindFileData
+) {
+    return np_FindFirstFileW(lpFileName, lpFindFileData);
+}
+
+ALWAYS_INLINE NP_STD(BOOL) FindNextFileA(
+        _In_  HANDLE             hFindFile,
+        _Out_ LPWIN32_FIND_DATAA lpFindFileData
+) {
+    return np_FindNextFileA(hFindFile, lpFindFileData);
+}
+
+/**
+ * @brief Inline wrapper for FindNextFileW to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(BOOL) FindNextFileW(
+    _In_ HANDLE hFindFile,
+    _Out_ LPWIN32_FIND_DATAW lpFindFileData
+) {
+    return np_FindNextFileW(hFindFile, lpFindFileData);
+}
+
+/**
+ * @brief Inline wrapper for FindClose to call our implementation.
+ */
+ALWAYS_INLINE NP_STD(BOOL) FindClose(
+    _Inout_ HANDLE hFindFile
+) {
+    return np_FindClose(hFindFile);
+}
+
+/**
+ * @brief Retrieves the size of the specified file, in bytes.
+ * @param hFile A handle to the file.
+ * @param lpFileSize A pointer to a variable that receives the file size.
+ * @return Nonzero on success, zero on failure.
+ */
+ALWAYS_INLINE NP_STD(BOOL) GetFileSizeEx(
+        _In_  HANDLE         hFile,
+        _Out_ PLARGE_INTEGER lpFileSize
+) {
+    return np_GetFileSizeEx(hFile, lpFileSize);
+}
+
+/**
+ * @brief Retrieves the size of the specified file.
+ * @param hFile A handle to the file.
+ * @param lpFileSizeHigh A pointer to the high-order doubleword of the file size.
+ * @return The low-order doubleword of the file size, or INVALID_FILE_SIZE.
+ */
+ALWAYS_INLINE NP_STD(DWORD) GetFileSize(
+        _In_      HANDLE  hFile,
+        _Out_opt_ LPDWORD lpFileSizeHigh
+) {
+    return np_GetFileSize(hFile, lpFileSizeHigh);
+}
+
+ALWAYS_INLINE NP_STD(HANDLE) CreateFileMappingA(
+        _In_     HANDLE                hFile,
+        _In_opt_ LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
+        _In_     DWORD                 flProtect,
+        _In_     DWORD                 dwMaximumSizeHigh,
+        _In_     DWORD                 dwMaximumSizeLow,
+        _In_opt_ LPCSTR                lpName
+) {
+    return np_CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+}
+
+ALWAYS_INLINE NP_STD(HANDLE) CreateFileMappingW(
+        _In_     HANDLE                hFile,
+        _In_opt_ LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
+        _In_     DWORD                 flProtect,
+        _In_     DWORD                 dwMaximumSizeHigh,
+        _In_     DWORD                 dwMaximumSizeLow,
+        _In_opt_ LPCWSTR               lpName
+) {
+    return np_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+}
+
+
+/**
+ * @brief Maps a view of a file mapping into the address space of a calling process.
+ * @return The starting address of the mapped view on success, NULL on failure.
+ */
+ALWAYS_INLINE NP_STD(LPVOID) MapViewOfFile(
+        _In_ HANDLE hFileMappingObject,
+        _In_ DWORD  dwDesiredAccess,
+        _In_ DWORD  dwFileOffsetHigh,
+        _In_ DWORD  dwFileOffsetLow,
+        _In_ SIZE_T dwNumberOfBytesToMap
+) {
+    return np_MapViewOfFile(hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+}
+
+/**
+ * @brief Unmaps a mapped view of a file from the calling process's address space.
+ * @return Nonzero on success, zero on failure.
+ */
+ALWAYS_INLINE NP_STD(BOOL) UnmapViewOfFile(
+        _In_ LPCVOID lpBaseAddress
+) {
+    return np_UnmapViewOfFile(lpBaseAddress);
+}
+
 #else
 ALWAYS_INLINE NP_DECL(int) stat(const char *path, struct stat *buf) {
     return np_stat(path, buf);
@@ -1067,6 +1377,74 @@ ALWAYS_INLINE NP_DECL(void) funlockfile(void *stream) {
 }
 ALWAYS_INLINE NP_DECL(int) ftrylockfile(void *stream) {
     return np_ftrylockfile(stream);
+}
+
+ALWAYS_INLINE NP_DECL(int) access(const char *pathname, int mode) {
+    return np_access(pathname, mode);
+}
+
+ALWAYS_INLINE NP_DECL(int) faccessat(int dirfd, const char *pathname, int mode, int flags) {
+    return np_faccessat(dirfd, pathname, mode, flags);
+}
+
+ALWAYS_INLINE NP_DECL(int) statvfs(const char *path, struct statvfs *buf) {
+    return np_statvfs(path, buf);
+}
+
+ALWAYS_INLINE NP_DECL(int) fstatvfs(int fd, struct statvfs *buf) {
+    return np_fstatvfs(fd, buf);
+}
+
+ALWAYS_INLINE NP_DECL(ssize_t) readv(int fd, const struct iovec *iov, int iovcnt) {
+    return np_readv(fd, iov, iovcnt);
+}
+
+ALWAYS_INLINE NP_DECL(ssize_t) preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+    return np_preadv(fd, iov, iovcnt, offset);
+}
+
+#ifdef __linux // preadv2 and pwritev2 are GNU extensions
+ALWAYS_INLINE NP_DECL(ssize_t) preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+    return np_preadv2(fd, iov, iovcnt, offset, flags);
+}
+#endif
+
+ALWAYS_INLINE NP_DECL(ssize_t) writev(int fd, const struct iovec *iov, int iovcnt) {
+    return np_writev(fd, iov, iovcnt);
+}
+
+ALWAYS_INLINE NP_DECL(ssize_t) pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+    return np_pwritev(fd, iov, iovcnt, offset);
+}
+
+#ifdef __linux // preadv2 and pwritev2 are GNU extensions
+ALWAYS_INLINE NP_DECL(ssize_t) pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+    return np_pwritev2(fd, iov, iovcnt, offset, flags);
+}
+#endif
+
+ALWAYS_INLINE NP_DECL(ssize_t) pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    return np_pwrite(fd, buf, count, offset);
+}
+
+ALWAYS_INLINE NP_DECL(DIR *) opendir(const char *name) {
+    return np_opendir(name);
+}
+
+ALWAYS_INLINE NP_DECL(DIR *) fdopendir(int fd) {
+    return np_fdopendir(fd);
+}
+
+ALWAYS_INLINE NP_DECL(struct dirent *) readdir(DIR *dirp) {
+    return np_readdir(dirp);
+}
+
+ALWAYS_INLINE NP_DECL(int) closedir(DIR *dirp) {
+    return np_closedir(dirp);
+}
+
+ALWAYS_INLINE NP_DECL(void) rewinddir(DIR *dirp) {
+    np_rewinddir(dirp);
 }
 #endif
 

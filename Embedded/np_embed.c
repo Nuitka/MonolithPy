@@ -9,6 +9,12 @@
 #include <ctype.h>
 #include <stdarg.h>
 
+#if _WIN32
+#define strcasecmp _stricmp
+#else
+#include <strings.h>
+#endif
+
 extern const char nuitka_embed_map;
 extern const long nuitka_embed_map_len;
 
@@ -22,6 +28,41 @@ struct FDMAP_S {    // Virtual File Stream
 typedef struct FDMAP_S FDMAP;
 
 FDMAP np_fd2file[512] = {};
+
+// A map to associate mapping HANDLEs with our virtual EFILE structs.
+struct VMAP_S {   // Virtual File Mapping
+    HANDLE h;
+    EFILE *f;
+};
+typedef struct VMAP_S VMAP;
+
+// An array to store the mappings for open virtual files.
+VMAP np_mapping2file[512] = {};
+
+// A map to associate view pointers with our virtual EFILE structs
+struct VIEWMAP_S { // Virtual File View
+    LPVOID view;
+    EFILE *f;
+};
+typedef struct VIEWMAP_S VIEWMAP;
+
+VIEWMAP np_view2file[512] = {};
+
+// For FindFirst/NextFile functionality
+typedef struct VIRTUAL_FIND_HANDLE_DATA_S {
+    EMAP* map_ptr; // Current position in the embedded map iterator
+    char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
+    char search_pattern[PATH_MAX]; // The file pattern (e.g., "*.txt")
+} VIRTUAL_FIND_HANDLE_DATA;
+
+// A map to associate find handles with our virtual find data
+struct FIND_HNDMAP_S {
+    HANDLE h;
+    VIRTUAL_FIND_HANDLE_DATA *data;
+};
+typedef struct FIND_HNDMAP_S FIND_HNDMAP;
+
+FIND_HNDMAP np_findhandles[512] = {};
 
 uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
   uint32_t h = 3323198485ul;
@@ -204,7 +245,7 @@ inline BOOL ExpandShortPath(const char* short_path, char* long_path_buffer, DWOR
     }
 
     // Copy the final constructed path to the output buffer.
-    strcat_s(long_path_buffer, buffer_size, current_path);
+    strcpy_s(long_path_buffer, buffer_size, current_path);
 
     // Clean up the memory allocated by DecomposePath.
     FreePathComponents(components, component_count);
@@ -268,13 +309,14 @@ static bool get_executable_path(char *execfolder, char *executable) {
   return true;
 }
 
-static bool find_embedded_file(const char *search_path, EMAP **found_map) {
+static bool find_embedded_file(char *search_path, EMAP **found_map) {
   EMAP *map = (EMAP*)(&nuitka_embed_map);
   const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-  uint32_t key = hash((char*)search_path);
+  for (char *p = search_path ; *p; ++p) *p = tolower(*p);
+  uint32_t key = hash(search_path);
 
   while ((char*)map < end) {
-    if (map->hash == key && strcmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
+    if (map->hash == key && strcasecmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
       *found_map = map;
       return true;
     }
@@ -470,7 +512,7 @@ NP_DECL(int) np_close(int fd) {
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
       e = np_fd2file[i].f;
-      fd_idx = -1;
+      fd_idx = i;
       break;
     }
   }
@@ -482,9 +524,13 @@ NP_DECL(int) np_close(int fd) {
     return 0;
   }
 
-  free(e);
-  e = NULL;
-  return 0;
+    if (fd_idx != -1) {
+        np_fd2file[fd_idx].fd = 0;
+        np_fd2file[fd_idx].f = NULL;
+    }
+
+    // Close the underlying file descriptor that was opened on the executable
+    return close(fd);
 }
 
 NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *e) {
@@ -523,11 +569,7 @@ NP_DECL(bool) np_feof(void* e) {
     return feof(((EFILE*)e)->f);
   }
 
-  if(((EFILE*)e)->end < ((EFILE*)e)->pos){
-    errno = EINVAL;
-    return true;
-  }
-  if((((EFILE*)e)->end - ((EFILE*)e)->pos) - ((EFILE*)e)->size < 0){
+  if (((EFILE*)e)->end < ((EFILE*)e)->pos){
     errno = EINVAL;
     return true;
   }
@@ -670,7 +712,7 @@ NP_DECL(int) np_fgetc(void* e) {
 
   if(np_feof(e))
     return -1;
-  return (int)(*(((EFILE*)e)->pos++));
+  return (int)(unsigned char)(*(((EFILE*)e)->pos++));
 }
 
 #ifndef _WIN32
@@ -705,7 +747,7 @@ int64_t np_ftell_priv(void* e) {
 #endif
   }
 
-  return (((EFILE*)e)->end - ((EFILE*)e)->pos) - ((EFILE*)e)->size;
+  return ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
 }
 
 int np_fseek_priv(void* e, int64_t offset, int origin) {
@@ -967,7 +1009,38 @@ NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
   return e;
 }
 
+#ifdef _WIN32
+NP_DECL(__int64) np_lseeki64(int fd, __int64 offset, int whence) {
+#else
+NP_DECL(ssize_t) np_lseek(int fd, off_t offset, int whence) {
+#endif
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e == NULL) {
+#ifdef _WIN32
+        return _lseeki64(fd, offset, whence);
+#else
+        return lseek(fd, offset, whence);
+#endif
+    }
+    if(whence == SEEK_SET)
+        e->pos = (e->end - e->size) + offset;
+    else if(whence == SEEK_CUR)
+        e->pos += offset;
+    else if(whence == SEEK_END)
+        e->pos = e->end + offset;
 
+    if(e->end < e->pos || (e->pos - (e->end - e->size)) < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return (e->pos - (e->end - e->size));
+}
 
 #ifdef _WIN32
 
@@ -1184,23 +1257,11 @@ NP_DECL(int) np__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
 }
 
 NP_STD(DWORD) np_GetFileAttributesA(LPCSTR lpFileName) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(lpFileName, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            DWORD attributes = FILE_ATTRIBUTE_READONLY;
-            if (map->type == ETYPE_DIRECTORY) {
-                attributes |= FILE_ATTRIBUTE_DIRECTORY;
-            }
-            return attributes;
-        }
+    wchar_t wide_path[PATH_MAX];
+    if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
+        return GetFileAttributesA(lpFileName);
     }
-    return GetFileAttributesA(lpFileName);
+    return np_GetFileAttributesW(wide_path);
 }
 
 NP_STD(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName) {
@@ -1227,39 +1288,11 @@ NP_STD(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName) {
 }
 
 NP_STD(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
-    // This logic only supports the standard information level.
-    if (fInfoLevelId != GetFileExInfoStandard || !lpFileInformation) {
+    wchar_t wide_path[PATH_MAX];
+    if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
     }
-
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(lpFileName, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            WIN32_FILE_ATTRIBUTE_DATA *pData = (WIN32_FILE_ATTRIBUTE_DATA *)lpFileInformation;
-            memset(pData, 0, sizeof(WIN32_FILE_ATTRIBUTE_DATA));
-
-            pData->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
-            if (map->type == ETYPE_DIRECTORY) {
-                pData->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
-            }
-
-            // Populate file size
-            ULARGE_INTEGER fileSize;
-            fileSize.QuadPart = map->size;
-            pData->nFileSizeHigh = fileSize.HighPart;
-            pData->nFileSizeLow = fileSize.LowPart;
-
-            // Timestamps are zeroed by memset, which is acceptable for a virtual file.
-            return TRUE;
-        }
-    }
-    return GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
+    return np_GetFileAttributesExW(wide_path, fInfoLevelId, lpFileInformation);
 }
 
 NP_STD(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
@@ -1318,10 +1351,26 @@ HNDMAP np_handle2file[512] = {};
  * @param hObject A valid handle to an open object.
  * @return If the function succeeds, the return value is nonzero.
  *
- * This implementation intercepts handles to virtual files and cleans up
- * the associated resources before closing the underlying native handle.
+ * This implementation intercepts handles to virtual files and file mappings,
+ * cleans up the associated resources, and then calls the appropriate
+ * underlying close function if necessary.
  */
 NP_STD(BOOL) np_CloseHandle(HANDLE hObject) {
+    // Check if it's a handle to a virtual file mapping.
+    for (int i = 0; i < 512; i++) {
+        if (np_mapping2file[i].h == hObject) {
+            // This is a handle to one of our virtual file mappings.
+            // Since the "handle" is just a pointer to an EFILE struct
+            // and doesn't correspond to a real system object that needs closing,
+            // we just clear our tracking entry. The actual EFILE struct
+            // will be freed when the original file handle is closed.
+            np_mapping2file[i].h = NULL;
+            np_mapping2file[i].f = NULL;
+            return TRUE; // Indicate success.
+        }
+    }
+
+    // Check if it's a handle to a virtual file created by CreateFile.
     for (int i = 0; i < 512; i++) {
         if (np_handle2file[i].h == hObject) {
             // This is a handle to one of our virtual files.
@@ -1341,6 +1390,21 @@ NP_STD(BOOL) np_CloseHandle(HANDLE hObject) {
     return CloseHandle(hObject);
 }
 
+NP_STD(HANDLE) np_CreateFileA(
+        LPCSTR lpFileName,
+        DWORD dwDesiredAccess,
+        DWORD dwShareMode,
+        LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+        DWORD dwCreationDisposition,
+        DWORD dwFlagsAndAttributes,
+        HANDLE hTemplateFile
+) {
+    wchar_t wide_path[PATH_MAX];
+    if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
+        return CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    }
+    return np_CreateFileW(wide_path, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
 
 /**
  * @brief Creates or opens a file or I/O device.
@@ -1438,6 +1502,34 @@ NP_STD(HANDLE) np_CreateFileW(
     return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 }
 
+NP_STD(BOOL) np_DeleteFileA(LPCSTR lpFileName) {
+    wchar_t wide_path[PATH_MAX];
+    if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
+        return DeleteFileA(lpFileName);
+    }
+    return np_DeleteFileW(wide_path);
+}
+
+NP_STD(BOOL) np_DeleteFileW(LPCWSTR lpFileName) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, sizeof(file_mb));
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return FALSE;
+        }
+    }
+    return DeleteFileW(lpFileName);
+}
 
 /**
  * @brief Retrieves information about the specified file.
@@ -1584,6 +1676,617 @@ NP_STD(DWORD) np_GetFileType(HANDLE hFile) {
     return GetFileType(hFile);
 }
 
+/**
+ * @brief Retrieves the final path for the specified file.
+ * @param hFile A handle to a file or directory.
+ * @param lpszFilePath A pointer to a buffer that receives the path.
+ * @param cchFilePath The size of the lpszFilePath buffer, in TCHARs.
+ * @param dwFlags The options for how the path should be formatted.
+ * @return The length of the path copied to lpszFilePath, or the required buffer size.
+ *
+ * For virtual files, this returns the path stored within the embedded data.
+ */
+NP_STD(DWORD) np_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (e != NULL && get_executable_path(execfolder, executable)) {
+        char resulting_path[PATH_MAX] = {};
+        if (e->name[0] == '~') {
+            // This is a relative path.
+            size_t execfolder_len = strlen(execfolder);
+            strcpy(&resulting_path[0], execfolder);
+            size_t curr_res_pos = execfolder_len;
+            for (size_t i = 1; i < PATH_MAX && curr_res_pos < PATH_MAX - 1; i++) {
+                char curr = e->name[i];
+                if (curr == '\0')
+                    break;
+                if (curr == '/')
+                    curr = '\\';
+
+                resulting_path[curr_res_pos] = curr;
+                curr_res_pos++;
+            }
+            resulting_path[PATH_MAX - 1] = '\0';
+        } else {
+            strcpy(&resulting_path[0], e->name);
+        }
+
+        // It's a virtual file. The name is the final path.
+        size_t required_chars = mbstowcs(NULL, resulting_path, 0);
+        if (required_chars == (size_t)-1) {
+            SetLastError(ERROR_INVALID_DATA);
+            return 0;
+        }
+
+        if (cchFilePath < required_chars + 1) {
+            // Buffer is too small. Return the required size.
+            return required_chars + 1;
+        }
+
+        size_t converted_chars = mbstowcs(lpszFilePath, resulting_path, cchFilePath);
+        if (converted_chars == (size_t)-1) {
+            SetLastError(ERROR_INVALID_DATA);
+            return 0;
+        }
+
+        return converted_chars;
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFinalPathNameByHandleW(hFile, lpszFilePath, cchFilePath, dwFlags);
+}
+
+/**
+ * @brief Retrieves the full path and file name of the specified file.
+ * @return The length of the string copied to lpBuffer, or the required buffer size.
+ *
+ * For virtual files, this returns the calculated absolute path.
+ */
+NP_STD(DWORD) np_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            // It's a virtual file. Return the absolute path we constructed.
+            size_t required_chars = mbstowcs(NULL, absolute_path, 0) + 1;
+            if (required_chars == 0) {
+                SetLastError(ERROR_INVALID_DATA);
+                return 0;
+            }
+
+            if (nBufferLength < required_chars) {
+                return required_chars; // Return required buffer size
+            }
+
+            mbstowcs(lpBuffer, absolute_path, nBufferLength);
+
+            if (lpFilePart) {
+                *lpFilePart = PathFindFileNameW(lpBuffer);
+            }
+            return wcslen(lpBuffer);
+        }
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFullPathNameW(lpFileName, nBufferLength, lpBuffer, lpFilePart);
+}
+
+/**
+ * @brief Retrieves the volume mount point where the specified path is located.
+ * @return Nonzero on success, zero on failure.
+ *
+ * For virtual files, this retrieves the volume of the executable itself.
+ */
+NP_STD(BOOL) np_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpszFileName, PATH_MAX);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            // It's a virtual file. The volume is the volume of the executable.
+            wchar_t exec_path_w[PATH_MAX];
+            mbstowcs(exec_path_w, executable, PATH_MAX);
+
+            return GetVolumePathNameW(exec_path_w, lpszVolumePathName, cchBufferLength);
+        }
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetVolumePathNameW(lpszFileName, lpszVolumePathName, cchBufferLength);
+}
+
+/**
+ * @brief Retrieves information about the amount of space on a disk volume.
+ * @return Nonzero on success, zero on failure.
+ *
+ * For virtual paths, this returns the disk space for the volume hosting the executable.
+ */
+NP_STD(BOOL) np_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller, PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
+    char dir_mb[PATH_MAX];
+    if (lpDirectoryName != NULL) {
+        wcstombs(dir_mb, lpDirectoryName, PATH_MAX);
+    } else {
+        GetCurrentDirectoryA(PATH_MAX, dir_mb);
+    }
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(dir_mb, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map) && map->type == ETYPE_DIRECTORY) {
+            // It's a virtual directory. The disk space is the one for the executable's drive.
+            return GetDiskFreeSpaceExA(execfolder, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+        }
+    }
+
+    // Fall back for real paths.
+    return GetDiskFreeSpaceExW(lpDirectoryName, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
+}
+
+// Helper to convert WIN32_FIND_DATAW to WIN32_FIND_DATAA
+static void ConvertFindDataWtoA(LPWIN32_FIND_DATAA lpFindFileDataA, const WIN32_FIND_DATAW* lpFindFileDataW) {
+    lpFindFileDataA->dwFileAttributes = lpFindFileDataW->dwFileAttributes;
+    lpFindFileDataA->ftCreationTime = lpFindFileDataW->ftCreationTime;
+    lpFindFileDataA->ftLastAccessTime = lpFindFileDataW->ftLastAccessTime;
+    lpFindFileDataA->ftLastWriteTime = lpFindFileDataW->ftLastWriteTime;
+    lpFindFileDataA->nFileSizeHigh = lpFindFileDataW->nFileSizeHigh;
+    lpFindFileDataA->nFileSizeLow = lpFindFileDataW->nFileSizeLow;
+    lpFindFileDataA->dwReserved0 = lpFindFileDataW->dwReserved0;
+    lpFindFileDataA->dwReserved1 = lpFindFileDataW->dwReserved1;
+    WideCharToMultiByte(CP_ACP, 0, lpFindFileDataW->cFileName, -1, lpFindFileDataA->cFileName, MAX_PATH, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, lpFindFileDataW->cAlternateFileName, -1, lpFindFileDataA->cAlternateFileName, 14, NULL, NULL);
+}
+
+// Helper to populate WIN32_FIND_DATAW from an EMAP entry for FindFirst/Next
+static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
+    memset(find_data, 0, sizeof(WIN32_FIND_DATAW));
+
+    // Convert filename to wide char
+    const char* filename = PathFindFileNameA(&nuitka_embed_data + map->pathpos);
+    mbstowcs(find_data->cFileName, filename, _countof(find_data->cFileName));
+    // Ensure null-termination for safety
+    find_data->cFileName[_countof(find_data->cFileName) - 1] = L'\0';
+
+    // Set attributes
+    find_data->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+    if (map->type == ETYPE_DIRECTORY) {
+        find_data->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
+    }
+
+    // Set file size
+    ULARGE_INTEGER fileSize;
+    fileSize.QuadPart = map->size;
+    find_data->nFileSizeHigh = fileSize.HighPart;
+    find_data->nFileSizeLow = fileSize.LowPart;
+}
+
+NP_STD(HANDLE) np_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
+    wchar_t wide_path[PATH_MAX];
+    if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
+        return FindFirstFileA(lpFileName, lpFindFileData);
+    }
+
+    WIN32_FIND_DATAW find_data_w;
+    HANDLE hFindFile = np_FindFirstFileW(wide_path, &find_data_w);
+
+    if (hFindFile != INVALID_HANDLE_VALUE) {
+        ConvertFindDataWtoA(lpFindFileData, &find_data_w);
+    }
+
+    return hFindFile;
+}
+
+NP_STD(BOOL) np_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
+    VIRTUAL_FIND_HANDLE_DATA* find_handle_data = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_findhandles[i].h == hFindFile) {
+            find_handle_data = np_findhandles[i].data;
+            break;
+        }
+    }
+
+    if (find_handle_data == NULL) {
+        return FindNextFileA(hFindFile, lpFindFileData);
+    }
+
+    WIN32_FIND_DATAW find_data_w;
+    if (np_FindNextFileW(hFindFile, &find_data_w)) {
+        ConvertFindDataWtoA(lpFindFileData, &find_data_w);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/**
+ * @brief Searches a directory for a file or subdirectory.
+ * @return A search handle on success, or INVALID_HANDLE_VALUE on failure.
+ *
+ * Intercepts searches in virtual directories.
+ */
+NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
+    char file_mb[PATH_MAX];
+    wcstombs(file_mb, lpFileName, sizeof(file_mb));
+
+    char search_dir[PATH_MAX];
+    strcpy(search_dir, file_mb);
+    PathRemoveFileSpecA(search_dir);
+    char* search_pattern = PathFindFileNameA(file_mb);
+
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(search_dir, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
+    if (!get_executable_path(execfolder, executable)) {
+        return FindFirstFileW(lpFileName, lpFindFileData);
+    }
+
+    char virtual_dir_path[PATH_MAX] = {};
+    get_virtual_path(virtual_dir_path, execfolder, absolute_path);
+
+    EMAP *dir_map;
+    if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
+        // Ensure virtual directory path ends with a slash for correct matching
+        if (strlen(virtual_dir_path) > 1 && virtual_dir_path[strlen(virtual_dir_path)-1] != '/') {
+            strcat(virtual_dir_path, "/");
+        }
+
+        EMAP *map = (EMAP*)(&nuitka_embed_map);
+        const char *end = &nuitka_embed_map + nuitka_embed_map_len;
+
+        while ((char*)map < end) {
+            if (strncmp(&nuitka_embed_data + map->pathpos, virtual_dir_path, strlen(virtual_dir_path)) == 0) {
+                const char* filename_part = (&nuitka_embed_data + map->pathpos) + strlen(virtual_dir_path);
+                if (strchr(filename_part, '/') == NULL) {
+                    if (PathMatchSpecA(filename_part, search_pattern)) {
+                        VIRTUAL_FIND_HANDLE_DATA* find_handle_data = (VIRTUAL_FIND_HANDLE_DATA*)malloc(sizeof(VIRTUAL_FIND_HANDLE_DATA));
+                        if (!find_handle_data) {
+                            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                            return INVALID_HANDLE_VALUE;
+                        }
+                        find_handle_data->map_ptr = map;
+                        strcpy(find_handle_data->search_pattern, search_pattern);
+                        strcpy(find_handle_data->virtual_dir_path, virtual_dir_path);
+
+                        for (int i = 0; i < 512; i++) {
+                            if (np_findhandles[i].h == NULL) {
+                                np_findhandles[i].h = (HANDLE)find_handle_data;
+                                np_findhandles[i].data = find_handle_data;
+                                populate_find_data(map, lpFindFileData);
+                                return np_findhandles[i].h;
+                            }
+                        }
+                        free(find_handle_data);
+                        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+                        return INVALID_HANDLE_VALUE;
+                    }
+                }
+            }
+            map++;
+        }
+
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return INVALID_HANDLE_VALUE;
+    }
+
+    return FindFirstFileW(lpFileName, lpFindFileData);
+}
+
+/**
+ * @brief Continues a file search from a previous call to FindFirstFileW.
+ * @return Nonzero on success, zero on failure.
+ */
+NP_STD(BOOL) np_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
+    VIRTUAL_FIND_HANDLE_DATA* find_handle_data = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_findhandles[i].h == hFindFile) {
+            find_handle_data = np_findhandles[i].data;
+            break;
+        }
+    }
+
+    if (find_handle_data == NULL) {
+        return FindNextFileW(hFindFile, lpFindFileData);
+    }
+
+    EMAP *map = find_handle_data->map_ptr + 1;
+    const char *end = &nuitka_embed_map + nuitka_embed_map_len;
+
+    while ((char*)map < end) {
+        if (strncmp(&nuitka_embed_data + map->pathpos, find_handle_data->virtual_dir_path, strlen(find_handle_data->virtual_dir_path)) == 0) {
+            const char* filename_part = (&nuitka_embed_data + map->pathpos) + strlen(find_handle_data->virtual_dir_path);
+            if (strchr(filename_part, '/') == NULL) {
+                if (PathMatchSpecA(filename_part, find_handle_data->search_pattern)) {
+                    find_handle_data->map_ptr = map;
+                    populate_find_data(map, lpFindFileData);
+                    return TRUE;
+                }
+            }
+        }
+        map++;
+    }
+
+    SetLastError(ERROR_NO_MORE_FILES);
+    return FALSE;
+}
+
+/**
+ * @brief Closes a file search handle.
+ * @return Nonzero on success, zero on failure.
+ */
+NP_STD(BOOL) np_FindClose(HANDLE hFindFile) {
+    for (int i = 0; i < 512; i++) {
+        if (np_findhandles[i].h == hFindFile) {
+            free(np_findhandles[i].data);
+            np_findhandles[i].h = NULL;
+            np_findhandles[i].data = NULL;
+            return TRUE;
+        }
+    }
+
+    return FindClose(hFindFile);
+}
+
+/**
+ * @brief Retrieves the size of the specified file, in bytes.
+ * @param hFile A handle to the file.
+ * @param lpFileSize A pointer to a variable where the file size is returned.
+ * @return If the function succeeds, the return value is nonzero.
+ *
+ * Intercepts handles to virtual files and provides the file size from the
+ * embedded data map.
+ */
+NP_STD(BOOL) np_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // It's a virtual file.
+        if (lpFileSize == NULL) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+        lpFileSize->QuadPart = e->size;
+        return TRUE;
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFileSizeEx(hFile, lpFileSize);
+}
+
+/**
+ * @brief Retrieves the size of the specified file. (Legacy)
+ * @param hFile A handle to the file.
+ * @param lpFileSizeHigh A pointer to a variable that receives the high-order DWORD of the file size. Can be NULL.
+ * @return If the function succeeds, the return value is the low-order DWORD of the file size.
+ * If the function fails and lpFileSizeHigh is NULL, the return value is INVALID_FILE_SIZE.
+ *
+ * Intercepts handles to virtual files and provides the file size from the
+ * embedded data map.
+ */
+NP_STD(DWORD) np_GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // It's a virtual file.
+        ULARGE_INTEGER fileSize;
+        fileSize.QuadPart = e->size;
+
+        if (lpFileSizeHigh != NULL) {
+            *lpFileSizeHigh = fileSize.HighPart;
+        }
+
+        // The original API returns INVALID_FILE_SIZE on failure. If the low part
+        // is exactly that value, we must clear the last error to indicate success.
+        if (fileSize.LowPart == INVALID_FILE_SIZE) {
+            SetLastError(NO_ERROR);
+        }
+
+        return fileSize.LowPart;
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return GetFileSize(hFile, lpFileSizeHigh);
+}
+
+NP_STD(HANDLE) np_CreateFileMappingA(
+    HANDLE                hFile,
+    LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
+    DWORD                 flProtect,
+    DWORD                 dwMaximumSizeHigh,
+    DWORD                 dwMaximumSizeLow,
+    LPCSTR                lpName
+) {
+    // If a name is provided for the mapping object, we need to convert it
+    // to a wide character string to pass to the np_CreateFileMappingW function.
+    if (lpName) {
+        // Determine the required buffer size for the wide string.
+        int required_chars = MultiByteToWideChar(CP_ACP, 0, lpName, -1, NULL, 0);
+        if (required_chars == 0) {
+             // Let the real API handle the error.
+            return CreateFileMappingA(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+        }
+
+        // Allocate memory for the wide string.
+        wchar_t* wide_name = (wchar_t*)malloc(required_chars * sizeof(wchar_t));
+        if (wide_name == NULL) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NULL;
+        }
+
+        // Perform the conversion.
+        MultiByteToWideChar(CP_ACP, 0, lpName, -1, wide_name, required_chars);
+
+        // Call our wide-character implementation with the converted name.
+        HANDLE result = np_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, wide_name);
+
+        // Free the allocated memory for the wide string.
+        free(wide_name);
+
+        return result;
+    } else {
+        // If no name is provided, we can call the wide-character version directly with NULL.
+        return np_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, NULL);
+    }
+}
+
+
+NP_STD(HANDLE) np_CreateFileMappingW(
+    HANDLE                hFile,
+    LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
+    DWORD                 flProtect,
+    DWORD                 dwMaximumSizeHigh,
+    DWORD                 dwMaximumSizeLow,
+    LPCWSTR               lpName
+) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_handle2file[i].h == hFile) {
+            e = np_handle2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // This is a virtual file.
+        // Virtual files are read-only, so deny writeable mappings.
+        if (flProtect & (PAGE_EXECUTE_READWRITE | PAGE_READWRITE)) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return NULL;
+        }
+
+        // The size of the mapping must be within the file's bounds.
+        ULONGLONG maxSize = ((ULONGLONG)dwMaximumSizeHigh << 32) | dwMaximumSizeLow;
+        if (maxSize > e->size) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return NULL;
+        }
+
+        // We can't create a real mapping object for in-memory data.
+        // Instead, we'll use a pointer to our EFILE struct as a "handle".
+        // This is a bit of a hack, but it allows us to identify the mapping later.
+        // Find an empty slot in our mapping table.
+        for (int i = 0; i < 512; i++) {
+            if (np_mapping2file[i].h == NULL) {
+                // We use the EFILE pointer itself as the handle.
+                np_mapping2file[i].h = (HANDLE)e;
+                np_mapping2file[i].f = e;
+                return (HANDLE)e;
+            }
+        }
+        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+        return NULL;
+    }
+
+    // Not a virtual file, fall back to the real API.
+    return CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
+}
+
+NP_STD(LPVOID) np_MapViewOfFile(
+    HANDLE hFileMappingObject,
+    DWORD  dwDesiredAccess,
+    DWORD  dwFileOffsetHigh,
+    DWORD  dwFileOffsetLow,
+    SIZE_T dwNumberOfBytesToMap
+) {
+    EFILE* e = NULL;
+    for (int i = 0; i < 512; i++) {
+        // Check if the mapping object is one of our virtual ones.
+        if (np_mapping2file[i].h == hFileMappingObject) {
+            e = np_mapping2file[i].f;
+            break;
+        }
+    }
+
+    if (e != NULL) {
+        // It's a virtual mapping. The "view" is just a pointer into our data block.
+        // Check for write access, which is not allowed.
+        if (dwDesiredAccess & (FILE_MAP_WRITE | FILE_MAP_ALL_ACCESS)) {
+            SetLastError(ERROR_ACCESS_DENIED);
+            return NULL;
+        }
+
+        ULONGLONG offset = ((ULONGLONG)dwFileOffsetHigh << 32) | dwFileOffsetLow;
+        if (offset >= e->size) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return NULL;
+        }
+
+        LPVOID view = (LPVOID)(e->pos + offset);
+
+        // Store the view so we can recognize it in UnmapViewOfFile
+        for (int i = 0; i < 512; i++) {
+            if (np_view2file[i].view == NULL) {
+                np_view2file[i].view = view;
+                np_view2file[i].f = e;
+                return view;
+            }
+        }
+        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+        return NULL;
+    }
+
+    // Not a virtual mapping, fall back to the real API.
+    return MapViewOfFile(hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
+}
+
+NP_STD(BOOL) np_UnmapViewOfFile(
+    LPCVOID lpBaseAddress
+) {
+    for (int i = 0; i < 512; i++) {
+        if (np_view2file[i].view == lpBaseAddress) {
+            // This is a view of one of our virtual files.
+            // Since we didn't allocate memory with MapViewOfFile,
+            // we don't need to free it here. We just clear our tracking entry.
+            np_view2file[i].view = NULL;
+            np_view2file[i].f = NULL;
+            return TRUE;
+        }
+    }
+
+    // Not a virtual view, fall back to the real API.
+    return UnmapViewOfFile(lpBaseAddress);
+}
 #else
 NP_DECL(int) np_stat(const char *file, struct stat *buf) {
     char absolute_path[PATH_MAX] = {};
@@ -1638,4 +2341,312 @@ NP_DECL(int) np_lstat(const char *file, struct stat *buf) {
 NP_DECL(int) np_fstat(int fd, struct stat *buf) {
     return fstat(fd, buf);
 }
+
+
+NP_DECL(int) np_access(const char *pathname, int mode) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            if (mode == F_OK) return 0; // Existence check passes
+            if ((mode & W_OK)) { // Write check fails
+                errno = EROFS;
+                return -1;
+            }
+            if ((mode & R_OK) || (mode & X_OK)) { // Read/Exec check passes
+                return 0;
+            }
+        }
+    }
+    return access(pathname, mode);
+}
+
+NP_DECL(int) np_faccessat(int dirfd, const char *pathname, int mode, int flags) {
+    // This implementation ignores dirfd and flags for virtual files.
+    return np_access(pathname, mode);
+}
+
+NP_DECL(int) np_statvfs(const char *path, struct statvfs *buf) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(path, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+        char search_path[PATH_MAX] = {};
+        get_virtual_path(search_path, execfolder, absolute_path);
+
+        EMAP *map;
+        if (find_embedded_file(search_path, &map)) {
+            // Virtual file system lives on the same FS as the executable
+            return statvfs(execfolder, buf);
+        }
+    }
+    return statvfs(path, buf);
+}
+
+NP_DECL(int) np_fstatvfs(int fd, struct statvfs *buf) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e != NULL) {
+        char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+        if (get_executable_path(execfolder, executable)) {
+            return statvfs(execfolder, buf);
+        }
+    }
+    return fstatvfs(fd, buf);
+}
+
+NP_DECL(ssize_t) np_pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e != NULL) {
+        errno = EROFS; // Read-only file system
+        return -1;
+    }
+    return pwrite(fd, buf, count, offset);
+}
+
+NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e == NULL) {
+        return readv(fd, iov, iovcnt);
+    }
+
+    ssize_t total_read = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        ssize_t bytes_to_read = iov[i].iov_len;
+        ssize_t remaining_in_file = e->end - e->pos;
+        if (bytes_to_read > remaining_in_file) {
+            bytes_to_read = remaining_in_file;
+        }
+        memcpy(iov[i].iov_base, e->pos, bytes_to_read);
+        e->pos += bytes_to_read;
+        total_read += bytes_to_read;
+        if (bytes_to_read < iov[i].iov_len) {
+            // Reached EOF
+            break;
+        }
+    }
+    return total_read;
+}
+
+NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+     EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e == NULL) {
+        return preadv(fd, iov, iovcnt, offset);
+    }
+
+    if (offset >= e->size) return 0;
+
+    const char* start_pos = (e->end - e->size) + offset;
+    ssize_t total_read = 0;
+    for (int i = 0; i < iovcnt; i++) {
+        ssize_t bytes_to_read = iov[i].iov_len;
+        ssize_t remaining_in_file = e->end - start_pos;
+         if (bytes_to_read > remaining_in_file) {
+            bytes_to_read = remaining_in_file;
+        }
+        memcpy(iov[i].iov_base, start_pos, bytes_to_read);
+        start_pos += bytes_to_read;
+        total_read += bytes_to_read;
+        if (bytes_to_read < iov[i].iov_len) {
+            break;
+        }
+    }
+    return total_read;
+}
+
+#ifdef __linux
+NP_DECL(ssize_t) np_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+    // Ignoring flags for virtual files
+    return np_preadv(fd, iov, iovcnt, offset);
+}
+#endif
+
+NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e != NULL) {
+        errno = EROFS; // Read-only
+        return -1;
+    }
+    return writev(fd, iov, iovcnt);
+}
+
+NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e != NULL) {
+        errno = EROFS; // Read-only
+        return -1;
+    }
+    return pwritev(fd, iov, iovcnt, offset);
+}
+
+#ifdef __linux
+NP_DECL(ssize_t) np_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+    // Ignoring flags for virtual files
+    return np_pwritev(fd, iov, iovcnt, offset);
+}
+#endif
+
+typedef struct VDIR_S {
+    EMAP* map_ptr; // Current position in the embedded map iterator
+    char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
+    struct dirent entry; // The current entry to be returned
+} VDIR;
+
+// A map to associate DIR* pointers with our VDIR structs
+VDIR* np_open_vdirs[512] = {};
+
+NP_DECL(DIR*) np_opendir(const char* name) {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(name, absolute_path, PATH_MAX);
+
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
+    if (!get_executable_path(execfolder, executable)) {
+        return opendir(name);
+    }
+
+    char virtual_dir_path[PATH_MAX] = {};
+    get_virtual_path(virtual_dir_path, execfolder, absolute_path);
+
+    EMAP *dir_map;
+    if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
+        VDIR* vdir = (VDIR*)malloc(sizeof(VDIR));
+        if (!vdir) {
+            errno = ENOMEM;
+            return NULL;
+        }
+        vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
+        strcpy(vdir->virtual_dir_path, virtual_dir_path);
+        // Ensure path ends with a slash for correct matching
+        if (strlen(vdir->virtual_dir_path) > 1 && vdir->virtual_dir_path[strlen(vdir->virtual_dir_path)-1] != '/') {
+            strcat(vdir->virtual_dir_path, "/");
+        }
+
+        for (int i = 0; i < 512; i++) {
+            if (np_open_vdirs[i] == NULL) {
+                np_open_vdirs[i] = vdir;
+                return (DIR*)vdir;
+            }
+        }
+        free(vdir);
+        errno = EMFILE; // Too many open files
+        return NULL;
+    }
+    return opendir(name);
+}
+
+NP_DECL(DIR*) np_fdopendir(int fd) {
+    EFILE *e = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_fd2file[i].fd == fd) {
+            e = np_fd2file[i].f;
+            break;
+        }
+    }
+    if (e != NULL) {
+        // We have a virtual file descriptor. We can open it if it's a directory.
+        return np_opendir(e->name);
+    }
+    return fdopendir(fd);
+}
+
+NP_DECL(struct dirent*) np_readdir(DIR *dirp) {
+    VDIR* vdir = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_open_vdirs[i] == (VDIR*)dirp) {
+            vdir = (VDIR*)dirp;
+            break;
+        }
+    }
+    if (vdir == NULL) {
+        return readdir(dirp);
+    }
+
+    const char *end = &nuitka_embed_map + nuitka_embed_map_len;
+    while ((char*)vdir->map_ptr < end) {
+        EMAP* current_map = vdir->map_ptr;
+        vdir->map_ptr++; // Advance for next call
+
+        if (strncmp(current_map->name, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
+            const char* filename_part = current_map->name + strlen(vdir->virtual_dir_path);
+            if (*filename_part != '\0' && strchr(filename_part, '/') == NULL) {
+                // It's a direct child.
+                strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
+                // Ensure null-termination, as strncpy may not null-terminate if the source is too long
+                vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
+                // Fake inode number from map position
+                vdir->entry.d_ino = (ino_t)((char*)current_map - nuitka_embed_map);
+                vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
+                return &vdir->entry;
+            }
+        }
+    }
+    return NULL; // No more entries
+}
+
+NP_DECL(int) np_closedir(DIR *dirp) {
+    for (int i = 0; i < 512; i++) {
+        if (np_open_vdirs[i] == (VDIR*)dirp) {
+            free(np_open_vdirs[i]);
+            np_open_vdirs[i] = NULL;
+            return 0;
+        }
+    }
+    return closedir(dirp);
+}
+
+NP_DECL(void) np_rewinddir(DIR *dirp) {
+    VDIR* vdir = NULL;
+    for (int i = 0; i < 512; i++) {
+        if (np_open_vdirs[i] == (VDIR*)dirp) {
+            vdir = (VDIR*)dirp;
+            break;
+        }
+    }
+    if (vdir != NULL) {
+        vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
+    } else {
+        rewinddir(dirp);
+    }
+}
+
 #endif

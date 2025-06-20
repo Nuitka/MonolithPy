@@ -37,7 +37,7 @@ if NOT DEFINED PYTHON (
 
 %PYTHON% -c "import urllib.request; open('Embedded/embed_data/C/vfs/ssl/cert.pem', 'wb').write(urllib.request.urlopen('https://mkcert.org/generate/').read().decode('utf-8').encode('ascii', errors='backslashreplace'))"
 
-%PYTHON% Lib\mkembed.py Embedded Embedded\embed_data
+%PYTHON% Lib\mkembeddata.py Embedded Embedded\embed_data
 
 cl /c /Zi /FoEmbedded\np_embed.obj Embedded\np_embed.c /IInclude
 cl /c /FoEmbedded\np_embed_data.obj Embedded\np_embed_data.c

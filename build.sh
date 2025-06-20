@@ -60,7 +60,7 @@ mkdir -p ${PREFIX}/lib
 # Preparing embedded resources
 mkdir -p Embedded/embed_data/vfs/ssl
 curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
-python3 Lib/mkembed.py Embedded Embedded/embed_data
+python3 Lib/mkembeddata.py Embedded Embedded/embed_data
 $CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
 $CC -c -o Embedded/np_embed_data.o Embedded/np_embed_data.c
 ar rcs ${PREFIX}/lib/libnp_embed.a Embedded/np_embed.o Embedded/np_embed_data.o

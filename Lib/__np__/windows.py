@@ -77,28 +77,32 @@ def nmake(*args):
     return run_compiler_exe("nmake.exe", *args)
 
 
-def auto_patch_MD_MT_file(fpath):
+def auto_patch_build_file(fpath):
     try:
         if fpath.endswith("CMakeLists.txt"):
             with open(fpath, "r") as f:
                 s = f.read()
             s2 = s.replace("/MD", "/MT")
             s2 = s2.replace("-MD", "-MT")
+            escaped_embed_path = os.path.join(sysconfig.get_config_var('base'), 'libs', 'np_embed.lib').replace("\\", "/")
+            escaped_include = sysconfig.get_config_var("INCLUDEPY").replace("\\", "/")
             s2 = re.sub(
                 r"cmake_minimum_required *\( *VERSION [0-9\.]+ *\)",
-                """cmake_minimum_required(VERSION 3.15)
-            set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
-            foreach(flag_var
-                        CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-                        CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-                        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-                        CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-                    if(${flag_var} MATCHES "/MD")
-                        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
-                    endif()
-                endforeach(flag_var)
+                f"""cmake_minimum_required(VERSION 3.15)
+set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
+foreach(flag_var
+            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
+            CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
+            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+        if(${{flag_var}} MATCHES "/MD")
+            string(REGEX REPLACE "/MD" "/MT" ${{flag_var}} "${{${{flag_var}}}}")
+        endif()
+    endforeach(flag_var)
 
-         """,
+add_link_options({escaped_embed_path} Shlwapi.lib)
+include_directories({escaped_include})
+""",
                 s2,
                 flags=re.IGNORECASE,
             )
@@ -122,14 +126,14 @@ def auto_patch_MD_MT_file(fpath):
         pass
 
 
-def auto_patch_MD_MT(folder):
+def auto_patch_build(folder):
     for dname, dirs, files in os.walk(folder):
         for fname in files:
             fpath = os.path.join(dname, fname)
             if ".git" in fpath or ".svn" in fpath:
                 continue
 
-            auto_patch_MD_MT_file(fpath)
+            auto_patch_build_file(fpath)
 
 
 def get_object_symbols(obj):

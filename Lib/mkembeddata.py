@@ -2,10 +2,11 @@
 
 import os
 import sys
-try:
-    sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
-except ValueError:
-    pass
+if __name__ == "__main__":
+    try:
+        sys.path.remove(os.path.abspath(os.path.dirname(sys.argv[0])))
+    except ValueError:
+        pass
 
 import struct
 from ctypes import c_uint32
@@ -38,11 +39,6 @@ MAX_UINT32 = 2 ** 32 - 1
 
 
 def main():
-    global out_dir
-    global base_path
-    out_dir = os.path.abspath(sys.argv[1])
-    base_path = os.path.abspath(sys.argv[2])
-
     data_temp_f = open(os.path.join(out_dir, 'data.dat'), 'wb')
     map_temp_f = open(os.path.join(out_dir, 'map.dat'), 'wb')
 
@@ -52,18 +48,20 @@ def main():
     curr_map_idx = 0
     for dirpath, dnames, fnames in os.walk(base_path):
         curr_dir_path = mkfspath(dirpath)
+        if curr_dir_path in ("/", "~"):
+            continue
         path_hash = hash(curr_dir_path)
         if path_hash in knownHashes:
             print(f"Failed to pack {curr_dir_path} due to hash collision.")
             raise NotImplementedError()
         knownHashes.add(path_hash)
 
-        if curr_dir_path == "/":
+        parent_node = mkfspath(os.path.dirname(dirpath))
+        if parent_node in path2mapidx:
+            parent_node_idx = path2mapidx[parent_node]
+        else:
             # No parent.
             parent_node_idx = MAX_UINT32
-        else:
-            parent_node = mkfspath(os.path.dirname(dirpath))
-            parent_node_idx = path2mapidx[parent_node]
 
         path_start_pos = data_temp_f.tell()
         data_temp_f.write(curr_dir_path.encode('utf-8'))
@@ -77,7 +75,7 @@ def main():
         path2mapidx[curr_dir_path] = dir_map_idx
 
         for fname in fnames:
-            curr_file_path = curr_dir_path + "/" + fname
+            curr_file_path = curr_dir_path + "/" + fname.lower()
             path_hash = hash(curr_file_path)
             if path_hash in knownHashes:
                 print(f"Failed to pack {curr_dir_path} due to hash collision.")
@@ -145,4 +143,6 @@ const unsigned long nuitka_embed_data_len = """ + str(count) + """;
 """)
 
 if __name__ == "__main__":
+    out_dir = os.path.abspath(sys.argv[1])
+    base_path = os.path.abspath(sys.argv[2])
     main()
