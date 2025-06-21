@@ -415,7 +415,8 @@ typedef struct EFILE_S EFILE;
 #define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
 #endif
 
-#if defined(_WIN32) && !defined(NUITKAPYTHON_EMBED_BUILD)
+#if !defined(NUITKAPYTHON_EMBED_BUILD)
+#if defined(_WIN32)
 struct _stat32
 {
     _dev_t         st_dev;
@@ -502,6 +503,59 @@ struct stat
     #define _stati64    _stat64
     #define _wstat      _wstat64i32
     #define _wstati64   _wstat64
+#endif
+#endif  // _WIN32
+#ifdef __APPLE__
+#if __DARWIN_64_BIT_INO_T
+
+struct stat __DARWIN_STRUCT_STAT64;
+
+#else /* !__DARWIN_64_BIT_INO_T */
+
+struct stat {
+	dev_t           st_dev;         /* [XSI] ID of device containing file */
+	ino_t           st_ino;         /* [XSI] File serial number */
+	mode_t          st_mode;        /* [XSI] Mode of file (see below) */
+	nlink_t         st_nlink;       /* [XSI] Number of hard links */
+	uid_t           st_uid;         /* [XSI] User ID of the file */
+	gid_t           st_gid;         /* [XSI] Group ID of the file */
+	dev_t           st_rdev;        /* [XSI] Device ID */
+#if !defined(_POSIX_C_SOURCE) || defined(_DARWIN_C_SOURCE)
+	struct  timespec st_atimespec;  /* time of last access */
+	struct  timespec st_mtimespec;  /* time of last data modification */
+	struct  timespec st_ctimespec;  /* time of last status change */
+#else
+	time_t          st_atime;       /* [XSI] Time of last access */
+	long            st_atimensec;   /* nsec of last access */
+	time_t          st_mtime;       /* [XSI] Last data modification time */
+	long            st_mtimensec;   /* last data modification nsec */
+	time_t          st_ctime;       /* [XSI] Time of last status change */
+	long            st_ctimensec;   /* nsec of last status change */
+#endif
+	off_t           st_size;        /* [XSI] file size, in bytes */
+	blkcnt_t        st_blocks;      /* [XSI] blocks allocated for file */
+	blksize_t       st_blksize;     /* [XSI] optimal blocksize for I/O */
+	__uint32_t      st_flags;       /* user defined flags for file */
+	__uint32_t      st_gen;         /* file generation number */
+	__int32_t       st_lspare;      /* RESERVED: DO NOT USE! */
+	__int64_t       st_qspare[2];   /* RESERVED: DO NOT USE! */
+};
+
+#endif /* __DARWIN_64_BIT_INO_T */
+
+struct statvfs {
+	unsigned long	f_bsize;	/* File system block size */
+	unsigned long	f_frsize;	/* Fundamental file system block size */
+	fsblkcnt_t	f_blocks;	/* Blocks on FS in units of f_frsize */
+	fsblkcnt_t	f_bfree;	/* Free blocks */
+	fsblkcnt_t	f_bavail;	/* Blocks available to non-root */
+	fsfilcnt_t	f_files;	/* Total inodes */
+	fsfilcnt_t	f_ffree;	/* Free inodes */
+	fsfilcnt_t	f_favail;	/* Free inodes for non-root */
+	unsigned long	f_fsid;		/* Filesystem ID */
+	unsigned long	f_flag;		/* Bit mask of values */
+	unsigned long	f_namemax;	/* Max file name length */
+};
 #endif
 #endif
 

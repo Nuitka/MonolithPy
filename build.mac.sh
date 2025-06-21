@@ -28,8 +28,10 @@ export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
-export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -fPIC ${LTO_OPTS}"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib ${LTO_OPTS}"
+export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
+export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lnp_embed ${LTO_OPTS}"
+export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lnp_embed -I${PYTHON_BASE}/Include"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -125,11 +127,7 @@ tar -xf openssl.tar.gz
 cd openssl-3.1.8
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib darwin64-$arch enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
-else
-    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
-fi
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
 #make depend all -j$(sysctl -n hw.ncpu)
 make install_dev -j$(sysctl -n hw.ncpu)
 unset CPPINCLUDES
@@ -154,12 +152,12 @@ make install
 cd ..
 fi
 
-if [ ! -d libffi-3.4.6 ]; then
-download_file https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz libffi.tar.gz
+if [ ! -d libffi-3.5.1 ]; then
+download_file https://github.com/libffi/libffi/releases/download/v3.5.1/libffi-3.5.1.tar.gz libffi.tar.gz
 tar -xf libffi.tar.gz
-cd libffi-3.4.6
+cd libffi-3.5.1
 ./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
+make -j$(sysctl -n hw.ncpu)
 make install
 cd ..
 fi
@@ -185,12 +183,13 @@ make install
 cd ..
 fi
 
-if [ ! -d libpng-1.6.39 ]; then
-download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.39/libpng-1.6.39.tar.xz libpng.tar.gz
+if [ ! -d libpng-1.6.46 ]; then
+download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.46/libpng-1.6.46.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
-cd libpng-1.6.39
+cd libpng-1.6.46
 ./configure --prefix=${PREFIX} --disable-shared --with-zlib-prefix=${PREFIX}
 make pnglibconf.h
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
 sed -i '' -e 's/define PNG_ZLIB_VERNUM 0x[0-9a-z][0-9a-z][0-9a-z][0-9a-z]/define PNG_ZLIB_VERNUM 0/g' pnglibconf.h
 make -j$(sysctl -n hw.ncpu)
 make install
@@ -201,16 +200,18 @@ if [ ! -d harfbuzz-8.3.0 ]; then
 download_file https://github.com/harfbuzz/harfbuzz/releases/download/8.3.0/harfbuzz-8.3.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
 cd harfbuzz-8.3.0
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(sysctl -n hw.ncpu)
 make install
 cd ..
 fi
 
-if [ ! -d freetype-2.13.2 ]; then
-download_file https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz freetype.tar.gz
+if [ ! -d freetype-2.13.3 ]; then
+download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
-cd freetype-2.13.2
+cd freetype-2.13.3
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(sysctl -n hw.ncpu)
 make install
@@ -320,6 +321,9 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
 $ELEVATE mv ${PREFIX}/lib/libnp_embed.a "$target/lib/libnp_embed.a"
 
 $ELEVATE mkdir -p "$target/Embedded"
+# The object file usually gets deleted during the build, so make sure to recompile here just in case.
+rm -f Embedded/np_embed.o
+$CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
 $ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 

@@ -29,6 +29,7 @@ typedef struct FDMAP_S FDMAP;
 
 FDMAP np_fd2file[512] = {};
 
+#ifdef _WIN32
 // A map to associate mapping HANDLEs with our virtual EFILE structs.
 struct VMAP_S {   // Virtual File Mapping
     HANDLE h;
@@ -63,6 +64,7 @@ struct FIND_HNDMAP_S {
 typedef struct FIND_HNDMAP_S FIND_HNDMAP;
 
 FIND_HNDMAP np_findhandles[512] = {};
+#endif
 
 uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
   uint32_t h = 3323198485ul;
@@ -2450,7 +2452,11 @@ NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt) {
     return total_read;
 }
 
-NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+#ifdef __APPLE__
+__API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
+#endif
+{
      EFILE *e = NULL;
     for (int i = 0; i < 512; i++) {
         if (np_fd2file[i].fd == fd) {
@@ -2489,7 +2495,11 @@ NP_DECL(ssize_t) np_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t o
 }
 #endif
 
-NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt) {
+NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt)
+#ifdef __APPLE__
+__API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
+#endif
+{
     EFILE *e = NULL;
     for (int i = 0; i < 512; i++) {
         if (np_fd2file[i].fd == fd) {
@@ -2504,7 +2514,11 @@ NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt) {
     return writev(fd, iov, iovcnt);
 }
 
-NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+#ifdef __APPLE__
+__API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
+#endif
+{
     EFILE *e = NULL;
     for (int i = 0; i < 512; i++) {
         if (np_fd2file[i].fd == fd) {
@@ -2606,17 +2620,18 @@ NP_DECL(struct dirent*) np_readdir(DIR *dirp) {
         EMAP* current_map = vdir->map_ptr;
         vdir->map_ptr++; // Advance for next call
 
-        if (strncmp(current_map->name, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
-            const char* filename_part = current_map->name + strlen(vdir->virtual_dir_path);
+        const char* current_path_str = &nuitka_embed_data + current_map->pathpos;
+
+        if (strncmp(current_path_str, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
+            const char* filename_part = current_path_str + strlen(vdir->virtual_dir_path);
             if (*filename_part != '\0' && strchr(filename_part, '/') == NULL) {
-                // It's a direct child.
-                strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
-                // Ensure null-termination, as strncpy may not null-terminate if the source is too long
-                vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
-                // Fake inode number from map position
-                vdir->entry.d_ino = (ino_t)((char*)current_map - nuitka_embed_map);
-                vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
-                return &vdir->entry;
+                 // It's a direct child.
+                 strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
+                 vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
+                 // Fake inode number from map position
+                 vdir->entry.d_ino = (ino_t)((char*)current_map - (const char*) &nuitka_embed_map);
+                 vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
+                 return &vdir->entry;
             }
         }
     }

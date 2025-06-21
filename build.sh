@@ -29,10 +29,11 @@ set -x
 # happens to also delete all the static libraries that we built.
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
 export "PYTHON_BASE=$(pwd)"
-export "CFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
-export "CXXFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
-export "CPPFLAGS=-I${PREFIX}/include" 
-export "LDFLAGS=-L${PREFIX}/lib -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include"
+export "LDFLAGS=-L${PREFIX}/lib -lnp_embed -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CCexe_LDFLAGS=-L${PREFIX}/lib -lnp_embed -I${PYTHON_BASE}/Include"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
 
@@ -121,11 +122,7 @@ tar -xf openssl.tar.gz
 cd openssl-3.1.8
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '' '1s/^/#include "np_embed.h"\n\'$'\n/g'
-else
-    find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
-fi
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 make install_dev -j$(nproc --all)
 unset CPPINCLUDES
 cd ..
@@ -195,6 +192,7 @@ if [ ! -d libpng-1.6.39 ]; then
 download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.39/libpng-1.6.39.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
 cd libpng-1.6.39
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -205,6 +203,7 @@ if [ ! -d harfbuzz-8.3.0 ]; then
 download_file https://github.com/harfbuzz/harfbuzz/releases/download/8.3.0/harfbuzz-8.3.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
 cd harfbuzz-8.3.0
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -245,6 +244,7 @@ if [ ! -d freetype-2.13.2 ]; then
 download_file https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz freetype.tar.gz
 tar -xf freetype.tar.gz
 cd freetype-2.13.2
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(nproc --all)
 make install
@@ -403,6 +403,10 @@ then
   target="$1"
 fi
 
+export "CFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CXXFLAGS=-I${PREFIX}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CPPFLAGS=-I${PREFIX}/include"
+
 # The UCS4 has best compatibility with wheels on PyPI it seems.
 ./configure "--prefix=$target" --disable-shared --enable-ipv6 --enable-unicode=ucs4 \
   --enable-optimizations --with-lto --with-computed-gotos --with-fpectl --without-readline \
@@ -433,6 +437,9 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
     $ELEVATE mv "$target/lib/python${long_version}/pip.py.bak" "$target/lib/python${long_version}/pip.py"
 
 $ELEVATE mkdir -p "$target/Embedded"
+# The object file usually gets deleted during the build, so make sure to recompile here just in case.
+rm -f Embedded/np_embed.o
+$CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
 $ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 

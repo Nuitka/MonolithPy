@@ -162,7 +162,7 @@ _elementtree _elementtree.c
 pyexpat pyexpat.c
 
 # hashing builtins
-_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c -l:libb2.a
+_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c -lb2
 _md5 md5module.c
 _sha1 sha1module.c
 _sha256 sha256module.c
@@ -182,30 +182,30 @@ unicodedata unicodedata.c
 # Modules with some UNIX dependencies
 
 _posixsubprocess _posixsubprocess.c
-_posixshmem -I$(srcdir)/Modules/_multiprocessing _multiprocessing/posixshmem.c -lrt
+_posixshmem -I$(srcdir)/Modules/_multiprocessing _multiprocessing/posixshmem.c
 fcntl fcntlmodule.c
 grp grpmodule.c
-ossaudiodev ossaudiodev.c
+#ossaudiodev ossaudiodev.c
 resource resource.c
-spwd spwdmodule.c
+#spwd spwdmodule.c
 syslog syslogmodule.c
 termios termios.c
 
 # Modules with UNIX dependencies that require external libraries
 
-_crypt _cryptmodule.c -l:libcrypt.a
+_crypt _cryptmodule.c -lcrypt
 #nis nismodule.c -I/usr/include/tirpc -lnsl -ltirpc
 
 # Modules that require external libraries.
 
-_bz2 _bz2module.c -l:libbz2.a
-_ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict.c _ctypes/cfield.c -ldl -l:libffi.a -DHAVE_FFI_PREP_CIF_VAR -DHAVE_FFI_PREP_CLOSURE_LOC -DHAVE_FFI_CLOSURE_ALLOC
+_bz2 _bz2module.c -lbz2
+_ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict.c _ctypes/cfield.c -ldl -lffi -DHAVE_FFI_PREP_CIF_VAR -DHAVE_FFI_PREP_CLOSURE_LOC -DHAVE_FFI_CLOSURE_ALLOC
 # The _dbm module supports NDBM, GDBM with compat module, and Berkeley DB.
 #_dbm _dbmmodule.c -l:libgdbm_compat.a -DUSE_GDBM_COMPAT
 #_gdbm _gdbmmodule.c -l:libgdbm.a
-_lzma _lzmamodule.c -l:liblzma.a
-_uuid _uuidmodule.c -l:libuuid.a
-zlib  zlibmodule.c -l:libz.a
+_lzma _lzmamodule.c -llzma
+#_uuid _uuidmodule.c -luuid
+zlib  zlibmodule.c -lz
 
 # The readline module also supports libeditline (-leditline).
 # Some systems may require -ltermcap or -ltermlib.
@@ -217,10 +217,10 @@ zlib  zlibmodule.c -l:libz.a
 
 # To statically link OpenSSL:
 _ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -l:libssl.a \
-    -l:libcrypto.a
+    -lssl \
+    -lcrypto
 _hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -l:libcrypto.a
+    -lcrypto
 
 # The _tkinter module.
 #
@@ -253,7 +253,7 @@ _tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
 # *** Uncomment and edit for TOGL extension only:
 #	-DWITH_TOGL togl.c \
 # *** Uncomment and edit to reflect your Tcl/Tk versions:
-	-l:libtk8.6.a -l:libtcl8.6.a \
+	-ltk8.6 -ltcl8.6 \
 # *** Uncomment and edit to reflect where your X11 libraries are:
 #	-L/usr/X11R6/lib \
 # *** Or uncomment this for Solaris:
@@ -263,14 +263,15 @@ _tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
 # *** Uncomment for AIX:
 #	-lld \
 # *** Always uncomment this; X11 libraries to link with:
-	  -l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a
+#	-lX11
+    -framework Cocoa -framework Carbon -framework IOKit -framework QuartzCore -framework CoreServices -framework CoreFoundation -framework ApplicationServices -framework UniformTypeIdentifiers
 
 # Some system have -lcurses
-_curses -l:libncursesw.a _cursesmodule.c
-_curses_panel -l:libpanelw.a -l:libncursesw.a _curses_panel.c
+_curses -lncursesw _cursesmodule.c
+_curses_panel -lpanelw -lncursesw _curses_panel.c
 
 # macOS specific module, needs SystemConfiguration and CoreFoundation framework
-# _scproxy _scproxy.c
+_scproxy _scproxy.c
 
 # Examples
 

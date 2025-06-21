@@ -11,34 +11,37 @@ def make(*args):
     return run_with_output("make", *args)
 
 
-def auto_patch_Cython_memcpy(folder):
-    # TODO: Have a generic implementation, maybe in nuitka.utils for this
+def auto_patch_build_file(fpath):
+    try:
+        if fpath.endswith("CMakeLists.txt"):
+            with open(fpath, "r") as f:
+                s = f.read()
+            s2 = re.sub(
+                r"cmake_minimum_required *\( *VERSION [0-9\.]+ *\)",
+                f"""cmake_minimum_required(VERSION 3.15)
+
+add_link_options({os.path.join(sysconfig.get_config_var('LIBDIR'), 'libnp_embed.a')})
+include_directories({sysconfig.get_config_var("INCLUDEPY")})
+""",
+                s,
+                flags=re.IGNORECASE,
+            )
+            if s != s2:
+                my_print("Fixed up file: %s" % fpath, style="blue")
+                with open(fpath, "w") as f:
+                    f.write(s2)
+    except Exception:
+        pass
+
+
+def auto_patch_build(folder):
     for dname, dirs, files in os.walk(folder):
         for fname in files:
             fpath = os.path.join(dname, fname)
             if ".git" in fpath or ".svn" in fpath:
                 continue
 
-            # TODO: Probably unnecessary
-            if fname.endswith(".cc"):
-                with open(fpath, "r") as f:
-                    s = f.read()
-                s2 = s.replace('"-Wl,-wrap,memcpy"', "")
-
-                if s != s2:
-                    my_print("Removed Cython config: %s" % fpath, style="blue")
-                    with open(fpath, "w") as f:
-                        f.write(s2)
-
-            if fname == "setup.py":
-                with open(fpath, "r") as f:
-                    s = f.read()
-                s2 = s.replace("-Wl,-wrap,memcpy", "")
-
-                if s != s2:
-                    my_print("Removed memcpy wrapper config: %s" % fpath, style="blue")
-                    with open(fpath, "w") as f:
-                        f.write(s2)
+            auto_patch_build_file(fpath)
 
 
 def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
