@@ -557,6 +557,43 @@ struct statvfs {
 	unsigned long	f_namemax;	/* Max file name length */
 };
 #endif
+#ifdef __linux
+struct stat {
+    dev_t     st_dev;         /* ID of device containing file */
+    ino_t     st_ino;         /* Inode number */
+    mode_t    st_mode;        /* File type and mode */
+    nlink_t   st_nlink;       /* Number of hard links */
+    uid_t     st_uid;         /* User ID of owner */
+    gid_t     st_gid;         /* Group ID of owner */
+    dev_t     st_rdev;        /* Device ID (if special file) */
+    off_t     st_size;        /* Total size, in bytes */
+    blksize_t st_blksize;     /* Block size for filesystem I/O */
+    blkcnt_t  st_blocks;      /* Number of 512B blocks allocated */
+
+    /* Timespec structures for nanosecond precision */
+    struct timespec st_atim;  /* Time of last access */
+    struct timespec st_mtim;  /* Time of last modification */
+    struct timespec st_ctim;  /* Time of last status change */
+
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
+};
+
+struct statvfs {
+    unsigned long  f_bsize;    /* Filesystem block size */
+    unsigned long  f_frsize;   /* Fragment size */
+    fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
+    fsblkcnt_t     f_bfree;    /* Number of free blocks */
+    fsblkcnt_t     f_bavail;   /* Number of free blocks for unprivileged users */
+    fsfilcnt_t     f_files;    /* Number of inodes */
+    fsfilcnt_t     f_ffree;    /* Number of free inodes */
+    fsfilcnt_t     f_favail;   /* Number of free inodes for unprivileged users */
+    unsigned long  f_fsid;     /* Filesystem ID */
+    unsigned long  f_flag;     /* Mount flags */
+    unsigned long  f_namemax;  /* Maximum filename length */
+};
+#endif
 #endif
 
 #ifdef __cplusplus
