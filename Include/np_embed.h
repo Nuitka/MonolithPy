@@ -17,6 +17,9 @@
 // Don't even try in that case.
 #define NP_STDIO_ALREADY_LOADED
 #include <fcntl.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #ifdef _WIN32
 	#define NOMINMAX
     #include <wchar.h>
@@ -27,6 +30,7 @@
     #include <limits.h>
     #include <unistd.h>
     #include <libgen.h>
+    #include <sys/statvfs.h>
 #endif
 #else
 
@@ -419,7 +423,7 @@ typedef struct EFILE_S EFILE;
 #define NP_FOREIGN_PTR ((EFILE*)e)->handle_type != EHANDLE_VIRTUAL && ((EFILE*)e)->handle_type != EHANDLE_NATIVE
 #endif
 
-#if !defined(NUITKAPYTHON_EMBED_BUILD)
+#if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
 #if defined(_WIN32)
 struct _stat32
 {
@@ -512,7 +516,37 @@ struct stat
 #ifdef __APPLE__
 #if __DARWIN_64_BIT_INO_T
 
-struct stat __DARWIN_STRUCT_STAT64;
+struct stat {
+    dev_t st_dev;
+    mode_t st_mode;
+    nlink_t st_nlink;
+    __darwin_ino64_t st_ino;
+    uid_t st_uid;
+    gid_t st_gid;
+    dev_t st_rdev;
+#if !defined(_POSIX_C_SOURCE) || defined(_DARWIN_C_SOURCE)
+    struct  timespec st_atimespec;  /* time of last access */
+    struct  timespec st_mtimespec;  /* time of last data modification */
+    struct  timespec st_ctimespec;  /* time of last status change */
+    struct  timespec st_birthtimespec;  /* time of file creation(birth) */
+#else
+    time_t          st_atime;       /* [XSI] Time of last access */
+	long            st_atimensec;   /* nsec of last access */
+	time_t          st_mtime;       /* [XSI] Last data modification time */
+	long            st_mtimensec;   /* last data modification nsec */
+	time_t          st_ctime;       /* [XSI] Time of last status change */
+	long            st_ctimensec;   /* nsec of last status change */
+	time_t		    st_birthtime;       /*  File creation time(birth)  */
+	long		    st_birthtimensec;   /* nsec of File creation time */
+#endif
+    off_t st_size;
+    blkcnt_t st_blocks;
+    blksize_t st_blksize;
+    __uint32_t st_flags;
+    __uint32_t st_gen;
+    __int32_t st_lspare;
+    __int64_t st_qspare[2];
+};
 
 #else /* !__DARWIN_64_BIT_INO_T */
 
@@ -795,7 +829,7 @@ NP_DECL(void) np_rewinddir(DIR *dirp);
 
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
 
-#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
+#if (defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)) || defined(__APPLE__)
 #define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
 #define PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
 
@@ -897,7 +931,7 @@ ALWAYS_INLINE NP_DECL(EFILE*) _fopen(const char* file, const char* mode) {
     return np_fopen(file, mode);
 }
 
-#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
+#if (defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)) || defined(__APPLE__)
 #ifdef __cplusplus
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode = 0) {
 #else

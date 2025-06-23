@@ -38,7 +38,7 @@ jobs:
     - name: Run Build
       run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/Nuitka-Python-Out"
     - name: Cleanup artifact
-      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.o' -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+      run: find "${{ github.workspace }}/Nuitka-Python-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
         name: Nuitka-Python311_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}

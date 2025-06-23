@@ -346,4 +346,6 @@ $ELEVATE ln -s base "$target/dependency_libs/tcltk"
 $ELEVATE ln -s base "$target/dependency_libs/xz"
 $ELEVATE ln -s base "$target/dependency_libs/zlib"
 
+find "$target" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs $ELEVATE rm -rf
+
 $ELEVATE "$target/bin/python${long_version}" -m rebuildpython
