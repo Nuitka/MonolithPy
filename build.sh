@@ -29,10 +29,10 @@ set -x
 # happens to also delete all the static libraries that we built.
 export "PREFIX=$(pwd)/../Nuitka-Python-Deps"
 export "PYTHON_BASE=$(pwd)"
-export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
-export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
-export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/include"
-export "LDFLAGS=-L${PREFIX}/lib -lnp_embed -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
+export "LDFLAGS=-L${PREFIX}/lib -lnp_embed -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CCexe_LDFLAGS=-L${PREFIX}/lib -lnp_embed -I${PYTHON_BASE}/Include"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
@@ -87,7 +87,7 @@ if [ ! -d ncurses-6.4 ]; then
 download_file https://ftp.gnu.org/gnu/ncurses/ncurses-6.4.tar.gz ncurses.tar.gz
 tar -xf ncurses.tar.gz
 cd ncurses-6.4
-./configure --prefix=${PREFIX} --disable-shared --enable-termcap --enable-widec --enable-getcap
+./configure --prefix=${PREFIX} --disable-shared --enable-termcap --enable-widec --enable-getcap --without-cxx-binding
 make libs -j$(nproc --all)
 make install.libs install.includes
 for header in ${PREFIX}/include/ncursesw/*; do
@@ -96,10 +96,11 @@ done
 cd ..
 fi
 
-if [ ! -d editline-1.17.1 ]; then
-download_file https://github.com/troglobit/editline/releases/download/1.17.1/editline-1.17.1.tar.gz editline.tar.gz
+if [ ! -d editline-f735e4d1d566cac3caa4a5e248179d07f0babefd ]; then
+download_file https://github.com/troglobit/editline/archive/f735e4d1d566cac3caa4a5e248179d07f0babefd.tar.gz editline.tar.gz
 tar -xf editline.tar.gz
-cd editline-1.17.1
+cd editline-f735e4d1d566cac3caa4a5e248179d07f0babefd
+./autogen.sh
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -121,8 +122,8 @@ download_file https://www.openssl.org/source/openssl-3.1.8.tar.gz openssl.tar.gz
 tar -xf openssl.tar.gz
 cd openssl-3.1.8
 export "CPPINCLUDES=$PYTHON_BASE/Include"
-./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 make install_dev -j$(nproc --all)
 unset CPPINCLUDES
 cd ..
@@ -178,22 +179,14 @@ make install
 cd ..
 fi
 
-if [ ! -d libxcrypt-4.4.36 ]; then
-download_file https://github.com/besser82/libxcrypt/releases/download/v4.4.36/libxcrypt-4.4.36.tar.xz libxcrypt.tar.xz
-tar -xf libxcrypt.tar.xz
-cd libxcrypt-4.4.36
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
-cd ..
-fi
-
 if [ ! -d libpng-1.6.39 ]; then
 download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.39/libpng-1.6.39.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
 cd libpng-1.6.39
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
+make pnglibconf.h
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+sed -i -e 's/define PNG_ZLIB_VERNUM 0x[0-9a-z][0-9a-z][0-9a-z][0-9a-z]/define PNG_ZLIB_VERNUM 0/g' pnglibconf.h
 make -j$(nproc --all)
 make install
 cd ..
@@ -203,7 +196,7 @@ if [ ! -d harfbuzz-8.3.0 ]; then
 download_file https://github.com/harfbuzz/harfbuzz/releases/download/8.3.0/harfbuzz-8.3.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
 cd harfbuzz-8.3.0
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -240,11 +233,11 @@ make install
 cd ..
 fi
 
-if [ ! -d freetype-2.13.2 ]; then
-download_file https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.gz freetype.tar.gz
+if [ ! -d freetype-2.13.3 ]; then
+download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
-cd freetype-2.13.2
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+cd freetype-2.13.3
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(nproc --all)
 make install
@@ -255,8 +248,9 @@ if [ ! -d fontconfig-2.15.0 ]; then
 download_file https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.gz fontconfig.tar.gz
 tar -xf fontconfig.tar.gz
 cd fontconfig-2.15.0
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all) install || true
+make CPPFLAGS="-I${PREFIX}/include -I${PYTHON_BASE}/Include -DBYPASS_NP_EMBED" -j$(nproc --all) install || true
 echo ----- It is normal for fontconfig to fail to build the executables. The libs should be enough. -----
 cd ..
 fi
@@ -285,6 +279,7 @@ if [ ! -d libXft-2.3.8 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXft-2.3.8.tar.gz libXft.tar.gz
 tar -xf libXft.tar.gz
 cd libXft-2.3.8
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -417,6 +412,10 @@ export "CPPFLAGS=-I${PREFIX}/include"
   LDFLAGS="-g -Xlinker -export-dynamic -rdynamic -Bsymbolic-functions -Wl,-z,relro -Wl,-allow-multiple-definition $LDFLAGS" \
   LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a -l:libnp_embed.a" \
   ax_cv_c_float_words_bigendian=no \
+  ac_cv_lib_sqlite3_sqlite3_bind_double=yes ac_cv_lib_sqlite3_sqlite3_column_decltype=yes ac_cv_lib_sqlite3_sqlite3_column_double=yes \
+  ac_cv_lib_sqlite3_sqlite3_complete=yes ac_cv_lib_sqlite3_sqlite3_enable_shared_cache=yes ac_cv_lib_sqlite3_sqlite3_progress_handler=yes \
+  ac_cv_lib_sqlite3_sqlite3_result_double=yes ac_cv_lib_sqlite3_sqlite3_set_authorizer=yes ac_cv_lib_sqlite3_sqlite3_trace_v2=yes \
+  ac_cv_lib_sqlite3_sqlite3_value_double=yes ac_cv_lib_sqlite3_sqlite3_load_extension=yes ac_cv_lib_sqlite3_sqlite3_serialize=yes \
   ___ORIG_DEPS_PREFIX=${PREFIX}___
 
 make -j $(nproc --all) \
@@ -433,7 +432,6 @@ $ELEVATE rm -rf "$target" && $ELEVATE make install
 # e.g. doesn't include it.
 $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long_version}/pip.py.bak" && \
     $ELEVATE "$target/bin/python${long_version}" -m ensurepip && \
-    $ELEVATE "$target/bin/python${long_version}" install_ssl.py && \
     $ELEVATE mv "$target/lib/python${long_version}/pip.py.bak" "$target/lib/python${long_version}/pip.py"
 
 $ELEVATE mkdir -p "$target/Embedded"

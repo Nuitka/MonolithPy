@@ -36,6 +36,7 @@
 #ifndef NUITKAPYTHON_EMBED_BUILD
 #define open orig_open
 #define _open orig__open
+#define openat orig_openat
 #define fopen orig_fopen
 #define _fopen orig__fopen
 #define fdopen orig_fdopen
@@ -143,6 +144,7 @@
 #define UnmapViewOfFile orig_UnmapViewOfFile
 #define stat orig_stat
 #define fstat orig_fstat
+#define fstatat orig_fstatat
 #define lstat orig_lstat
 #define access orig_access
 #define faccessat orig_faccessat
@@ -214,6 +216,7 @@ typedef SSIZE_T ssize_t;
 #ifndef NUITKAPYTHON_EMBED_BUILD
 #undef open
 #undef _open
+#undef openat
 #undef fopen
 #undef _fopen
 #undef fdopen
@@ -319,6 +322,7 @@ typedef SSIZE_T ssize_t;
 #undef UnmapViewOfFile
 #undef stat
 #undef fstat
+#undef fstatat
 #undef lstat
 #undef access
 #undef faccessat
@@ -558,40 +562,103 @@ struct statvfs {
 };
 #endif
 #ifdef __linux
-struct stat {
-    dev_t     st_dev;         /* ID of device containing file */
-    ino_t     st_ino;         /* Inode number */
-    mode_t    st_mode;        /* File type and mode */
-    nlink_t   st_nlink;       /* Number of hard links */
-    uid_t     st_uid;         /* User ID of owner */
-    gid_t     st_gid;         /* Group ID of owner */
-    dev_t     st_rdev;        /* Device ID (if special file) */
-    off_t     st_size;        /* Total size, in bytes */
-    blksize_t st_blksize;     /* Block size for filesystem I/O */
-    blkcnt_t  st_blocks;      /* Number of 512B blocks allocated */
-
-    /* Timespec structures for nanosecond precision */
-    struct timespec st_atim;  /* Time of last access */
-    struct timespec st_mtim;  /* Time of last modification */
-    struct timespec st_ctim;  /* Time of last status change */
-
-#define st_atime st_atim.tv_sec
-#define st_mtime st_mtim.tv_sec
-#define st_ctime st_ctim.tv_sec
+struct stat
+{
+  __dev_t st_dev;		/* Device.  */
+#ifndef __x86_64__
+  unsigned short int __pad1;
+#endif
+#if defined __x86_64__ || !defined __USE_FILE_OFFSET64
+  __ino_t st_ino;		/* File serial number.	*/
+#else
+  __ino_t __st_ino;			/* 32bit file serial number.	*/
+#endif
+#ifndef __x86_64__
+  __mode_t st_mode;			/* File mode.  */
+    __nlink_t st_nlink;			/* Link count.  */
+#else
+  __nlink_t st_nlink;		/* Link count.  */
+  __mode_t st_mode;		/* File mode.  */
+#endif
+  __uid_t st_uid;		/* User ID of the file's owner.	*/
+  __gid_t st_gid;		/* Group ID of the file's group.*/
+#ifdef __x86_64__
+  int __pad0;
+#endif
+  __dev_t st_rdev;		/* Device number, if device.  */
+#ifndef __x86_64__
+  unsigned short int __pad2;
+#endif
+#if defined __x86_64__ || !defined __USE_FILE_OFFSET64
+  __off_t st_size;			/* Size of file, in bytes.  */
+#else
+  __off64_t st_size;			/* Size of file, in bytes.  */
+#endif
+  __blksize_t st_blksize;	/* Optimal block size for I/O.  */
+#if defined __x86_64__  || !defined __USE_FILE_OFFSET64
+  __blkcnt_t st_blocks;		/* Number 512-byte blocks allocated. */
+#else
+  __blkcnt64_t st_blocks;		/* Number 512-byte blocks allocated. */
+#endif
+#ifdef __USE_XOPEN2K8
+  /* Nanosecond resolution timestamps are stored in a format
+     equivalent to 'struct timespec'.  This is the type used
+     whenever possible but the Unix namespace rules do not allow the
+     identifier 'timespec' to appear in the <sys/stat.h> header.
+     Therefore we have to handle the use of this header in strictly
+     standard-compliant sources special.  */
+  struct timespec st_atim;		/* Time of last access.  */
+  struct timespec st_mtim;		/* Time of last modification.  */
+  struct timespec st_ctim;		/* Time of last status change.  */
+# define st_atime st_atim.tv_sec	/* Backward compatibility.  */
+# define st_mtime st_mtim.tv_sec
+# define st_ctime st_ctim.tv_sec
+#else
+  __time_t st_atime;			/* Time of last access.  */
+  __syscall_ulong_t st_atimensec;	/* Nscecs of last access.  */
+  __time_t st_mtime;			/* Time of last modification.  */
+  __syscall_ulong_t st_mtimensec;	/* Nsecs of last modification.  */
+  __time_t st_ctime;			/* Time of last status change.  */
+  __syscall_ulong_t st_ctimensec;	/* Nsecs of last status change.  */
+#endif
+#ifdef __x86_64__
+  __syscall_slong_t __glibc_reserved[3];
+#else
+# ifndef __USE_FILE_OFFSET64
+  unsigned long int __glibc_reserved4;
+  unsigned long int __glibc_reserved5;
+# else
+  __ino64_t st_ino;			/* File serial number.	*/
+# endif
+#endif
 };
-
-struct statvfs {
-    unsigned long  f_bsize;    /* Filesystem block size */
-    unsigned long  f_frsize;   /* Fragment size */
-    fsblkcnt_t     f_blocks;   /* Size of fs in f_frsize units */
-    fsblkcnt_t     f_bfree;    /* Number of free blocks */
-    fsblkcnt_t     f_bavail;   /* Number of free blocks for unprivileged users */
-    fsfilcnt_t     f_files;    /* Number of inodes */
-    fsfilcnt_t     f_ffree;    /* Number of free inodes */
-    fsfilcnt_t     f_favail;   /* Number of free inodes for unprivileged users */
-    unsigned long  f_fsid;     /* Filesystem ID */
-    unsigned long  f_flag;     /* Mount flags */
-    unsigned long  f_namemax;  /* Maximum filename length */
+struct statvfs
+{
+  unsigned long int f_bsize;
+  unsigned long int f_frsize;
+#ifndef __USE_FILE_OFFSET64
+  __fsblkcnt_t f_blocks;
+  __fsblkcnt_t f_bfree;
+  __fsblkcnt_t f_bavail;
+  __fsfilcnt_t f_files;
+  __fsfilcnt_t f_ffree;
+  __fsfilcnt_t f_favail;
+#else
+  __fsblkcnt64_t f_blocks;
+  __fsblkcnt64_t f_bfree;
+  __fsblkcnt64_t f_bavail;
+  __fsfilcnt64_t f_files;
+  __fsfilcnt64_t f_ffree;
+  __fsfilcnt64_t f_favail;
+#endif
+  unsigned long int f_fsid;
+#ifdef _STATVFSBUF_F_UNUSED
+  int __f_unused;
+#endif
+  unsigned long int f_flag;
+  unsigned long int f_namemax;
+  unsigned int f_type;
+  int __f_spare[5];
 };
 #endif
 #endif
@@ -607,6 +674,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode);
 NP_DECL(int) np_wopen(const wchar_t *pathname, int flags, int mode);
 #else
 NP_DECL(int) np_open(const char *pathname, int flags, mode_t mode);
+NP_DECL(int) np_openat(int dirfd, const char* pathname, int flags, mode_t mode);
 #endif
 NP_DECL(int) np_fclose(void* e);
 NP_DECL(int) np_close(int fd);
@@ -705,6 +773,7 @@ NP_STD(BOOL) np_UnmapViewOfFile(LPCVOID lpBaseAddress);
 #else
 NP_DECL(int) np_stat(const char *path, struct stat *buf);
 NP_DECL(int) np_fstat(int fd, struct stat *buf);
+NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags);
 NP_DECL(int) np_lstat(const char *path, struct stat *buf);
 NP_DECL(int) np_access(const char *pathname, int mode);
 NP_DECL(int) np_faccessat(int dirfd, const char *pathname, int mode, int flags);
@@ -843,9 +912,16 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode) {
 #endif
   return np_open(pathname, flags, mode);
 }
+#ifdef __cplusplus
+ALWAYS_INLINE NP_DECL(int) openat(int dirfd, const char *pathname, int flags, mode_t mode = 0) {
+#else
+ALWAYS_INLINE NP_DECL(int) openat(int dirfd, const char *pathname, int flags, mode_t mode) {
+#endif
+    return np_openat(dirfd, pathname, flags, mode);
+}
 #ifndef __cplusplus
 // C does not support optional parameters so we are forced to rely on the mess below
-// because GCC does not support inlining vararg function. :(
+// because GCC does not support inlining vararg functions. :(
 #define open0() open()
 #define open1(a) open(a)
 #define open2(a, b) open(a, b, 0)
@@ -856,6 +932,16 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode) {
 #define open7(a, b, c, d, e, f, g) open(a, b, c, d, e, f, g)
 #define open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 #define _open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+
+#define openat0() openat()
+#define openat1(a) openat(a)
+#define openat2(a, b) openat(a, b, 0)
+#define openat3(a, b, c) openat(a, b, c)
+#define openat4(a, b, c, d) openat(a, b, c, d)
+#define openat5(a, b, c, d, e) openat(a, b, c, d, e)
+#define openat6(a, b, c, d, e, f) openat(a, b, c, d, e, f)
+#define openat7(a, b, c, d, e, f, g) openat(a, b, c, d, e, f, g)
+#define openat(...) CAT( openat, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 #endif  // !__cplusplus
 #else  // GCC only
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t mode */ ) {
@@ -886,6 +972,18 @@ ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, ... /* mode_t 
     va_end(args);
     return np_open(pathname, flags, mode);
 }
+#ifndef _WIN32
+ALWAYS_INLINE NP_DECL(int) openat(int dirfd, const char *pathname, int flags, ... /* mode_t mode */ ) {
+    va_list args;
+    va_start(args, flags);
+    mode_t mode = 0;
+    if (flags & O_CREAT) {
+        mode = va_arg(args, int); // mode_t is promoted to int in varargs
+    }
+    va_end(args);
+    return np_openat(dirfd, pathname, flags, mode);
+}
+#endif
 #endif  // !GCC
 
 ALWAYS_INLINE NP_DECL(EFILE*) fdopen(int fd, const char *mode) {
@@ -1455,6 +1553,10 @@ ALWAYS_INLINE NP_DECL(int) fstat(int fd, struct stat *buf) {
     return np_fstat(fd, buf);
 }
 
+ALWAYS_INLINE NP_DECL(int) fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    return np_fstatat(dirfd, pathname, buf, flags);
+}
+
 ALWAYS_INLINE NP_DECL(int) lstat(const char *path, struct stat *buf) {
     return np_lstat(path, buf);
 }
@@ -1543,6 +1645,106 @@ ALWAYS_INLINE NP_DECL(void) rewinddir(DIR *dirp) {
 
 #ifdef __cplusplus
 }
+
+#if defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)
+#ifndef _GLIBCXX_CSTDIO
+#define _GLIBCXX_CSTDIO 1
+
+#include <bits/c++config.h>
+namespace std
+{
+  using ::FILE;
+  using ::fpos_t;
+
+  using ::clearerr;
+  using ::fclose;
+  using ::feof;
+  using ::ferror;
+  using ::fflush;
+  using ::fgetc;
+  using ::fgetpos;
+  using ::fgets;
+  using ::fopen;
+  using ::fprintf;
+  using ::fputc;
+  using ::fputs;
+  using ::fread;
+  using ::freopen;
+  using ::fscanf;
+  using ::fseek;
+  using ::fsetpos;
+  using ::ftell;
+  using ::fwrite;
+  using ::getc;
+  using ::getchar;
+#if __cplusplus <= 201103L
+  // LWG 2249
+  using ::gets;
+#endif
+  using ::perror;
+  using ::printf;
+  using ::putc;
+  using ::putchar;
+  using ::puts;
+  using ::remove;
+  using ::rename;
+  using ::rewind;
+  using ::scanf;
+  using ::setbuf;
+  using ::setvbuf;
+  using ::sprintf;
+  using ::sscanf;
+  using ::tmpfile;
+#if _GLIBCXX_USE_TMPNAM
+  using ::tmpnam;
+#endif
+  using ::ungetc;
+  using ::vfprintf;
+  using ::vprintf;
+  using ::vsprintf;
+} // namespace
+
+#if _GLIBCXX_USE_C99_STDIO
+
+namespace __gnu_cxx
+{
+#if _GLIBCXX_USE_C99_CHECK || _GLIBCXX_USE_C99_DYNAMIC
+  extern "C" int
+  (snprintf)(char * __restrict, std::size_t, const char * __restrict, ...)
+  throw ();
+  extern "C" int
+  (vfscanf)(FILE * __restrict, const char * __restrict, __gnuc_va_list);
+  extern "C" int (vscanf)(const char * __restrict, __gnuc_va_list);
+  extern "C" int
+  (vsnprintf)(char * __restrict, std::size_t, const char * __restrict,
+	      __gnuc_va_list) throw ();
+  extern "C" int
+  (vsscanf)(const char * __restrict, const char * __restrict, __gnuc_va_list)
+  throw ();
+#endif
+
+#if !_GLIBCXX_USE_C99_DYNAMIC
+  using ::snprintf;
+  using ::vfscanf;
+  using ::vscanf;
+  using ::vsnprintf;
+  using ::vsscanf;
+#endif
+} // namespace __gnu_cxx
+
+namespace std
+{
+  using ::__gnu_cxx::snprintf;
+  using ::__gnu_cxx::vfscanf;
+  using ::__gnu_cxx::vscanf;
+  using ::__gnu_cxx::vsnprintf;
+  using ::__gnu_cxx::vsscanf;
+} // namespace std
+
+#endif // _GLIBCXX_USE_C99_STDIO
+
+#endif
+#endif
 #endif
 
 #endif

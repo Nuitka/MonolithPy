@@ -15,6 +15,12 @@
 #include <strings.h>
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define unlikely(x)     __builtin_expect(!!(x), 0)
+#else
+#define unlikely(x)     (x)
+#endif
+
 extern const char nuitka_embed_map;
 extern const long nuitka_embed_map_len;
 
@@ -22,12 +28,13 @@ extern const char nuitka_embed_data;
 extern const long nuitka_embed_data_len;
 
 struct FDMAP_S {    // Virtual File Stream
-    int fd;
-    EFILE *f;
+  int fd;
+  EFILE *f;
 };
 typedef struct FDMAP_S FDMAP;
 
 FDMAP np_fd2file[512] = {};
+bool np_fd2file_initialized = false;
 
 #ifdef _WIN32
 // A map to associate mapping HANDLEs with our virtual EFILE structs.
@@ -66,7 +73,7 @@ typedef struct FIND_HNDMAP_S FIND_HNDMAP;
 FIND_HNDMAP np_findhandles[512] = {};
 #endif
 
-uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
+uint32_t hash(char * key) {   // Hash Function: MurmurOAAT64
   uint32_t h = 3323198485ul;
   for (;*key;++key) {
     h ^= *key;
@@ -74,6 +81,18 @@ uint32_t hash(char * key){   // Hash Function: MurmurOAAT64
     h ^= h >> 15;
   }
   return h;
+}
+
+ALWAYS_INLINE void init_fd2file() {
+  if (unlikely(!np_fd2file_initialized)) {
+    for (int i = 0; i < 512; ++i) {
+      np_fd2file[i].fd = -1;
+      // The pointer 'f' is already NULL due to the initial zero-initialization
+      // but it's good practice to be explicit if the intent isn't just zeroing.
+      np_fd2file[i].f = NULL;
+    }
+    np_fd2file_initialized = true;
+  }
 }
 
 // Normalize path by resolving ".." and "."
@@ -372,6 +391,7 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
       e->pos = &nuitka_embed_data + map->pos;
       e->end = &nuitka_embed_data + map->pos + map->size;
       e->size = map->size;
+      e->map = map;
       return e;
     }
   }
@@ -392,6 +412,7 @@ NP_DECL(int) np_open(const char *file, int flags, int mode) {
 #else
 NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
 #endif
+  init_fd2file();
   char absolute_path[PATH_MAX] = {};
   np_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
@@ -402,7 +423,7 @@ NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
   get_virtual_path(search_path, execfolder, absolute_path);
 
   EMAP *map;
-  if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
+  if (find_embedded_file(search_path, &map)) {
     EFILE *e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_VIRTUAL;
     e->name = &nuitka_embed_data + map->pathpos;
@@ -412,7 +433,7 @@ NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
     e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == 0) {
+      if (np_fd2file[i].fd == -1) {
         np_fd2file[i].fd = fakefd;
         np_fd2file[i].f = e;
         break;
@@ -443,6 +464,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
       e->pos = &nuitka_embed_data + map->pos;
       e->end = &nuitka_embed_data + map->pos + map->size;
       e->size = map->size;
+      e->map = map;
       return e;
     }
   }
@@ -459,6 +481,7 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
 }
 
 NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
+  init_fd2file();
   char file[PATH_MAX] = {};
   wcstombs((char*)&file, wfile, PATH_MAX);
 
@@ -472,7 +495,7 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
   get_virtual_path(search_path, execfolder, absolute_path);
 
   EMAP *map;
-  if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
+  if (find_embedded_file(search_path, &map)) {
     EFILE* e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_VIRTUAL;
     e->name = (&nuitka_embed_data + map->pathpos);
@@ -482,7 +505,7 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
     e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == 0) {
+      if (np_fd2file[i].fd == -1) {
         np_fd2file[i].fd = fakefd;
         np_fd2file[i].f = e;
         break;
@@ -493,22 +516,157 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
 
   return _wopen(wfile, flags, mode);
 }
+#else
+NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) {
+  init_fd2file();
+  char full_virtual_path[PATH_MAX] = {};
+  bool is_virtual_context = false;
+
+  // Handle cases where pathname is relative to a virtual directory fd
+  if (pathname[0] != '/') {
+    for (int i = 0; i < 512; i++) {
+      if (np_fd2file[i].fd == dirfd) {
+        is_virtual_context = true;
+        EFILE *e = np_fd2file[i].f;
+        // We found the fd, it corresponds to a virtual file.
+        if (e->map->type != ETYPE_DIRECTORY) {
+          errno = ENOTDIR;
+          return -1;
+        }
+
+        // It's a directory, construct the full virtual path.
+        snprintf(full_virtual_path, PATH_MAX, "%s/%s", e->name, pathname);
+
+        // The base virtual path is already normalized, but the new one might not be.
+        np_normalize_path(full_virtual_path);
+        break; // Found our context, exit the loop
+      }
+    }
+  }
+
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (!get_executable_path(execfolder, executable)) {
+    // If we can't get executable path, we cannot proceed with virtual file logic.
+    return openat(dirfd, pathname, flags, mode);
+  }
+
+  // If we are not in a virtual context, resolve the path from CWD or absolute.
+  if (!is_virtual_context && pathname[0] == '/') {
+    char absolute_path[PATH_MAX] = {};
+    np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+    get_virtual_path(full_virtual_path, execfolder, absolute_path);
+  }
+
+  EMAP *map;
+  if (find_embedded_file(full_virtual_path, &map)) {
+    // Virtual files are read-only.
+    if ((flags & O_WRONLY) || (flags & O_RDWR)) {
+      errno = EROFS;
+      return -1;
+    }
+
+    // Do not allow opening a directory with open/openat unless O_DIRECTORY is specified.
+    if (map->type == ETYPE_DIRECTORY && !(flags & O_DIRECTORY)) {
+      errno = EISDIR;
+      return -1;
+    }
+
+    if (map->type == ETYPE_FILE && (flags & O_DIRECTORY)) {
+      errno = ENOTDIR;
+      return -1;
+    }
+
+    EFILE *e = (EFILE*)malloc(sizeof *e);
+    e->handle_type = EHANDLE_VIRTUAL;
+    e->name = &nuitka_embed_data + map->pathpos;
+    e->pos = &nuitka_embed_data + map->pos;
+    e->end = &nuitka_embed_data + map->pos + map->size;
+    e->size = map->size;
+    e->map = map;
+
+    // Use the executable itself for the underlying native fd
+    int fakefd = open(executable, O_RDONLY);
+    if (fakefd == -1) {
+      free(e);
+      return -1; // errno will be set by open()
+    }
+
+    for (int i = 0; i < 512; i++) {
+      if (np_fd2file[i].fd == -1) {
+        np_fd2file[i].fd = fakefd;
+        np_fd2file[i].f = e;
+        return fakefd;
+      }
+    }
+
+    // No more file descriptors available in our virtual table
+    free(e);
+    close(fakefd);
+    errno = EMFILE;
+    return -1;
+  }
+
+  // If we determined the context was a virtual directory but didn't find the file
+  if (is_virtual_context) {
+    errno = ENOENT;
+    return -1;
+  }
+
+  // Fallback to the real openat for all other cases (non-virtual paths)
+  return openat(dirfd, pathname, flags, mode);
+}
 #endif
 
 NP_DECL(int) np_fclose(void* e) {
+  init_fd2file();
   if (NP_FOREIGN_PTR) {
+    // This is not a stream managed by our system, pass to the real fclose.
     return fclose((FILE*)e);
   }
-  if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
-    fclose(((EFILE*)e)->f);
+
+  EFILE* efile = (EFILE*)e;
+
+  // Handle native file streams wrapped in our EFILE struct.
+  if (efile->handle_type == EHANDLE_NATIVE) {
+    // Call the real fclose on the underlying FILE stream.
+    int result = fclose(efile->f);
+    // Free the EFILE wrapper struct.
+    free(efile);
+    return result;
   }
 
-  free(e);
-  e = NULL;
+  // Handle virtual file streams.
+  if (efile->handle_type == EHANDLE_VIRTUAL) {
+    // To close a virtual file, we must find its associated native file
+    // descriptor in our map and close it.
+    for (int i = 0; i < 512; i++) {
+      if (np_fd2file[i].f == efile) {
+        int fd_to_close = np_fd2file[i].fd;
+
+        // Important: Clear the map entry to prevent dangling pointers
+        // and incorrect reuse of the slot.
+        np_fd2file[i].fd = -1;
+        np_fd2file[i].f = NULL;
+
+        // Free the EFILE struct itself.
+        free(efile);
+
+        // Finally, close the underlying native file descriptor.
+        // The return value of the underlying close() is the result of this operation.
+        return close(fd_to_close);
+      }
+    }
+  }
+
+  // Fallback for unrecognized handle types or for virtual files that
+  // were somehow created without a map entry (which indicates a bug).
+  // The best we can do is free the wrapper to prevent a memory leak.
+  free(efile);
   return 0;
 }
 
 NP_DECL(int) np_close(int fd) {
+  init_fd2file();
   EFILE *e = NULL;
   int fd_idx = -1;
   for (int i = 0; i < 512; i++) {
@@ -526,21 +684,27 @@ NP_DECL(int) np_close(int fd) {
     return 0;
   }
 
-    if (fd_idx != -1) {
-        np_fd2file[fd_idx].fd = 0;
-        np_fd2file[fd_idx].f = NULL;
-    }
+  if (fd_idx != -1) {
+    np_fd2file[fd_idx].fd = -1;
+    np_fd2file[fd_idx].f = NULL;
+  }
 
-    // Close the underlying file descriptor that was opened on the executable
-    return close(fd);
+  // Close the underlying file descriptor that was opened on the executable
+  return close(fd);
 }
 
 NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *e) {
   if (NP_FOREIGN_PTR) {
-    return freopen(filename, mode, (FILE*)e);
+    EFILE* e = (EFILE*)malloc(sizeof *e);
+    e->handle_type = EHANDLE_NATIVE;
+    e->f = freopen(filename, mode, (FILE*)e);
+    return e;
   }
   if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
-    return freopen(filename, mode, ((EFILE*)e)->f);
+    EFILE* e = (EFILE*)malloc(sizeof *e);
+    e->handle_type = EHANDLE_NATIVE;
+    e->f = freopen(filename, mode, ((EFILE*)e)->f);
+    return e;
   }
 
   return NULL;
@@ -604,6 +768,7 @@ NP_DECL(int) np_read(int fd, void *buf, unsigned int count) {
 #else
 NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count) {
 #endif
+  init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
@@ -628,6 +793,7 @@ NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count) {
 }
 
 NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset) {
+  init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
@@ -661,21 +827,25 @@ NP_DECL(int) np_fgetpos(void* e, fpos_t* pos) {
     return fgetpos(((EFILE*)e)->f, pos);
   }
 
-  if(((EFILE*)e)->end <= ((EFILE*)e)->pos){
-    pos = NULL;
-    return 1;
+  // fgetpos should store the absolute offset from the start of the file.
+  // We use the same logic as np_ftell_priv to get this value.
+  int64_t offset = ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
   }
 
 #ifdef __linux__
-  fpos_t temp = {};
-  temp.__pos = ((EFILE*)e)->end - ((EFILE*)e)->pos;
+  // On Linux, fpos_t is a struct.
+  fpos_t temp = { 0 };
+  temp.__pos = offset;
   memcpy(pos, &temp, sizeof(fpos_t));
 #else
-  *pos = (fpos_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
+  // On other systems, it's typically a numeric type.
+  *pos = (fpos_t)offset;
 #endif
 
   return 0;
-
 }
 
 NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
@@ -825,7 +995,8 @@ NP_DECL(int) np_fputc(int character, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fputc(character, ((EFILE*)e)->f);
   }
-  return 0;
+  errno = EACCES;
+  return -1;
 }
 
 NP_DECL(int) np_fputs(const char *str, void *e) {
@@ -835,7 +1006,8 @@ NP_DECL(int) np_fputs(const char *str, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fputs(str, ((EFILE*)e)->f);
   }
-  return 0;
+  errno = EACCES;
+  return -1;
 }
 
 NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
@@ -853,7 +1025,8 @@ NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
     va_end(args);
     return result;
   }
-  return 0;
+  errno = EACCES;
+  return -1;
 }
 NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args) {
   if (NP_FOREIGN_PTR) {
@@ -862,7 +1035,8 @@ NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return vfprintf(((EFILE*)e)->f, format, args);
   }
-  return 0;
+  errno = EACCES;
+  return -1;
 }
 
 NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *e) {
@@ -872,7 +1046,8 @@ NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fwrite(ptr, size, count, ((EFILE*)e)->f);
   }
-  return 0;
+  errno = EACCES;
+  return -1;
 }
 
 NP_DECL(void) np_setbuf(void *e, char *buffer) {
@@ -912,7 +1087,16 @@ NP_DECL(int) np_fsetpos(void *e, const fpos_t *pos) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fsetpos(((EFILE*)e)->f, pos);
   }
-  return 0;
+
+  // The 'pos' object now contains the absolute offset from the beginning.
+  // We can use our fseek implementation with SEEK_SET to position the stream.
+#ifdef __linux__
+  // On Linux, fpos_t is a struct, extract the position.
+  return np_fseek_priv(e, pos->__pos, SEEK_SET);
+#else
+  // On other systems, it's typically a numeric type.
+  return np_fseek_priv(e, *pos, SEEK_SET);
+#endif
 }
 
 NP_DECL(void) np_clearerr(void *e) {
@@ -936,13 +1120,58 @@ NP_DECL(int) np_ferror(void *e) {
 }
 
 NP_DECL(int) np_fileno(void *e) {
+  init_fd2file();
   if (NP_FOREIGN_PTR) {
     return fileno((FILE*)e);
   }
-  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
-    return fileno(((EFILE*)e)->f);
+  EFILE* efile = (EFILE*)e;
+
+  if (efile->handle_type == EHANDLE_NATIVE) {
+    // For a native file stream, call the real fileno on the underlying FILE*.
+    return fileno(efile->f);
   }
-  return 0;
+
+  // For a virtual file, first attempt to find the existing file descriptor.
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].f == efile) {
+      // Found the existing mapping, which is the correct behavior.
+      return np_fd2file[i].fd;
+    }
+  }
+
+  // The stream was not found in the map. We will now
+  // create and add a new file descriptor.
+
+  char execfolder[PATH_MAX] = {}, executable_path[PATH_MAX];
+  // We need the executable path to open a new native handle.
+  if (!get_executable_path(execfolder, executable_path)) {
+    // Cannot get executable path, cannot create a new fd.
+    errno = EBADF;
+    return -1;
+  }
+
+  // DANGER: Opening a new file descriptor here because the original was lost.
+  int new_fd = open(executable_path, O_RDONLY);
+  if (new_fd == -1) {
+    // The open call failed, return its error.
+    return -1;
+  }
+
+  // Now, find an empty slot in the map to store this new, leaked descriptor.
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == -1) {
+      np_fd2file[i].fd = new_fd;
+      np_fd2file[i].f = efile;
+      // The function now returns a NEW descriptor that the calling code wasn't expecting.
+      return new_fd;
+    }
+  }
+
+  // If we are here, our virtual descriptor map is full.
+  // We must close the descriptor we just opened and return an error.
+  close(new_fd);
+  errno = EMFILE; // Too many open files
+  return -1;
 }
 
 NP_DECL(int) np_fflush(void *e) {
@@ -998,6 +1227,7 @@ NP_DECL(int) np_ungetc(int character, void *e) {
 }
 
 NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
+  init_fd2file();
   for (int i = 0; i < 512; i++) {
     if (np_fd2file[i].fd == fd) {
       return np_fd2file[i].f;
@@ -1016,32 +1246,33 @@ NP_DECL(__int64) np_lseeki64(int fd, __int64 offset, int whence) {
 #else
 NP_DECL(ssize_t) np_lseek(int fd, off_t offset, int whence) {
 #endif
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e == NULL) {
+  }
+  if (e == NULL) {
 #ifdef _WIN32
-        return _lseeki64(fd, offset, whence);
+    return _lseeki64(fd, offset, whence);
 #else
-        return lseek(fd, offset, whence);
+    return lseek(fd, offset, whence);
 #endif
-    }
-    if(whence == SEEK_SET)
-        e->pos = (e->end - e->size) + offset;
-    else if(whence == SEEK_CUR)
-        e->pos += offset;
-    else if(whence == SEEK_END)
-        e->pos = e->end + offset;
+  }
+  if(whence == SEEK_SET)
+    e->pos = (e->end - e->size) + offset;
+  else if(whence == SEEK_CUR)
+    e->pos += offset;
+  else if(whence == SEEK_END)
+    e->pos = e->end + offset;
 
-    if(e->end < e->pos || (e->pos - (e->end - e->size)) < 0) {
-        errno = EINVAL;
-        return -1;
-    }
-    return (e->pos - (e->end - e->size));
+  if(e->end < e->pos || (e->pos - (e->end - e->size)) < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (e->pos - (e->end - e->size));
 }
 
 #ifdef _WIN32
@@ -2291,165 +2522,267 @@ NP_STD(BOOL) np_UnmapViewOfFile(
 }
 #else
 NP_DECL(int) np_stat(const char *file, struct stat *buf) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
 
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct stat tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = map->size;
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      struct stat tmp;
+      memset(&tmp, 0, sizeof(tmp));
+      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+      switch (map->type) {
+        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+      }
+      tmp.st_size = map->size;
+      memcpy(buf, &tmp, sizeof(tmp));
+      return 0;
     }
-    return stat(file, buf);
+  }
+  return stat(file, buf);
 }
 
 NP_DECL(int) np_lstat(const char *file, struct stat *buf) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
 
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct stat tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = map->size;
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      struct stat tmp;
+      memset(&tmp, 0, sizeof(tmp));
+      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+      switch (map->type) {
+        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+      }
+      tmp.st_size = map->size;
+      memcpy(buf, &tmp, sizeof(tmp));
+      return 0;
     }
-    return lstat(file, buf);
+  }
+  return lstat(file, buf);
 }
 
 NP_DECL(int) np_fstat(int fd, struct stat *buf) {
-    return fstat(fd, buf);
+  init_fd2file();
+  // Check if the file descriptor is for a virtual file.
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      EFILE *e = np_fd2file[i].f;
+      EMAP *map = e->map;
+
+      // This is a virtual file, populate the stat buffer from the map.
+      struct stat tmp;
+      memset(&tmp, 0, sizeof(tmp));
+      // Set standard read/execute permissions for user, group, and other.
+      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+      switch (map->type) {
+        case ETYPE_FILE:
+          tmp.st_mode |= S_IFREG; // Regular file
+          break;
+        case ETYPE_DIRECTORY:
+          tmp.st_mode |= S_IFDIR; // Directory
+          break;
+      }
+      tmp.st_size = map->size; // Set the file size.
+      // Other fields like timestamps, user/group ID etc., remain 0.
+
+      memcpy(buf, &tmp, sizeof(tmp));
+      return 0; // Success
+    }
+  }
+
+  // If the fd is not in our virtual file table, fall back to the native call.
+  return fstat(fd, buf);
 }
 
+NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+  init_fd2file();
+  // Handle cases where pathname is relative to a virtual directory fd
+  if (pathname[0] != '/') {
+    for (int i = 0; i < 512; i++) {
+      if (np_fd2file[i].fd == dirfd) {
+        EFILE *e = np_fd2file[i].f;
+        // We found the fd, it corresponds to a virtual file.
+        if (e->map->type != ETYPE_DIRECTORY) {
+          errno = ENOTDIR;
+          return -1;
+        }
 
-NP_DECL(int) np_access(const char *pathname, int mode) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(pathname, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
+        // It's a directory, construct the full virtual path.
+        char full_virtual_path[PATH_MAX];
+        snprintf(full_virtual_path, PATH_MAX, "%s/%s", e->name, pathname);
+
+        // The virtual path is already normalized, but the new one might not be (e.g., ../)
+        char temp_path_for_norm[PATH_MAX];
+        strcpy(temp_path_for_norm, full_virtual_path);
+        np_normalize_path(temp_path_for_norm);
 
         EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            if (mode == F_OK) return 0; // Existence check passes
-            if ((mode & W_OK)) { // Write check fails
-                errno = EROFS;
-                return -1;
-            }
-            if ((mode & R_OK) || (mode & X_OK)) { // Read/Exec check passes
-                return 0;
-            }
+        if (find_embedded_file(temp_path_for_norm, &map)) {
+          struct stat tmp;
+          memset(&tmp, 0, sizeof(tmp));
+          tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+          switch (map->type) {
+            case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+            case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+          }
+          tmp.st_size = map->size;
+          memcpy(buf, &tmp, sizeof(tmp));
+          return 0;
+        } else {
+          errno = ENOENT;
+          return -1;
         }
+      }
     }
-    return access(pathname, mode);
+  }
+
+  // Fallback for absolute paths, AT_FDCWD, or native file descriptors
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      // The virtual file system does not support symlinks, so AT_SYMLINK_NOFOLLOW
+      // is effectively ignored as the behavior is the same as lstat/stat.
+      struct stat tmp;
+      memset(&tmp, 0, sizeof(tmp));
+      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+      switch (map->type) {
+        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
+        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
+      }
+      tmp.st_size = map->size;
+      memcpy(buf, &tmp, sizeof(tmp));
+      return 0;
+    }
+  }
+
+  // Fallback to the real fstatat for non-virtual files.
+  return fstatat(dirfd, pathname, buf, flags);
+}
+
+NP_DECL(int) np_access(const char *pathname, int mode) {
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      if (mode == F_OK) return 0; // Existence check passes
+      if ((mode & W_OK)) { // Write check fails
+        errno = EROFS;
+        return -1;
+      }
+      if ((mode & R_OK) || (mode & X_OK)) { // Read/Exec check passes
+        return 0;
+      }
+    }
+  }
+  return access(pathname, mode);
 }
 
 NP_DECL(int) np_faccessat(int dirfd, const char *pathname, int mode, int flags) {
-    // This implementation ignores dirfd and flags for virtual files.
-    return np_access(pathname, mode);
+  // This implementation ignores dirfd and flags for virtual files.
+  return np_access(pathname, mode);
 }
 
 NP_DECL(int) np_statvfs(const char *path, struct statvfs *buf) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(path, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(path, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+  if (get_executable_path(execfolder, executable)) {
+    char search_path[PATH_MAX] = {};
+    get_virtual_path(search_path, execfolder, absolute_path);
 
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            // Virtual file system lives on the same FS as the executable
-            return statvfs(execfolder, buf);
-        }
+    EMAP *map;
+    if (find_embedded_file(search_path, &map)) {
+      // Virtual file system lives on the same FS as the executable
+      return statvfs(execfolder, buf);
     }
-    return statvfs(path, buf);
+  }
+  return statvfs(path, buf);
 }
 
 NP_DECL(int) np_fstatvfs(int fd, struct statvfs *buf) {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e != NULL) {
-        char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-        if (get_executable_path(execfolder, executable)) {
-            return statvfs(execfolder, buf);
-        }
+  }
+  if (e != NULL) {
+    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
+    if (get_executable_path(execfolder, executable)) {
+      return statvfs(execfolder, buf);
     }
-    return fstatvfs(fd, buf);
+  }
+  return fstatvfs(fd, buf);
 }
 
 NP_DECL(ssize_t) np_pwrite(int fd, const void *buf, size_t count, off_t offset) {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e != NULL) {
-        errno = EROFS; // Read-only file system
-        return -1;
-    }
-    return pwrite(fd, buf, count, offset);
+  }
+  if (e != NULL) {
+    errno = EROFS; // Read-only file system
+    return -1;
+  }
+  return pwrite(fd, buf, count, offset);
 }
 
 NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt) {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e == NULL) {
-        return readv(fd, iov, iovcnt);
-    }
+  }
+  if (e == NULL) {
+    return readv(fd, iov, iovcnt);
+  }
 
-    ssize_t total_read = 0;
-    for (int i = 0; i < iovcnt; i++) {
-        ssize_t bytes_to_read = iov[i].iov_len;
-        ssize_t remaining_in_file = e->end - e->pos;
-        if (bytes_to_read > remaining_in_file) {
-            bytes_to_read = remaining_in_file;
-        }
-        memcpy(iov[i].iov_base, e->pos, bytes_to_read);
-        e->pos += bytes_to_read;
-        total_read += bytes_to_read;
-        if (bytes_to_read < iov[i].iov_len) {
-            // Reached EOF
-            break;
-        }
+  ssize_t total_read = 0;
+  for (int i = 0; i < iovcnt; i++) {
+    ssize_t bytes_to_read = iov[i].iov_len;
+    ssize_t remaining_in_file = e->end - e->pos;
+    if (bytes_to_read > remaining_in_file) {
+      bytes_to_read = remaining_in_file;
     }
-    return total_read;
+    memcpy(iov[i].iov_base, e->pos, bytes_to_read);
+    e->pos += bytes_to_read;
+    total_read += bytes_to_read;
+    if (bytes_to_read < iov[i].iov_len) {
+      // Reached EOF
+      break;
+    }
+  }
+  return total_read;
 }
 
 NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
@@ -2457,41 +2790,42 @@ NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t of
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-     EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e == NULL) {
-        return preadv(fd, iov, iovcnt, offset);
-    }
+  }
+  if (e == NULL) {
+    return preadv(fd, iov, iovcnt, offset);
+  }
 
-    if (offset >= e->size) return 0;
+  if (offset >= e->size) return 0;
 
-    const char* start_pos = (e->end - e->size) + offset;
-    ssize_t total_read = 0;
-    for (int i = 0; i < iovcnt; i++) {
-        ssize_t bytes_to_read = iov[i].iov_len;
-        ssize_t remaining_in_file = e->end - start_pos;
-         if (bytes_to_read > remaining_in_file) {
-            bytes_to_read = remaining_in_file;
-        }
-        memcpy(iov[i].iov_base, start_pos, bytes_to_read);
-        start_pos += bytes_to_read;
-        total_read += bytes_to_read;
-        if (bytes_to_read < iov[i].iov_len) {
-            break;
-        }
+  const char* start_pos = (e->end - e->size) + offset;
+  ssize_t total_read = 0;
+  for (int i = 0; i < iovcnt; i++) {
+    ssize_t bytes_to_read = iov[i].iov_len;
+    ssize_t remaining_in_file = e->end - start_pos;
+    if (bytes_to_read > remaining_in_file) {
+      bytes_to_read = remaining_in_file;
     }
-    return total_read;
+    memcpy(iov[i].iov_base, start_pos, bytes_to_read);
+    start_pos += bytes_to_read;
+    total_read += bytes_to_read;
+    if (bytes_to_read < iov[i].iov_len) {
+      break;
+    }
+  }
+  return total_read;
 }
 
 #ifdef __linux
 NP_DECL(ssize_t) np_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
-    // Ignoring flags for virtual files
-    return np_preadv(fd, iov, iovcnt, offset);
+  // Ignoring flags for virtual files
+  return np_preadv(fd, iov, iovcnt, offset);
 }
 #endif
 
@@ -2500,18 +2834,19 @@ NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt)
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e != NULL) {
-        errno = EROFS; // Read-only
-        return -1;
-    }
-    return writev(fd, iov, iovcnt);
+  }
+  if (e != NULL) {
+    errno = EROFS; // Read-only
+    return -1;
+  }
+  return writev(fd, iov, iovcnt);
 }
 
 NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
@@ -2519,149 +2854,151 @@ NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t o
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e != NULL) {
-        errno = EROFS; // Read-only
-        return -1;
-    }
-    return pwritev(fd, iov, iovcnt, offset);
+  }
+  if (e != NULL) {
+    errno = EROFS; // Read-only
+    return -1;
+  }
+  return pwritev(fd, iov, iovcnt, offset);
 }
 
 #ifdef __linux
 NP_DECL(ssize_t) np_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
-    // Ignoring flags for virtual files
-    return np_pwritev(fd, iov, iovcnt, offset);
+  // Ignoring flags for virtual files
+  return np_pwritev(fd, iov, iovcnt, offset);
 }
 #endif
 
 typedef struct VDIR_S {
-    EMAP* map_ptr; // Current position in the embedded map iterator
-    char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
-    struct dirent entry; // The current entry to be returned
+  EMAP* map_ptr; // Current position in the embedded map iterator
+  char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
+  struct dirent entry; // The current entry to be returned
 } VDIR;
 
 // A map to associate DIR* pointers with our VDIR structs
 VDIR* np_open_vdirs[512] = {};
 
 NP_DECL(DIR*) np_opendir(const char* name) {
-    char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(name, absolute_path, PATH_MAX);
+  char absolute_path[PATH_MAX] = {};
+  np_get_absolute_path(name, absolute_path, PATH_MAX);
 
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
-    if (!get_executable_path(execfolder, executable)) {
-        return opendir(name);
-    }
-
-    char virtual_dir_path[PATH_MAX] = {};
-    get_virtual_path(virtual_dir_path, execfolder, absolute_path);
-
-    EMAP *dir_map;
-    if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
-        VDIR* vdir = (VDIR*)malloc(sizeof(VDIR));
-        if (!vdir) {
-            errno = ENOMEM;
-            return NULL;
-        }
-        vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
-        strcpy(vdir->virtual_dir_path, virtual_dir_path);
-        // Ensure path ends with a slash for correct matching
-        if (strlen(vdir->virtual_dir_path) > 1 && vdir->virtual_dir_path[strlen(vdir->virtual_dir_path)-1] != '/') {
-            strcat(vdir->virtual_dir_path, "/");
-        }
-
-        for (int i = 0; i < 512; i++) {
-            if (np_open_vdirs[i] == NULL) {
-                np_open_vdirs[i] = vdir;
-                return (DIR*)vdir;
-            }
-        }
-        free(vdir);
-        errno = EMFILE; // Too many open files
-        return NULL;
-    }
+  char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
+  if (!get_executable_path(execfolder, executable)) {
     return opendir(name);
+  }
+
+  char virtual_dir_path[PATH_MAX] = {};
+  get_virtual_path(virtual_dir_path, execfolder, absolute_path);
+
+  EMAP *dir_map;
+  if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
+    VDIR* vdir = (VDIR*)malloc(sizeof(VDIR));
+    if (!vdir) {
+      errno = ENOMEM;
+      return NULL;
+    }
+    vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
+    strcpy(vdir->virtual_dir_path, virtual_dir_path);
+    // Ensure path ends with a slash for correct matching
+    if (strlen(vdir->virtual_dir_path) > 1 && vdir->virtual_dir_path[strlen(vdir->virtual_dir_path)-1] != '/') {
+      strcat(vdir->virtual_dir_path, "/");
+    }
+
+    for (int i = 0; i < 512; i++) {
+      if (np_open_vdirs[i] == NULL) {
+        np_open_vdirs[i] = vdir;
+        return (DIR*)vdir;
+      }
+    }
+    free(vdir);
+    errno = EMFILE; // Too many open files
+    return NULL;
+  }
+  return opendir(name);
 }
 
 NP_DECL(DIR*) np_fdopendir(int fd) {
-    EFILE *e = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_fd2file[i].fd == fd) {
-            e = np_fd2file[i].f;
-            break;
-        }
+  init_fd2file();
+  EFILE *e = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_fd2file[i].fd == fd) {
+      e = np_fd2file[i].f;
+      break;
     }
-    if (e != NULL) {
-        // We have a virtual file descriptor. We can open it if it's a directory.
-        return np_opendir(e->name);
-    }
-    return fdopendir(fd);
+  }
+  if (e != NULL) {
+    // We have a virtual file descriptor. We can open it if it's a directory.
+    return np_opendir(e->name);
+  }
+  return fdopendir(fd);
 }
 
 NP_DECL(struct dirent*) np_readdir(DIR *dirp) {
-    VDIR* vdir = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_open_vdirs[i] == (VDIR*)dirp) {
-            vdir = (VDIR*)dirp;
-            break;
-        }
+  VDIR* vdir = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_open_vdirs[i] == (VDIR*)dirp) {
+      vdir = (VDIR*)dirp;
+      break;
     }
-    if (vdir == NULL) {
-        return readdir(dirp);
+  }
+  if (vdir == NULL) {
+    return readdir(dirp);
+  }
+
+  const char *end = &nuitka_embed_map + nuitka_embed_map_len;
+  while ((char*)vdir->map_ptr < end) {
+    EMAP* current_map = vdir->map_ptr;
+    vdir->map_ptr++; // Advance for next call
+
+    const char* current_path_str = &nuitka_embed_data + current_map->pathpos;
+
+    if (strncmp(current_path_str, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
+      const char* filename_part = current_path_str + strlen(vdir->virtual_dir_path);
+      if (*filename_part != '\0' && strchr(filename_part, '/') == NULL) {
+        // It's a direct child.
+        strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
+        vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
+        // Fake inode number from map position
+        vdir->entry.d_ino = (ino_t)((char*)current_map - (const char*) &nuitka_embed_map);
+        vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
+        return &vdir->entry;
+      }
     }
-
-    const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-    while ((char*)vdir->map_ptr < end) {
-        EMAP* current_map = vdir->map_ptr;
-        vdir->map_ptr++; // Advance for next call
-
-        const char* current_path_str = &nuitka_embed_data + current_map->pathpos;
-
-        if (strncmp(current_path_str, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
-            const char* filename_part = current_path_str + strlen(vdir->virtual_dir_path);
-            if (*filename_part != '\0' && strchr(filename_part, '/') == NULL) {
-                 // It's a direct child.
-                 strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
-                 vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
-                 // Fake inode number from map position
-                 vdir->entry.d_ino = (ino_t)((char*)current_map - (const char*) &nuitka_embed_map);
-                 vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
-                 return &vdir->entry;
-            }
-        }
-    }
-    return NULL; // No more entries
+  }
+  return NULL; // No more entries
 }
 
 NP_DECL(int) np_closedir(DIR *dirp) {
-    for (int i = 0; i < 512; i++) {
-        if (np_open_vdirs[i] == (VDIR*)dirp) {
-            free(np_open_vdirs[i]);
-            np_open_vdirs[i] = NULL;
-            return 0;
-        }
+  for (int i = 0; i < 512; i++) {
+    if (np_open_vdirs[i] == (VDIR*)dirp) {
+      free(np_open_vdirs[i]);
+      np_open_vdirs[i] = NULL;
+      return 0;
     }
-    return closedir(dirp);
+  }
+  return closedir(dirp);
 }
 
 NP_DECL(void) np_rewinddir(DIR *dirp) {
-    VDIR* vdir = NULL;
-    for (int i = 0; i < 512; i++) {
-        if (np_open_vdirs[i] == (VDIR*)dirp) {
-            vdir = (VDIR*)dirp;
-            break;
-        }
+  VDIR* vdir = NULL;
+  for (int i = 0; i < 512; i++) {
+    if (np_open_vdirs[i] == (VDIR*)dirp) {
+      vdir = (VDIR*)dirp;
+      break;
     }
-    if (vdir != NULL) {
-        vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
-    } else {
-        rewinddir(dirp);
-    }
+  }
+  if (vdir != NULL) {
+    vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
+  } else {
+    rewinddir(dirp);
+  }
 }
 
 #endif
