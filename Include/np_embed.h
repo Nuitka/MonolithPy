@@ -830,87 +830,86 @@ NP_DECL(void) np_rewinddir(DIR *dirp);
 #if !defined(NUITKAPYTHON_EMBED_BUILD) && !defined(NP_STDIO_ALREADY_LOADED)
 
 #if (defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)) || defined(__APPLE__)
-#define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
-#define PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
+#define NP_EMBED_CAT(a, ...) NP_EMBED_PRIMITIVE_CAT(a, __VA_ARGS__)
+#define NP_EMBED_PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
 
-#define IIF(c) PRIMITIVE_CAT(IIF_, c)
-#define IIF_0(t, ...) __VA_ARGS__
-#define IIF_1(t, ...) t
+#define NP_EMBED_IIF(c) NP_EMBED_PRIMITIVE_CAT(NP_EMBED_IIF_, c)
+#define NP_EMBED_IIF_0(t, ...) __VA_ARGS__
+#define NP_EMBED_IIF_1(t, ...) t
 
-#define COMPL(b) PRIMITIVE_CAT(COMPL_, b)
-#define COMPL_0 1
-#define COMPL_1 0
+#define NP_EMBED_COMPL(b) NP_EMBED_PRIMITIVE_CAT(NP_EMBED_COMPL_, b)
+#define NP_EMBED_COMPL_0 1
+#define NP_EMBED_COMPL_1 0
 
-#define INC(x) PRIMITIVE_CAT(INC_, x)
-#define INC_0 1
-#define INC_1 2
-#define INC_2 3
-#define INC_3 4
-#define INC_4 5
-#define INC_5 6
-#define INC_6 7
-#define INC_7 8
-#define INC_8 9
-#define INC_9 10
-#define INC_10 11
-#define INC_11 12
-#define INC_12 13
-#define INC_13 14
-#define INC_14 15
-#define INC_15 16
-#define INC_16 17
-#define INC_17 18
-#define INC_18 19
-#define INC_19 20
+#define NP_EMBED_INC(x) NP_EMBED_PRIMITIVE_CAT(NP_EMBED_INC_, x)
+#define NP_EMBED_INC_0 1
+#define NP_EMBED_INC_1 2
+#define NP_EMBED_INC_2 3
+#define NP_EMBED_INC_3 4
+#define NP_EMBED_INC_4 5
+#define NP_EMBED_INC_5 6
+#define NP_EMBED_INC_6 7
+#define NP_EMBED_INC_7 8
+#define NP_EMBED_INC_8 9
+#define NP_EMBED_INC_9 10
+#define NP_EMBED_INC_10 11
+#define NP_EMBED_INC_11 12
+#define NP_EMBED_INC_12 13
+#define NP_EMBED_INC_13 14
+#define NP_EMBED_INC_14 15
+#define NP_EMBED_INC_15 16
+#define NP_EMBED_INC_16 17
+#define NP_EMBED_INC_17 18
+#define NP_EMBED_INC_18 19
+#define NP_EMBED_INC_19 20
 
-#define DEC(x) PRIMITIVE_CAT(DEC_, x)
-#define DEC_0 0
-#define DEC_1 0
-#define DEC_2 1
-#define DEC_3 2
-#define DEC_4 3
-#define DEC_5 4
-#define DEC_6 5
-#define DEC_7 6
-#define DEC_8 7
-#define DEC_9 8
-#define DEC_10 9
-#define DEC_11 10
-#define DEC_12 11
-#define DEC_13 12
-#define DEC_14 13
-#define DEC_15 14
-#define DEC_16 15
-#define DEC_17 16
-#define DEC_18 17
-#define DEC_19 18
-#define DEC_20 19
+#define NP_EMBED_DEC(x) NP_EMBED_PRIMITIVE_CAT(NP_EMBED_DEC_, x)
+#define NP_EMBED_DEC_0 0
+#define NP_EMBED_DEC_1 0
+#define NP_EMBED_DEC_2 1
+#define NP_EMBED_DEC_3 2
+#define NP_EMBED_DEC_4 3
+#define NP_EMBED_DEC_5 4
+#define NP_EMBED_DEC_6 5
+#define NP_EMBED_DEC_7 6
+#define NP_EMBED_DEC_8 7
+#define NP_EMBED_DEC_9 8
+#define NP_EMBED_DEC_10 9
+#define NP_EMBED_DEC_11 10
+#define NP_EMBED_DEC_12 11
+#define NP_EMBED_DEC_13 12
+#define NP_EMBED_DEC_14 13
+#define NP_EMBED_DEC_15 14
+#define NP_EMBED_DEC_16 15
+#define NP_EMBED_DEC_17 16
+#define NP_EMBED_DEC_18 17
+#define NP_EMBED_DEC_19 18
+#define NP_EMBED_DEC_20 19
 
-#define CHECK_N(x, n, ...) n
-#define CHECK(...) CHECK_N(__VA_ARGS__, 0,)
-#define PROBE(x) x, 1,
+#define NP_EMBED_CHECK_N(x, n, ...) n
+#define NP_EMBED_CHECK(...) NP_EMBED_CHECK_N(__VA_ARGS__, 0,)
+#define NP_EMBED_PROBE(x) x, 1,
 
-#define IS_PAREN(x) CHECK(IS_PAREN_PROBE x)
-#define IS_PAREN_PROBE(...) PROBE(~)
+#define NP_EMBED_IS_PAREN(x) NP_EMBED_CHECK(NP_EMBED_IS_PAREN_PROBE x)
+#define NP_EMBED_IS_PAREN_PROBE(...) NP_EMBED_PROBE(~)
 
-#define NOT(x) CHECK(PRIMITIVE_CAT(NOT_, x))
-#define NOT_0 PROBE(~)
+#define NP_EMBED_NOT(x) NP_EMBED_CHECK(NP_EMBED_PRIMITIVE_CAT(NP_EMBED_NOT_, x))
+#define NP_EMBED_NOT_0 NP_EMBED_PROBE(~)
 
-#define BOOL(x) COMPL(NOT(x))
-#define IF(c) IIF(BOOL(c))
+#define NP_EMBED_BOOL(x) NP_EMBED_COMPL(NP_EMBED_NOT(x))
+#define NP_EMBED_IF(c) NP_EMBED_IIF(NP_EMBED_BOOL(c))
 
-#define EAT(...)
-#define EXPAND(...) __VA_ARGS__
-#define WHEN(c) IF(c)(EXPAND, EAT)
+#define NP_EMBED_EAT(...)
+#define NP_EMBED_EXPAND(...) __VA_ARGS__
+#define NP_EMBED_WHEN(c) NP_EMBED_IF(c)(NP_EMBED_EXPAND, NP_EMBED_EAT)
 
-#define EMPTY()
-#define DEFER(id) id EMPTY()
-#define OBSTRUCT(...) __VA_ARGS__ DEFER(EMPTY)()
-#define EXPAND(...) __VA_ARGS__
+#define NP_EMBED_EMPTY()
+#define NP_EMBED_DEFER(id) id NP_EMBED_EMPTY()
+#define NP_EMBED_OBSTRUCT(...) __VA_ARGS__ NP_EMBED_DEFER(NP_EMBED_EMPTY)()
 
-#define NUM_ARGS1(_20,_19,_18,_17,_16,_15,_14,_13,_12,_11,_10,_9,_8,_7,_6,_5,_4,_3,_2,_1, n, ...) n
-#define NUM_ARGS0(...) NUM_ARGS1(__VA_ARGS__,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
-#define NUM_ARGS(...) IF(DEC(NUM_ARGS0(__VA_ARGS__)))(NUM_ARGS0(__VA_ARGS__),IF(IS_PAREN(__VA_ARGS__ ()))(0,1))
+#define NP_EMBED_NUM_ARGS1(_20,_19,_18,_17,_16,_15,_14,_13,_12,_11,_10,_9,_8,_7,_6,_5,_4,_3,_2,_1, n, ...) n
+#define NP_EMBED_NUM_ARGS0(...) NP_EMBED_NUM_ARGS1(__VA_ARGS__,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define NP_EMBED_NUM_ARGS(...) NP_EMBED_IF(NP_EMBED_DEC(NP_EMBED_NUM_ARGS0(__VA_ARGS__)))(NP_EMBED_NUM_ARGS0(__VA_ARGS__),NP_EMBED_IF(NP_EMBED_IS_PAREN(__VA_ARGS__ ()))(0,1))
 #endif  // GCC only
 
 // Preprocessor Translation
@@ -925,10 +924,10 @@ extern EFILE *stderr;		/* Standard error output stream.  */
 
 /* File Opening and Closing */
 ALWAYS_INLINE NP_DECL(EFILE*) fopen(const char* file, const char* mode) {
-    return np_fopen(file, mode);
+  return np_fopen(file, mode);
 }
 ALWAYS_INLINE NP_DECL(EFILE*) _fopen(const char* file, const char* mode) {
-    return np_fopen(file, mode);
+  return np_fopen(file, mode);
 }
 
 #if (defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)) || defined(__APPLE__)
@@ -937,7 +936,7 @@ ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode = 0
 #else
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, mode_t mode) {
 #endif
-    return np_open(pathname, flags, mode);
+  return np_open(pathname, flags, mode);
 }
 #ifdef __cplusplus
 ALWAYS_INLINE NP_DECL(int) _open(const char *pathname, int flags, mode_t mode = 0) {
@@ -951,31 +950,31 @@ ALWAYS_INLINE NP_DECL(int) openat(int dirfd, const char *pathname, int flags, mo
 #else
 ALWAYS_INLINE NP_DECL(int) openat(int dirfd, const char *pathname, int flags, mode_t mode) {
 #endif
-    return np_openat(dirfd, pathname, flags, mode);
+  return np_openat(dirfd, pathname, flags, mode);
 }
 #ifndef __cplusplus
 // C does not support optional parameters so we are forced to rely on the mess below
 // because GCC does not support inlining vararg functions. :(
-#define open0() open()
-#define open1(a) open(a)
-#define open2(a, b) open(a, b, 0)
-#define open3(a, b, c) open(a, b, c)
-#define open4(a, b, c, d) open(a, b, c, d)
-#define open5(a, b, c, d, e) open(a, b, c, d, e)
-#define open6(a, b, c, d, e, f) open(a, b, c, d, e, f)
-#define open7(a, b, c, d, e, f, g) open(a, b, c, d, e, f, g)
-#define open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
-#define _open(...) CAT( open, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#define NP_EMBED_open0() open()
+#define NP_EMBED_open1(a) open(a)
+#define NP_EMBED_open2(a, b) open(a, b, 0)
+#define NP_EMBED_open3(a, b, c) open(a, b, c)
+#define NP_EMBED_open4(a, b, c, d) open(a, b, c, d)
+#define NP_EMBED_open5(a, b, c, d, e) open(a, b, c, d, e)
+#define NP_EMBED_open6(a, b, c, d, e, f) open(a, b, c, d, e, f)
+#define NP_EMBED_open7(a, b, c, d, e, f, g) open(a, b, c, d, e, f, g)
+#define open(...) NP_EMBED_CAT( NP_EMBED_open, NP_EMBED_NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#define _open(...) NP_EMBED_CAT( NP_EMBED_open, NP_EMBED_NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 
-#define openat0() openat()
-#define openat1(a) openat(a)
-#define openat2(a, b) openat(a, b, 0)
-#define openat3(a, b, c) openat(a, b, c)
-#define openat4(a, b, c, d) openat(a, b, c, d)
-#define openat5(a, b, c, d, e) openat(a, b, c, d, e)
-#define openat6(a, b, c, d, e, f) openat(a, b, c, d, e, f)
-#define openat7(a, b, c, d, e, f, g) openat(a, b, c, d, e, f, g)
-#define openat(...) CAT( openat, NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
+#define NP_EMBED_openat0() openat()
+#define NP_EMBED_openat1(a) openat(a)
+#define NP_EMBED_openat2(a, b) openat(a, b, 0)
+#define NP_EMBED_openat3(a, b, c) openat(a, b, c)
+#define NP_EMBED_openat4(a, b, c, d) openat(a, b, c, d)
+#define NP_EMBED_openat5(a, b, c, d, e) openat(a, b, c, d, e)
+#define NP_EMBED_openat6(a, b, c, d, e, f) openat(a, b, c, d, e, f)
+#define NP_EMBED_openat7(a, b, c, d, e, f, g) openat(a, b, c, d, e, f, g)
+#define openat(...) NP_EMBED_CAT( NP_EMBED_openat, NP_EMBED_NUM_ARGS( __VA_ARGS__ ) )( __VA_ARGS__ )
 #endif  // !__cplusplus
 #else  // GCC only
 ALWAYS_INLINE NP_DECL(int) open(const char *pathname, int flags, ... /* mode_t mode */ ) {
