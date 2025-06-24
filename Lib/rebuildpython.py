@@ -555,6 +555,7 @@ extern "C" {
             library_dirs=library_dirs,
             extra_preargs=sysconfig.get_config_var("LDFLAGS").split()
                           + [
+                              "-l:libsqlite3.a",
                               "-flto",
                               "-fuse-linker-plugin",
                               "-ffat-lto-objects",
