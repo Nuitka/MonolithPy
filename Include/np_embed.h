@@ -17,7 +17,6 @@
 // Don't even try in that case.
 #define NP_STDIO_ALREADY_LOADED
 #include <fcntl.h>
-#include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifdef _WIN32
@@ -27,6 +26,7 @@
     #include <BaseTsd.h>
     typedef SSIZE_T ssize_t;
 #else
+    #include <dirent.h>
     #include <limits.h>
     #include <unistd.h>
     #include <libgen.h>
