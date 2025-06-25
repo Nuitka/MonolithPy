@@ -20,11 +20,29 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #ifdef _WIN32
-	#define NOMINMAX
-    #include <wchar.h>
-    #include <sal.h>
-    #include <BaseTsd.h>
-    typedef SSIZE_T ssize_t;
+#define NOMINMAX
+#include <wchar.h>
+#include <basetsd.h>
+#include <intsafe.h>
+#if defined(_M_IX86)
+#define _X86_
+#elif defined(_M_X64)
+#define _AMD64_
+#elif defined(_M_ARM)
+#define _ARM_
+    #elif defined(_M_ARM64)
+    #define _ARM64_
+#endif
+
+#include <fileapi.h>
+#include <handleapi.h>
+#include <windef.h>
+#include <WinBase.h>
+typedef int BOOL;
+typedef const char *LPCSTR;
+typedef const wchar_t *LPCWSTR;
+typedef void *LPVOID;
+typedef SSIZE_T ssize_t;
 #else
     #include <dirent.h>
     #include <limits.h>
