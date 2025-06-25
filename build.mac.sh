@@ -229,7 +229,9 @@ fi
 if [ ! -d tcl8.6.15 ]; then
 download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.15/tcl8.6.15-src.tar.gz tcl.tar.gz
 tar -xf tcl.tar.gz
-cd tcl8.6.15/unix
+cd tcl8.6.15
+rm -rf pkgs/tdbc* pkgs/sqlite*
+cd unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads
 make -j$(sysctl -n hw.ncpu)
 make install
