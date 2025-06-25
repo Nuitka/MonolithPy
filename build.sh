@@ -339,7 +339,9 @@ fi
 if [ ! -d tcl8.6.13 ]; then
 download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.13/tcl8.6.13-src.tar.gz tcl.tar.gz
 tar -xf tcl.tar.gz
-cd tcl8.6.13/unix
+cd tcl8.6.13
+rm -rf pkgs/tdbc* pkgs/sqlite*
+cd unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads
 make -j$(nproc --all)
 make install
