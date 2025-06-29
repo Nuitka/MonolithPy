@@ -62,17 +62,17 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - name: Download cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          curl -L "$file_url" -o "$file_name" || exit 0
-          unzip -q "$file_name" || exit 0
-          rm ${file_name} || exit 0
-          ln -s lib Nuitka-Python-Deps/lib64 || exit 0
+#      - name: Download cache
+#        env:
+#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+#        run: |
+#          cd ..
+#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+#          curl -L "$file_url" -o "$file_name" || exit 0
+#          unzip -q "$file_name" || exit 0
+#          rm ${file_name} || exit 0
+#          ln -s lib Nuitka-Python-Deps/lib64 || exit 0
       - name: Run Build
         run: bash build.sh "${{ github.workspace }}/Nuitka-Python-Out"
       - name: Cleanup artifact
@@ -81,18 +81,18 @@ jobs:
         with:
           name: Nuitka-Python311_ubuntu
           path: ${{ github.workspace }}/Nuitka-Python-Out
-      - name: Store cache
-        env:
-          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-        run: |
-          cd ..
-          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
-          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-          rm -rf ${file_name}
-          rm -f Nuitka-Python-Deps/lib64
-          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
-          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
-          rm -rf ${file_name}
+#      - name: Store cache
+#        env:
+#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+#        run: |
+#          cd ..
+#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+#          rm -rf ${file_name}
+#          rm -f Nuitka-Python-Deps/lib64
+#          zip -r ${file_name} Nuitka-Python-Deps Nuitka-Python/dep-build
+#          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+#          rm -rf ${file_name}
 
   windows:
     name: Windows Build
