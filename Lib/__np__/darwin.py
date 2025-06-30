@@ -77,7 +77,7 @@ def rename_init_symbol_in_file(target_lib):
                 obj_symbols = [x for x in obj_symbols if not x[0].startswith(".")]
                 for sym in obj_symbols:
                     if sym[0].startswith("PyInit_") or sym[0].startswith("_PyInit_") or \
-                            "pyx_CommonTypesMetaclass" in sym[0]:
+                            "pyx_CommonTypesMetaclass" in sym[0] or "pybind11" in sym[0]:
                         symbols_to_rename.add(sym[0])
 
                 if not symbols_to_rename:
