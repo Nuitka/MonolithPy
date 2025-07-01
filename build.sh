@@ -111,9 +111,15 @@ if [ ! -d sqlite-autoconf-3440000 ]; then
 download_file https://sqlite.org/2023/sqlite-autoconf-3440000.tar.gz sqlite.tar.gz
 tar -xf sqlite.tar.gz
 cd sqlite-autoconf-3440000
+export "CFLAGS_bak=$CFLAGS"
+export "CPPFLAGS_bak=$CPPFLAGS"
+export "CFLAGS=$CFLAGS -DSQLITE_ENABLE_COLUMN_METADATA"
+export "CPPFLAGS=$CPPFLAGS -DSQLITE_ENABLE_COLUMN_METADATA"
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
+export "CFLAGS=$CFLAGS_bak"
+export "CPPFLAGS=$CPPFLAGS_bak"
 cd ..
 fi
 
