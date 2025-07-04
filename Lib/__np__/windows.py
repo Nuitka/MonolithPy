@@ -231,7 +231,9 @@ def rename_init_symbol_in_file(target_lib):
 
                     # Check if it's a PyInit symbol and if it's defined (not 'U')
                     if (sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_") or
-                            "pyx_CommonTypesMetaclass" in sym_name or "pybind11" in sym_name) and \
+                            "pyx_CommonTypesMetaclass" in sym_name or
+                            "_f2py_" in sym_name or
+                        ("pybind11" in sym_name and '@' not in sym_name and '?' not in sym_name)) and \
                             not (' u ' in line.lower() or line.lower().startswith('u ')):
                         symbols_to_rename_map[sym_name] = f"{sym_name}__np__{file_hash}"
 
