@@ -78,7 +78,7 @@ def rename_init_symbol_in_file(target_lib):
                 for sym in obj_symbols:
                     if sym[0].startswith("PyInit_") or sym[0].startswith("_PyInit_") or \
                             "pyx_CommonTypesMetaclass" in sym[0] or \
-                            "_f2py_" in sym[0] or \
+                            "f2pyinittypes" in sym[0] or \
                             ("pybind11" in sym[0] and '@' not in sym[0] and '?' not in sym[0]):
                         symbols_to_rename.add(sym[0])
 

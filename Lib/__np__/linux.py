@@ -128,7 +128,7 @@ def rename_init_symbol_in_file(target_lib):
                 for sym_name, full_line in obj_symbols:
                     if (sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_") or
                             "pyx_CommonTypesMetaclass" in sym_name or
-                            "_f2py_" in sym_name or
+                            "f2pyinittypes" in sym_name or
                             ("pybind11" in sym_name and '@' not in sym_name and '?' not in sym_name)) and \
                             not (' U ' in full_line or full_line.strip().startswith('U ')):
                         symbols_to_rename_map[sym_name] = f"{sym_name}__np__{file_hash}"

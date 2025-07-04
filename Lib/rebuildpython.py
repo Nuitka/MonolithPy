@@ -175,6 +175,9 @@ def run_rebuild():
             if normalized_file in checkedLibs:
                 continue
 
+            if not is_lib_valid(normalized_file):
+                continue
+
             filename_base = os.path.basename(file)
 
             python_lib = sysconfig.get_config_var("LIBRARY")
@@ -538,6 +541,7 @@ extern "C" {
         link_libs = sysconfig_libs + link_libs
         libpython_lib = [x for x in link_libs if os.path.basename(x).startswith('libpython') and x.endswith(".a")][0]
         link_libs = [libpython_lib] + [x for x in link_libs if x != libpython_lib]
+        link_libs = [x for x in link_libs if is_lib_valid(x)]
         library_dirs = sysconfig_lib_dirs + library_dirs
 
         compiler.compile(
@@ -596,6 +600,7 @@ extern "C" {
         link_libs = sysconfig_libs + link_libs
         libpython_lib = [x for x in link_libs if os.path.basename(x).startswith('libpython') and x.endswith(".a")][0]
         link_libs = [libpython_lib] + [x for x in link_libs if x != libpython_lib]
+        link_libs = [x for x in link_libs if is_lib_valid(x)]
         library_dirs = [x for x in sysconfig_lib_dirs + library_dirs if 'Nuitka-Python-Deps' not in x]
 
         os.environ["MACOSX_DEPLOYMENT_TARGET"] = "10.9"
