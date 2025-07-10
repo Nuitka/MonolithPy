@@ -151,7 +151,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
     __np__.packaging.install_build_tool("7zip")
     target_lib_abs = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
-        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=tmpdir)
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-aou", "-o" + tmpdir, cwd=tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
@@ -204,7 +204,7 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=os.getcwd())
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-aou", "-o" + tmpdir, cwd=os.getcwd())
 
         obj_paths_in_tmpdir = []
         modified_any_obj = False
@@ -268,7 +268,7 @@ def remove_symbols_in_file(target_lib, object_file, symbols):
     __np__.packaging.install_build_tool("clang")
     __np__.packaging.install_build_tool("7zip")
     with tempfile.TemporaryDirectory() as tmpdir:
-        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-o" + tmpdir, cwd=tmpdir)
+        run_build_tool_exe("7zip", "7z.exe", "e", target_lib_abs, "-aou", "-o" + tmpdir, cwd=tmpdir)
 
         obj_list = [os.path.join(tmpdir, x) for x in os.listdir(tmpdir) if x.endswith(".obj")]
 
