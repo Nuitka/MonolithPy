@@ -873,6 +873,65 @@ NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
   return str;
 }
 
+#ifndef _WIN32
+NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void* e) {
+  if (NP_FOREIGN_PTR) {
+    return getline(lineptr, n, (FILE*)e);
+  }
+
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return getline(lineptr, n, ((EFILE*)e)->f);
+  }
+
+  // Handle virtual files
+  if (np_feof(e)) {
+    return -1;
+  }
+
+  // Initialize buffer if needed
+  if (*lineptr == NULL || *n == 0) {
+    *n = 128; // Initial buffer size
+    *lineptr = (char*)malloc(*n);
+    if (*lineptr == NULL) {
+      return -1;
+    }
+  }
+
+  size_t pos = 0;
+  int c;
+
+  while ((c = np_fgetc(e)) != -1) {
+    // Ensure buffer has space for character and null terminator
+    if (pos + 1 >= *n) {
+      size_t new_size = *n * 2;
+      char *new_ptr = (char*)realloc(*lineptr, new_size);
+      if (new_ptr == NULL) {
+        return -1;
+      }
+      *lineptr = new_ptr;
+      *n = new_size;
+    }
+
+    (*lineptr)[pos++] = (char)c;
+
+    // Stop at newline
+    if (c == '\n') {
+      break;
+    }
+  }
+
+  // If we read nothing and hit EOF, return -1
+  if (pos == 0 && c == -1) {
+    return -1;
+  }
+
+  // Null-terminate the string
+  (*lineptr)[pos] = '\0';
+
+  return (ssize_t)pos;
+}
+#endif
+
 NP_DECL(int) np_fgetc(void* e) {
   if (NP_FOREIGN_PTR) {
     return fgetc((FILE*)e);

@@ -76,6 +76,7 @@ typedef SSIZE_T ssize_t;
 #define tmpfile orig_tmpfile
 #define fgets orig_fgets
 #define _fgets orig__fgets
+#define getline orig_getline
 #define getc orig_getc
 #define fgetc orig_fgetc
 #define _fgetc orig__fgetc
@@ -256,6 +257,7 @@ typedef SSIZE_T ssize_t;
 #undef tmpfile
 #undef fgets
 #undef _fgets
+#undef getline
 #undef getc
 #undef fgetc
 #undef _fgetc
@@ -747,6 +749,9 @@ NP_DECL(EFILE*) np_fdopen(int fd, const char *mode);
 /* File Input Functions */
 NP_DECL(int) np_fgetc(void *stream);
 NP_DECL(char*) np_fgets(char *str, int n, void *stream);
+#ifndef _WIN32
+NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void *stream);
+#endif
 NP_DECL(int) np_fscanf(void *stream, const char *format, ...);
 NP_DECL(int) np_getc_unlocked(void *stream);  /* Unlocked version of egetc */
 
@@ -1106,6 +1111,12 @@ ALWAYS_INLINE NP_DECL(char*) fgets(char *str, int n, void *stream) {
 ALWAYS_INLINE NP_DECL(char*) _fgets(char *str, int n, void *stream) {
     return np_fgets(str, n, stream);
 }
+
+#ifndef _WIN32
+ALWAYS_INLINE NP_DECL(ssize_t) getline(char **lineptr, size_t *n, void *stream) {
+    return np_getline(lineptr, n, stream);
+}
+#endif
 
 ALWAYS_INLINE NP_DECL(int) getc(void *stream) {
     return np_fgetc(stream);
