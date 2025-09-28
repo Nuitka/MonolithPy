@@ -49,7 +49,8 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
     import __np__.packaging
     __np__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
-        run("ar", "-x", target_lib, cwd=tmpdir)
+        import __np__.tools.extract_ar
+        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
@@ -109,7 +110,8 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        run("ar", "-x", target_lib, cwd=tmpdir)
+        import __np__.tools.extract_ar
+        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
         obj_list_paths = []
         obj_filenames = []
 
@@ -157,7 +159,8 @@ def rename_init_symbol_in_file(target_lib):
 
 def remove_symbols_in_file(target_lib, object_file_to_modify, symbols_to_remove):
     with tempfile.TemporaryDirectory() as tmpdir:
-        run("ar", "-x", target_lib, cwd=tmpdir)
+        import __np__.tools.extract_ar
+        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
 
         all_obj_filenames = [fn for fn in os.listdir(tmpdir) if fn.endswith(".o")]
         target_obj_path = os.path.join(tmpdir, object_file_to_modify)
