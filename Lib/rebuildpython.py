@@ -547,22 +547,6 @@ extern "C" {
             macros=macros,
         )
 
-        print({
-            "objects": [os.path.join(sysconfig.get_config_var("prefix"), "python.o")],
-            "output_progname": "python",
-            "output_dir": build_dir,
-            "libraries": link_libs,
-            "library_dirs": library_dirs,
-            "extra_preargs": sysconfig.get_config_var("LDFLAGS").split()
-                            + [
-                                "-flto",
-                                "-fuse-linker-plugin",
-                                "-ffat-lto-objects",
-                                "-flto-partition=none",
-                            ],
-            "extra_postargs": ["-l:libsqlite3.a"]
-        })
-
         compiler.link_executable(
             objects=[os.path.join(sysconfig.get_config_var("prefix"), "python.o")],
             output_progname="python",
