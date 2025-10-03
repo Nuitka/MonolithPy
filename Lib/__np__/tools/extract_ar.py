@@ -101,11 +101,24 @@ def extract_archive(archive_path, output_dir="."):
                     print(f"Error parsing member header at offset {current_pos}: {e}", file=sys.stderr)
                     return False
 
+                raw_name_str = header.raw_name.strip().decode('ascii', 'ignore')
+
+                # Handle special members identified by their exact name first.
+                # This is critical for Windows.lib files where the first member is '/'
+                if raw_name_str == '/':
+                    f.seek(header.size, 1)
+                    if header.size % 2 != 0:
+                        f.seek(1, 1)
+                    continue
+
+                if raw_name_str == '//':
+                    long_names_table = f.read(header.size)
+                    if header.size % 2 != 0:
+                        f.seek(1, 1)
+                    continue
+
                 filename = ""
                 data_size = header.size
-
-                # 4. Resolve filename
-                raw_name_str = header.raw_name.strip().decode('ascii', 'ignore')
 
                 if raw_name_str.startswith('#1/'):
                     # BSD-style long filename
@@ -131,7 +144,9 @@ def extract_archive(archive_path, output_dir="."):
                         offset = int(raw_name_str[1:])
                         end_offset = long_names_table.find(b'/\n', offset)
                         if end_offset == -1:
-                            end_offset = len(long_names_table)  # some variants might not use the trailer
+                            end_offset = long_names_table.find(b'\x00', offset)  # Also check for null terminator
+                        if end_offset == -1:
+                            end_offset = len(long_names_table)
                         filename = long_names_table[offset:end_offset].decode('ascii')
                     except (ValueError, IndexError):
                         print(f"Error parsing GNU-style long name at offset {current_pos}.", file=sys.stderr)
@@ -143,29 +158,26 @@ def extract_archive(archive_path, output_dir="."):
                     # Standard short filename
                     filename = raw_name_str.rstrip('/')
 
-                data_to_read = data_size
-                if filename == '/' or filename.startswith('__.SYMDEF'):
-                    # Symbol table, skip
-                    f.seek(data_to_read, 1)
-                elif filename == '//':
-                    # GNU/SysV long names table
-                    long_names_table = f.read(data_to_read)
+                # Handle other special members (e.g., BSD symbol table)
+                if filename.startswith('__.SYMDEF'):
+                    f.seek(data_size, 1)
+                elif not filename:
+                    print(f"Warning: Skipping member with empty name at offset {current_pos}.", file=sys.stderr)
+                    f.seek(data_size, 1)
                 else:
-                    if not filename:
-                        print(f"Warning: Skipping member with empty name at offset {current_pos}.", file=sys.stderr)
-                        f.seek(data_to_read, 1)
-                    else:
-                        base_output_path = os.path.join(output_dir, os.path.basename(filename))
-                        output_path = _make_unique_filename(base_output_path)
+                    # Sanitize filename to prevent path traversal
+                    safe_basename = os.path.basename(filename)
+                    base_output_path = os.path.join(output_dir, safe_basename)
+                    output_path = _make_unique_filename(base_output_path)
 
-                        try:
-                            with open(output_path, 'wb') as out_f:
-                                out_f.write(f.read(data_to_read))
-                            extracted_filenames.add(filename)
-                        except IOError as e:
-                            print(f"Error writing file '{output_path}': {e}", file=sys.stderr)
-                            # Don't halt, try to extract other members
-                            f.seek(data_to_read, 1)  # Skip over data
+                    try:
+                        with open(output_path, 'wb') as out_f:
+                            out_f.write(f.read(data_size))
+                        extracted_filenames.add(filename)
+                    except IOError as e:
+                        print(f"Error writing file '{output_path}': {e}", file=sys.stderr)
+                        # Don't halt, try to extract other members
+                        f.seek(data_size, 1)  # Skip over data
 
                 # 7. Advance to the next member, accounting for padding
                 # Data must be padded to an even byte boundary
