@@ -10,7 +10,7 @@ from urllib.request import urlretrieve
 
 
 def fetch_zip(commit_hash, zip_dir, *, org='Nuitka', binary=False, verbose):
-    repo = f'Nuitka-Python-{"bin" if binary else "source"}-deps'
+    repo = f'MonolithPy-{"bin" if binary else "source"}-deps'
     url = f'https://github.com/{org}/{repo}/archive/{commit_hash}.zip'
 #    print(f"Fetching: {url}")
     reporthook = None

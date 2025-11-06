@@ -7,8 +7,8 @@ import fnmatch
 import __np__
 
 PACKAGE_BASE_URL = os.environ.get(
-    "NUITKA_PYTHON_PACKAGE_URL",
-    "https://raw.githubusercontent.com/Nuitka/Nuitka-Python-packages/master",
+    "MONOLITHPY_PACKAGE_URL",
+    "https://raw.githubusercontent.com/Nuitka/MonolithPy-packages/master",
 )
 
 
