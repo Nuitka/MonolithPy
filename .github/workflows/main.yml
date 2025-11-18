@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-    - 3.11
+    - 3.13
 
 jobs:
   mac:
