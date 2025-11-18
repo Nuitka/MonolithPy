@@ -460,6 +460,7 @@ static inline void Py_InitStaticModules(void) {
             if __np__.getToolsInstallDir() in file:
                 continue
             link_flags += [file]
+            link_libs += [file]
 
         compiler.compile(
             ["python.c"], output_dir=build_dir, include_dirs=include_dirs, macros=macros
