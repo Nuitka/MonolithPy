@@ -2,7 +2,7 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{10487945-15D1-4092-A214-338395C4116B}</ProjectGuid>
-        <OutputName>NuitkaPython</OutputName>
+        <OutputName>MonolithPy</OutputName>
         <OutputName Condition="$(Platform) == 'x86'">$(OutputName)x86</OutputName>
         <OutputName Condition="$(Platform) == 'ARM'">$(OutputName)arm32</OutputName>
         <OutputName Condition="$(BuildForDaily) == 'true'">$(OutputName)daily</OutputName>

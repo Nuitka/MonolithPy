@@ -1,6 +1,6 @@
 from __future__ import print_function
 
-import __np__
+import __mp__
 import ctypes
 import setuptools._distutils.ccompiler as ccompiler
 import fnmatch
@@ -174,7 +174,7 @@ def run_rebuild():
 
     ext_suffix = get_config_var("SO" if str is bytes else "EXT_SUFFIX")
 
-    extra_scan_dirs = [__np__.getDependencyInstallDir()]
+    extra_scan_dirs = [__mp__.getDependencyInstallDir()]
     if platform.system() == "Windows":
         extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
 
@@ -288,7 +288,7 @@ def run_rebuild():
     ):
         if "interpreter_build" in file:
             continue
-        if __np__.getToolsInstallDir() in file:
+        if __mp__.getToolsInstallDir() in file:
             continue
         link_libs.append(file)
 
@@ -299,9 +299,9 @@ def run_rebuild():
     library_dirs = list(set(library_dirs))
     extra_link_args = []
 
-    if os.path.isdir(__np__.getToolsInstallDir()):
-        for build_tool in os.listdir(__np__.getToolsInstallDir()):
-            tool_link_file = os.path.join(__np__.getToolsInstallDir(), build_tool, "link.json")
+    if os.path.isdir(__mp__.getToolsInstallDir()):
+        for build_tool in os.listdir(__mp__.getToolsInstallDir()):
+            tool_link_file = os.path.join(__mp__.getToolsInstallDir(), build_tool, "link.json")
             if os.path.isfile(tool_link_file):
                 with open(tool_link_file, "r") as f:
                     linkData = json.load(f)
@@ -312,7 +312,7 @@ def run_rebuild():
                         for x in linkData.get("library_dirs", [])
                     ]
 
-    library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__np__.getDependencyInstallDir(), "*")) if
+    library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__mp__.getDependencyInstallDir(), "*")) if
                      os.path.isdir(os.path.join(x, "lib"))]
 
     libIdx = 0
@@ -360,7 +360,7 @@ extern "C" {
     inittab_code = ""
 
     for module_fullname, filename in foundLibs.items():
-        if __np__.getToolsInstallDir() in filename:
+        if __mp__.getToolsInstallDir() in filename:
             continue
         if not is_lib_valid(filename):
             continue
@@ -457,7 +457,7 @@ static inline void Py_InitStaticModules(void) {
         for file in find_files(
             interpreter_prefix, "*.res"
         ):
-            if __np__.getToolsInstallDir() in file:
+            if __mp__.getToolsInstallDir() in file:
                 continue
             link_flags += [file]
             link_libs += [file]
@@ -502,7 +502,7 @@ static inline void Py_InitStaticModules(void) {
         EndUpdateResource.restype = ctypes.wintypes.BOOL
 
         manifest = (
-            __np__.EXE_MANIFEST
+            __mp__.EXE_MANIFEST
         ).encode("ascii")
 
         update_handle = BeginUpdateResource(os.path.join(build_dir, "python.exe"), False)
@@ -512,7 +512,7 @@ static inline void Py_InitStaticModules(void) {
 
         EndUpdateResource(update_handle, False)
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python.exe"), "-c",
+        if 'Interpreter OK' not in __mp__.run_with_output(os.path.join(build_dir, "python.exe"), "-c",
                                                           "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
@@ -574,7 +574,7 @@ static inline void Py_InitStaticModules(void) {
             extra_postargs=["-l:libsqlite3.a"]
         )
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c",
+        if 'Interpreter OK' not in __mp__.run_with_output(os.path.join(build_dir, "python"), "-c",
                                                           "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
@@ -663,11 +663,11 @@ static inline void Py_InitStaticModules(void) {
             extra_midargs=final_extra_link_args,
         )
 
-        if 'Interpreter OK' not in __np__.run_with_output(os.path.join(build_dir, "python"), "-c",
+        if 'Interpreter OK' not in __mp__.run_with_output(os.path.join(build_dir, "python"), "-c",
                                                           "print('Interpreter OK')"):
             raise RuntimeError("Failed to rebuild a working interpreter!")
 
-        otool_output = __np__.run_with_output("otool", "-l", os.path.join(build_dir, "python"), quiet=True)
+        otool_output = __mp__.run_with_output("otool", "-l", os.path.join(build_dir, "python"), quiet=True)
         curr_load_lines = []
         for line in otool_output.split('\n'):
             if line.startswith("Load command") or line.startswith("Section"):
@@ -684,10 +684,10 @@ static inline void Py_InitStaticModules(void) {
 
         for lib in [x for x in curr_load_lines if
                     x.get('name') and not x.get('name').startswith("/") and not x.get('name').startswith("@")]:
-            __np__.run_with_output("install_name_tool", "-change", lib['name'].split(' ')[0],
+            __mp__.run_with_output("install_name_tool", "-change", lib['name'].split(' ')[0],
                                    os.path.join("@rpath", lib['name'].split(' ')[0]), os.path.join(build_dir, "python"))
 
-        __np__.run_with_output("install_name_tool", "-add_rpath", "@loader_path", os.path.join(build_dir, "python"))
+        __mp__.run_with_output("install_name_tool", "-add_rpath", "@loader_path", os.path.join(build_dir, "python"))
 
         link_flags = final_extra_link_args
 

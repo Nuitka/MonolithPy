@@ -8,7 +8,7 @@
 // Since this is a "meta-include" file, "#ifdef __cplusplus / extern "C" {"
 // is not needed.
 
-#include "np_embed.h"
+#include "mp_embed.h"
 
 // Since this is a "meta-include" file, no #ifdef __cplusplus / extern "C" {
 

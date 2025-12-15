@@ -101,7 +101,7 @@ def main():
     map_temp_f.close()
     data_temp_f.close()
 
-    with open(os.path.join(out_dir, "np_embed_data.c"), 'w') as f:
+    with open(os.path.join(out_dir, "mp_embed_data.c"), 'w') as f:
         f.write("""const unsigned char nuitka_embed_map[] =
 {
 """)

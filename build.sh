@@ -32,8 +32,8 @@ export "PYTHON_BASE=$(pwd)"
 export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-export "LDFLAGS=-L${PREFIX}/lib -lnp_embed -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects"
-export "CCexe_LDFLAGS=-L${PREFIX}/lib -lnp_embed -I${PYTHON_BASE}/Include"
+export "LDFLAGS=-L${PREFIX}/lib -lmp_embed -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects"
+export "CCexe_LDFLAGS=-L${PREFIX}/lib -lmp_embed -I${PYTHON_BASE}/Include"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
 
@@ -62,9 +62,9 @@ mkdir -p ${PREFIX}/lib
 mkdir -p Embedded/embed_data/vfs/ssl
 curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
 python3 Lib/mkembeddata.py Embedded Embedded/embed_data
-$CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
-$CC -c -o Embedded/np_embed_data.o Embedded/np_embed_data.c
-ar rcs ${PREFIX}/lib/libnp_embed.a Embedded/np_embed.o Embedded/np_embed_data.o
+$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
+$CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
+ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
 
 if [ ! -h ${PREFIX}/lib64 ]; then
   ln -s lib ${PREFIX}/lib64
@@ -129,7 +129,7 @@ tar -xf openssl.tar.gz
 cd openssl-3.1.8
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 make install_dev -j$(nproc --all)
 unset CPPINCLUDES
 cd ..
@@ -243,7 +243,7 @@ if [ ! -d freetype-2.13.3 ]; then
 download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
 cd freetype-2.13.3
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(nproc --all)
 make install
@@ -254,9 +254,9 @@ if [ ! -d fontconfig-2.15.0 ]; then
 download_file https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.gz fontconfig.tar.gz
 tar -xf fontconfig.tar.gz
 cd fontconfig-2.15.0
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
-make CPPFLAGS="-I${PREFIX}/include -I${PYTHON_BASE}/Include -DBYPASS_NP_EMBED" -j$(nproc --all) install || true
+make CPPFLAGS="-I${PREFIX}/include -I${PYTHON_BASE}/Include -DBYPASS_MP_EMBED" -j$(nproc --all) install || true
 echo ----- It is normal for fontconfig to fail to build the executables. The libs should be enough. -----
 cd ..
 fi
@@ -285,7 +285,7 @@ if [ ! -d libXft-2.3.8 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXft-2.3.8.tar.gz libXft.tar.gz
 tar -xf libXft.tar.gz
 cd libXft-2.3.8
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -418,7 +418,7 @@ export "CPPFLAGS=-I${PREFIX}/include"
   CXX="$CXX" \
   CFLAGS="-g $CFLAGS" \
   LDFLAGS="-g -Xlinker -export-dynamic -rdynamic -Bsymbolic-functions -Wl,-z,relro -Wl,-allow-multiple-definition $LDFLAGS" \
-  LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a -l:libnp_embed.a" \
+  LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a -l:libmp_embed.a" \
   ax_cv_c_float_words_bigendian=no \
   ac_cv_lib_sqlite3_sqlite3_bind_double=yes ac_cv_lib_sqlite3_sqlite3_column_decltype=yes ac_cv_lib_sqlite3_sqlite3_column_double=yes \
   ac_cv_lib_sqlite3_sqlite3_complete=yes ac_cv_lib_sqlite3_sqlite3_enable_shared_cache=yes ac_cv_lib_sqlite3_sqlite3_progress_handler=yes \
@@ -444,9 +444,9 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
 
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
-rm -f Embedded/np_embed.o
-$CC -c -g -o Embedded/np_embed.o Embedded/np_embed.c -IInclude
-$ELEVATE cp -r "Embedded/np_embed.o" "$target/Embedded/"
+rm -f Embedded/mp_embed.o
+$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
+$ELEVATE cp -r "Embedded/mp_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
 $ELEVATE mkdir -p "$target/dependency_libs"

@@ -107,7 +107,7 @@ else:
     _INSTALL_SCHEMES['venv'] = _INSTALL_SCHEMES['posix_venv']
 
 def _get_implementation():
-    return 'MonolithPy'
+    return 'Python'
 
 # NOTE: site.py has copy of this function.
 # Sync it when modify this function.
@@ -478,12 +478,15 @@ def _init_config_vars():
         _init_non_posix(_CONFIG_VARS)
         _CONFIG_VARS['VPATH'] = sys._vpath
     if os.name == 'posix':
-        _init_posix(_CONFIG_VARS)
-        orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
-        base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
-        for var in _CONFIG_VARS:
-            if isinstance(_CONFIG_VARS[var], str):
-                _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
+        try:
+            _init_posix(_CONFIG_VARS)
+            orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
+            base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
+            for var in _CONFIG_VARS:
+                if isinstance(_CONFIG_VARS[var], str):
+                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
+        except ModuleNotFoundError:
+            pass
 
     # Normalized versions of prefix and exec_prefix are handy to have;
     # in fact, these are the standard versions used most places in the

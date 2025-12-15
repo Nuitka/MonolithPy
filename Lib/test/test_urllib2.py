@@ -1113,8 +1113,8 @@ class HandlerTests(unittest.TestCase, ExtraAssertions):
             ds_req = Request(ds_url, data)
 
             # Check whether host is determined correctly if there is no proxy
-            np_ds_req = h.do_request_(ds_req)
-            self.assertEqual(np_ds_req.unredirected_hdrs["Host"], "example.com")
+            mp_ds_req = h.do_request_(ds_req)
+            self.assertEqual(mp_ds_req.unredirected_hdrs["Host"], "example.com")
 
             # Check whether host is determined correctly if there is a proxy
             ds_req.set_proxy("someproxy:3128", None)

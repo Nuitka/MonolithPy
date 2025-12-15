@@ -2129,7 +2129,7 @@ class TestPosixSpawnP(unittest.TestCase, _PosixSpawnMixin):
         temp_dir = tempfile.mkdtemp()
         self.addCleanup(os_helper.rmtree, temp_dir)
 
-        program = 'posix_spawnp_test_program.exe'
+        program = 'posix_spawmp_test_program.exe'
         program_fullpath = os.path.join(temp_dir, program)
         os.symlink(sys.executable, program_fullpath)
 

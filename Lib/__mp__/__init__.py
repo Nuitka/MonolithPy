@@ -1,9 +1,9 @@
 import platform
 
 if platform.system() == "Windows":
-    from __np__.windows import *
+    from __mp__.windows import *
 elif platform.system() == "Linux":
-    from __np__.linux import *
+    from __mp__.linux import *
 elif platform.system() == "Darwin":
-    from __np__.darwin import *
+    from __mp__.darwin import *
 

@@ -3,7 +3,7 @@ import os
 import shutil
 import glob
 import sysconfig
-import __np__
+import __mp__
 import mkembeddata
 import setuptools._distutils.ccompiler as ccompiler
 
@@ -11,7 +11,7 @@ embed_path = None
 out_lib_path = None
 
 def main():
-    with __np__.TemporaryDirectory() as tmpdir:
+    with __mp__.TemporaryDirectory() as tmpdir:
         mkembeddata.base_path = embed_path
         mkembeddata.out_dir = tmpdir
         mkembeddata.main()
@@ -23,11 +23,11 @@ def main():
             pass
 
         objs = compiler.compile(
-            [os.path.join(tmpdir, "np_embed_data.c")], output_dir=tmpdir
+            [os.path.join(tmpdir, "mp_embed_data.c")], output_dir=tmpdir
         )
 
         compiler.create_static_lib([*objs,
-             os.path.join(sysconfig.get_config_var("prefix"), "Embedded", "np_embed" + compiler.obj_extension)],
+             os.path.join(sysconfig.get_config_var("prefix"), "Embedded", "mp_embed" + compiler.obj_extension)],
                                    "result_lib", output_dir=tmpdir)
 
         shutil.copy(glob.glob(os.path.join(tmpdir, "*result_lib.*"))[0], out_lib_path)

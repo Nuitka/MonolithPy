@@ -27,7 +27,7 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_name=MP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         curl -L "$file_url" -o "$file_name" || exit 0
         tar -xf "$file_name" || exit 0
@@ -48,7 +48,7 @@ jobs:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
       run: |
         cd ..
-        export "file_name=NP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
+        export "file_name=MP_mac-${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}-${{ hashFiles('build.mac.sh') }}.tar.gz"
         export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
         rm -rf ${file_name}
         rm -f MonolithPy-Deps/lib64
@@ -67,7 +67,7 @@ jobs:
 #          CACHE_SAS: ${{ secrets.CACHE_SAS }}
 #        run: |
 #          cd ..
-#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.zip"
 #          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
 #          curl -L "$file_url" -o "$file_name" || exit 0
 #          unzip -q "$file_name" || exit 0
@@ -86,7 +86,7 @@ jobs:
 #          CACHE_SAS: ${{ secrets.CACHE_SAS }}
 #        run: |
 #          cd ..
-#          export "file_name=NP_ubuntu-${{ hashFiles('build.sh') }}.zip"
+#          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.zip"
 #          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
 #          rm -rf ${file_name}
 #          rm -f MonolithPy-Deps/lib64
