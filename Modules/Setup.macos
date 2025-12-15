@@ -127,6 +127,7 @@ PYTHONPATH=$(COREPYTHONPATH)
 # detail; also note that *static* or *disabled* cancels this effect):
 
 #*shared*
+*static*
 
 # Modules that should always be present (POSIX and Windows):
 
@@ -137,6 +138,9 @@ _csv _csv.c
 _datetime _datetimemodule.c
 _decimal _decimal/_decimal.c
 _heapq _heapqmodule.c
+_interpchannels _interpchannelsmodule.c
+_interpqueues _interpqueuesmodule.c
+_interpreters _interpretersmodule.c
 _json _json.c
 _lsprof _lsprof.c rotatingtree.c
 _multiprocessing -I$(srcdir)/Modules/_multiprocessing _multiprocessing/multiprocessing.c _multiprocessing/semaphore.c
@@ -150,24 +154,23 @@ _struct _struct.c
 _typing _typingmodule.c
 _zoneinfo _zoneinfo.c
 array arraymodule.c
-audioop audioop.c
 binascii binascii.c
 cmath cmathmodule.c
 math mathmodule.c
 mmap mmapmodule.c
 select selectmodule.c
+_sysconfig _sysconfig.c
 
 # XML
 _elementtree _elementtree.c
 pyexpat pyexpat.c
 
 # hashing builtins
-_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c -lb2
-_md5 md5module.c
-_sha1 sha1module.c
-_sha256 sha256module.c
-_sha512 sha512module.c
-_sha3 _sha3/sha3module.c
+_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c
+_md5 md5module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_MD5.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_sha1 sha1module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA1.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_sha2 sha2module.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_Hash_SHA2.a
+_sha3 sha3module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA3.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
 
 # text encodings and unicode
 _codecs_cn cjkcodecs/_codecs_cn.c
@@ -185,16 +188,9 @@ _posixsubprocess _posixsubprocess.c
 _posixshmem -I$(srcdir)/Modules/_multiprocessing _multiprocessing/posixshmem.c
 fcntl fcntlmodule.c
 grp grpmodule.c
-#ossaudiodev ossaudiodev.c
 resource resource.c
-#spwd spwdmodule.c
 syslog syslogmodule.c
 termios termios.c
-
-# Modules with UNIX dependencies that require external libraries
-
-_crypt _cryptmodule.c -lcrypt
-#nis nismodule.c -I/usr/include/tirpc -lnsl -ltirpc
 
 # Modules that require external libraries.
 
@@ -202,25 +198,22 @@ _bz2 _bz2module.c -lbz2
 _ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict.c _ctypes/cfield.c -ldl -lffi -DHAVE_FFI_PREP_CIF_VAR -DHAVE_FFI_PREP_CLOSURE_LOC -DHAVE_FFI_CLOSURE_ALLOC
 # The _dbm module supports NDBM, GDBM with compat module, and Berkeley DB.
 #_dbm _dbmmodule.c -l:libgdbm_compat.a -DUSE_GDBM_COMPAT
-#_gdbm _gdbmmodule.c -l:libgdbm.a
+#_gdbm _gdbmmodule.c -lgdbm
 _lzma _lzmamodule.c -llzma
 #_uuid _uuidmodule.c -luuid
 zlib  zlibmodule.c -lz
 
 # The readline module also supports libeditline (-leditline).
 # Some systems may require -ltermcap or -ltermlib.
-#readline readline.c -l:libeditline.a -DWITH_EDITLINE
+#readline readline.c -leditline -DWITH_EDITLINE
 
 # OpenSSL bindings
 #_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) $(OPENSSL_LIBS)
 #_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lcrypto
 
 # To statically link OpenSSL:
-_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -lssl \
-    -lcrypto
-_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -lcrypto
+_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lssl -lcrypto
+_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lcrypto
 
 # The _tkinter module.
 #
@@ -234,37 +227,7 @@ _hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
 # every system.
 
 # *** Always uncomment this (leave the leading underscore in!):
-_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
-# *** Uncomment and edit to reflect where your Tcl/Tk libraries are:
-#	-L/usr/local/lib \
-# *** Uncomment and edit to reflect where your Tcl/Tk headers are:
-#	-I/usr/include/tcl8.6 \
-# *** Uncomment and edit to reflect where your X11 header files are:
-#	-I/usr/X11R6/include \
-# *** Or uncomment this for Solaris:
-#	-I/usr/openwin/include \
-# *** Uncomment and edit for Tix extension only:
-#	-DWITH_TIX -ltix8.1.8.2 \
-# *** Uncomment and edit for BLT extension only:
-#	-DWITH_BLT -I/usr/local/blt/blt8.0-unoff/include -lBLT8.0 \
-# *** Uncomment and edit for PIL (TkImaging) extension only:
-#     (See http://www.pythonware.com/products/pil/ for more info)
-#	-DWITH_PIL -I../Extensions/Imaging/libImaging  tkImaging.c \
-# *** Uncomment and edit for TOGL extension only:
-#	-DWITH_TOGL togl.c \
-# *** Uncomment and edit to reflect your Tcl/Tk versions:
-	-ltk8.6 -ltcl8.6 \
-# *** Uncomment and edit to reflect where your X11 libraries are:
-#	-L/usr/X11R6/lib \
-# *** Or uncomment this for Solaris:
-#	-L/usr/openwin/lib \
-# *** Uncomment these for TOGL extension only:
-#	-lGL -lGLU -lXext -lXmu \
-# *** Uncomment for AIX:
-#	-lld \
-# *** Always uncomment this; X11 libraries to link with:
-#	-lX11
-    -framework Cocoa -framework Carbon -framework IOKit -framework QuartzCore -framework CoreServices -framework CoreFoundation -framework ApplicationServices -framework UniformTypeIdentifiers
+_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) -ltk8.6 -ltcl8.6 -framework Cocoa -framework Carbon -framework IOKit -framework QuartzCore -framework CoreServices -framework CoreFoundation -framework ApplicationServices -framework UniformTypeIdentifiers
 
 # Some system have -lcurses
 _curses -lncursesw _cursesmodule.c
@@ -278,11 +241,10 @@ _scproxy _scproxy.c
 #xx xxmodule.c
 #xxlimited xxlimited.c
 #xxlimited_35 xxlimited_35.c
-#xxsubtype xxsubtype.c  # Required for the test suite to pass!
+#xxsubtype xxsubtype.c
 
 # Testing
 
-#_xxsubinterpreters _xxsubinterpretersmodule.c
 #_xxtestfuzz _xxtestfuzz/_xxtestfuzz.c _xxtestfuzz/fuzzer.c
 #_testbuffer _testbuffer.c
 #_testinternalcapi _testinternalcapi.c
@@ -294,6 +256,8 @@ _scproxy _scproxy.c
 #_testcapi _testcapimodule.c
 #_testimportmultiple _testimportmultiple.c
 #_testmultiphase _testmultiphase.c
+#_testexternalinspection _testexternalinspection.c
+#_testsinglephase _testsinglephase.c
 
 # ---
 # Uncommenting the following line tells makesetup that all following modules
@@ -308,11 +272,27 @@ _testbuffer
 _testmultiphase
 _xxtestfuzz
 _testimportmultiple
+_testexternalinspection
+_testsinglephase
 _dbm
 nis
 _ctypes_test
 ossaudiodev
 xxlimited
+-lcrypto
+-lssl
+-ltk8.6
+-lz
+_sqlite3
+_testclinic
+_testclinic_limited
+_testinternalcapi
+_testlimitedcapi
+_uuid
+xxlimited_35
+xxsubtype
+_gdbm
+readline
 #_lzma
 #
 # _sqlite3 _tkinter _curses pyexpat

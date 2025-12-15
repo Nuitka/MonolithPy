@@ -1,6 +1,6 @@
-#define NUITKAPYTHON_EMBED_BUILD
+#define MONOLITHPY_EMBED_BUILD
 #define _FILE_OFFSET_BITS 64
-#include "np_embed.h"
+#include "mp_embed.h"
 #define PATH_MAX 4096
 #ifdef _WIN32
 #include <windows.h>
@@ -8,6 +8,7 @@
 #endif
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 #if _WIN32
 #define strcasecmp _stricmp
@@ -33,8 +34,8 @@ struct FDMAP_S {    // Virtual File Stream
 };
 typedef struct FDMAP_S FDMAP;
 
-FDMAP np_fd2file[512] = {};
-bool np_fd2file_initialized = false;
+FDMAP mp_fd2file[512] = {};
+bool mp_fd2file_initialized = false;
 
 #ifdef _WIN32
 // A map to associate mapping HANDLEs with our virtual EFILE structs.
@@ -45,7 +46,7 @@ struct VMAP_S {   // Virtual File Mapping
 typedef struct VMAP_S VMAP;
 
 // An array to store the mappings for open virtual files.
-VMAP np_mapping2file[512] = {};
+VMAP mp_mapping2file[512] = {};
 
 // A map to associate view pointers with our virtual EFILE structs
 struct VIEWMAP_S { // Virtual File View
@@ -54,7 +55,7 @@ struct VIEWMAP_S { // Virtual File View
 };
 typedef struct VIEWMAP_S VIEWMAP;
 
-VIEWMAP np_view2file[512] = {};
+VIEWMAP mp_view2file[512] = {};
 
 // For FindFirst/NextFile functionality
 typedef struct VIRTUAL_FIND_HANDLE_DATA_S {
@@ -70,7 +71,7 @@ struct FIND_HNDMAP_S {
 };
 typedef struct FIND_HNDMAP_S FIND_HNDMAP;
 
-FIND_HNDMAP np_findhandles[512] = {};
+FIND_HNDMAP mp_findhandles[512] = {};
 #endif
 
 uint32_t hash(char * key) {   // Hash Function: MurmurOAAT64
@@ -84,19 +85,19 @@ uint32_t hash(char * key) {   // Hash Function: MurmurOAAT64
 }
 
 ALWAYS_INLINE void init_fd2file() {
-  if (unlikely(!np_fd2file_initialized)) {
+  if (unlikely(!mp_fd2file_initialized)) {
     for (int i = 0; i < 512; ++i) {
-      np_fd2file[i].fd = -1;
+      mp_fd2file[i].fd = -1;
       // The pointer 'f' is already NULL due to the initial zero-initialization
       // but it's good practice to be explicit if the intent isn't just zeroing.
-      np_fd2file[i].f = NULL;
+      mp_fd2file[i].f = NULL;
     }
-    np_fd2file_initialized = true;
+    mp_fd2file_initialized = true;
   }
 }
 
 // Normalize path by resolving ".." and "."
-void np_normalize_path(char *path) {
+void mp_normalize_path(char *path) {
   char resolved[PATH_MAX];
   char *tokens[PATH_MAX];  // Array to store path segments
   int depth = 0;
@@ -276,7 +277,7 @@ inline BOOL ExpandShortPath(const char* short_path, char* long_path_buffer, DWOR
 #endif
 
 // Cross-platform function to get absolute path without requiring the path to exist
-void np_get_absolute_path(const char *relative_path, char *absolute_path, size_t size) {
+void mp_get_absolute_path(const char *relative_path, char *absolute_path, size_t size) {
 #ifdef _WIN32
   char full_path[PATH_MAX] = {};
   // Windows: _fullpath resolves ".." and "." even if path does not exist
@@ -301,7 +302,7 @@ void np_get_absolute_path(const char *relative_path, char *absolute_path, size_t
       return;
     }
   }
-  np_normalize_path(absolute_path);  // Normalize ".." and "."
+  mp_normalize_path(absolute_path);  // Normalize ".." and "."
 #endif
 }
 
@@ -375,9 +376,9 @@ static void get_virtual_path(char *search_path, const char *execfolder, const ch
   }
 }
 
-NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
+MP_DECL(EFILE*) mp_fopen(const char* file, const char* mode) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -408,13 +409,13 @@ NP_DECL(EFILE*) np_fopen(const char* file, const char* mode) {
 }
 
 #ifdef _WIN32
-NP_DECL(int) np_open(const char *file, int flags, int mode) {
+MP_DECL(int) mp_open(const char *file, int flags, int mode) {
 #else
-NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
+MP_DECL(int) mp_open(const char *file, int flags, mode_t mode) {
 #endif
   init_fd2file();
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (!get_executable_path(execfolder, executable)) {
     return open(file, flags, mode);
@@ -433,9 +434,9 @@ NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
     e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == -1) {
-        np_fd2file[i].fd = fakefd;
-        np_fd2file[i].f = e;
+      if (mp_fd2file[i].fd == -1) {
+        mp_fd2file[i].fd = fakefd;
+        mp_fd2file[i].f = e;
         break;
       }
     }
@@ -445,12 +446,12 @@ NP_DECL(int) np_open(const char *file, int flags, mode_t mode) {
 }
 
 #ifdef _WIN32
-NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
+MP_DECL(EFILE*) mp_wfopen(const wchar_t *wfile, const wchar_t *mode) {
   char file[PATH_MAX] = {};
   wcstombs(file, wfile, PATH_MAX);
 
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -480,13 +481,13 @@ NP_DECL(EFILE*) np_wfopen(const wchar_t *wfile, const wchar_t *mode) {
   return e;
 }
 
-NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
+MP_DECL(int) mp_wopen(const wchar_t *wfile, int flags, int mode) {
   init_fd2file();
   char file[PATH_MAX] = {};
   wcstombs((char*)&file, wfile, PATH_MAX);
 
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (!get_executable_path(execfolder, executable)) {
     return _wopen(wfile, flags, mode);
@@ -505,9 +506,9 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
     e->map = map;
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == -1) {
-        np_fd2file[i].fd = fakefd;
-        np_fd2file[i].f = e;
+      if (mp_fd2file[i].fd == -1) {
+        mp_fd2file[i].fd = fakefd;
+        mp_fd2file[i].f = e;
         break;
       }
     }
@@ -517,7 +518,7 @@ NP_DECL(int) np_wopen(const wchar_t *wfile, int flags, int mode) {
   return _wopen(wfile, flags, mode);
 }
 #else
-NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) {
+MP_DECL(int) mp_openat(int dirfd, const char *pathname, int flags, mode_t mode) {
   init_fd2file();
   char full_virtual_path[PATH_MAX] = {};
   bool is_virtual_context = false;
@@ -525,9 +526,9 @@ NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
   // Handle cases where pathname is relative to a virtual directory fd
   if (pathname[0] != '/') {
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == dirfd) {
+      if (mp_fd2file[i].fd == dirfd) {
         is_virtual_context = true;
-        EFILE *e = np_fd2file[i].f;
+        EFILE *e = mp_fd2file[i].f;
         // We found the fd, it corresponds to a virtual file.
         if (e->map->type != ETYPE_DIRECTORY) {
           errno = ENOTDIR;
@@ -538,7 +539,7 @@ NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
         snprintf(full_virtual_path, PATH_MAX, "%s/%s", e->name, pathname);
 
         // The base virtual path is already normalized, but the new one might not be.
-        np_normalize_path(full_virtual_path);
+        mp_normalize_path(full_virtual_path);
         break; // Found our context, exit the loop
       }
     }
@@ -553,7 +554,7 @@ NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
   // If we are not in a virtual context, resolve the path from CWD or absolute.
   if (!is_virtual_context && pathname[0] == '/') {
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+    mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
     get_virtual_path(full_virtual_path, execfolder, absolute_path);
   }
 
@@ -592,9 +593,9 @@ NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
     }
 
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == -1) {
-        np_fd2file[i].fd = fakefd;
-        np_fd2file[i].f = e;
+      if (mp_fd2file[i].fd == -1) {
+        mp_fd2file[i].fd = fakefd;
+        mp_fd2file[i].f = e;
         return fakefd;
       }
     }
@@ -617,9 +618,9 @@ NP_DECL(int) np_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
 }
 #endif
 
-NP_DECL(int) np_fclose(void* e) {
+MP_DECL(int) mp_fclose(void* e) {
   init_fd2file();
-  if (NP_FOREIGN_PTR) {
+  if (MP_FOREIGN_PTR) {
     // This is not a stream managed by our system, pass to the real fclose.
     return fclose((FILE*)e);
   }
@@ -640,13 +641,13 @@ NP_DECL(int) np_fclose(void* e) {
     // To close a virtual file, we must find its associated native file
     // descriptor in our map and close it.
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].f == efile) {
-        int fd_to_close = np_fd2file[i].fd;
+      if (mp_fd2file[i].f == efile) {
+        int fd_to_close = mp_fd2file[i].fd;
 
         // Important: Clear the map entry to prevent dangling pointers
         // and incorrect reuse of the slot.
-        np_fd2file[i].fd = -1;
-        np_fd2file[i].f = NULL;
+        mp_fd2file[i].fd = -1;
+        mp_fd2file[i].f = NULL;
 
         // Free the EFILE struct itself.
         free(efile);
@@ -665,13 +666,13 @@ NP_DECL(int) np_fclose(void* e) {
   return 0;
 }
 
-NP_DECL(int) np_close(int fd) {
+MP_DECL(int) mp_close(int fd) {
   init_fd2file();
   EFILE *e = NULL;
   int fd_idx = -1;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       fd_idx = i;
       break;
     }
@@ -685,16 +686,16 @@ NP_DECL(int) np_close(int fd) {
   }
 
   if (fd_idx != -1) {
-    np_fd2file[fd_idx].fd = -1;
-    np_fd2file[fd_idx].f = NULL;
+    mp_fd2file[fd_idx].fd = -1;
+    mp_fd2file[fd_idx].f = NULL;
   }
 
   // Close the underlying file descriptor that was opened on the executable
   return close(fd);
 }
 
-NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(EFILE*) mp_freopen(const char *filename, const char *mode, void *e) {
+  if (MP_FOREIGN_PTR) {
     EFILE* e = (EFILE*)malloc(sizeof *e);
     e->handle_type = EHANDLE_NATIVE;
     e->f = freopen(filename, mode, (FILE*)e);
@@ -710,7 +711,7 @@ NP_DECL(EFILE*) np_freopen(const char *filename, const char *mode, void *e) {
   return NULL;
 }
 
-NP_DECL(EFILE*) np_tmpfile() {
+MP_DECL(EFILE*) mp_tmpfile() {
   FILE* f = tmpfile();
   if (f == NULL)
     return NULL;
@@ -722,8 +723,8 @@ NP_DECL(EFILE*) np_tmpfile() {
   return e;
 }
 
-NP_DECL(bool) np_feof(void* e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(bool) mp_feof(void* e) {
+  if (MP_FOREIGN_PTR) {
     return feof((FILE*)e);
   }
   if(e == NULL){
@@ -742,8 +743,8 @@ NP_DECL(bool) np_feof(void* e) {
   return (((EFILE*)e)->end == ((EFILE*)e)->pos);
 }
 
-NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(size_t) mp_fread(void* ptr, size_t size, size_t count, void* e) {
+  if (MP_FOREIGN_PTR) {
     return fread(ptr, size, count, (FILE*)e);
   }
 
@@ -764,15 +765,15 @@ NP_DECL(size_t) np_fread(void* ptr, size_t size, size_t count, void* e) {
 }
 
 #ifdef _WIN32
-NP_DECL(int) np_read(int fd, void *buf, unsigned int count) {
+MP_DECL(int) mp_read(int fd, void *buf, unsigned int count) {
 #else
-NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count) {
+MP_DECL(ssize_t) mp_read(int fd, void *buf, size_t count) {
 #endif
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -792,12 +793,12 @@ NP_DECL(ssize_t) np_read(int fd, void *buf, size_t count) {
   return count;
 }
 
-NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset) {
+MP_DECL(ssize_t) mp_pread(int fd, void *buf, size_t count, off_t offset) {
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -818,8 +819,8 @@ NP_DECL(ssize_t) np_pread(int fd, void *buf, size_t count, off_t offset) {
   return count;
 }
 
-NP_DECL(int) np_fgetpos(void* e, fpos_t* pos) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fgetpos(void* e, fpos_t* pos) {
+  if (MP_FOREIGN_PTR) {
     return fgetpos((FILE*)e, pos);
   }
 
@@ -828,7 +829,7 @@ NP_DECL(int) np_fgetpos(void* e, fpos_t* pos) {
   }
 
   // fgetpos should store the absolute offset from the start of the file.
-  // We use the same logic as np_ftell_priv to get this value.
+  // We use the same logic as mp_ftell_priv to get this value.
   int64_t offset = ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
   if (offset < 0) {
     errno = EINVAL;
@@ -848,8 +849,8 @@ NP_DECL(int) np_fgetpos(void* e, fpos_t* pos) {
   return 0;
 }
 
-NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(char*) mp_fgets(char* str, int num, void* e ) {
+  if (MP_FOREIGN_PTR) {
     return fgets(str, num, (FILE*)e);
   }
 
@@ -859,7 +860,7 @@ NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
 
   //if num 0 or 1 e->pos will not advance
   if (num <= 1) return NULL;
-  if (np_feof(e)) return NULL;
+  if (mp_feof(e)) return NULL;
 
   int i = 0;
 
@@ -867,15 +868,15 @@ NP_DECL(char*) np_fgets(char* str, int num, void* e ) {
   {
     //i < (num - 1) so still room for two characters: \n and \0
     if ((str[i++] = *(((EFILE*)e)->pos++)) == '\n') break;
-    if (np_feof(e) || (i == (num - 1))) break;
+    if (mp_feof(e) || (i == (num - 1))) break;
   }
   str[i] = '\0';
   return str;
 }
 
 #ifndef _WIN32
-NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void* e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(ssize_t) mp_getline(char **lineptr, size_t *n, void* e) {
+  if (MP_FOREIGN_PTR) {
     return getline(lineptr, n, (FILE*)e);
   }
 
@@ -884,7 +885,7 @@ NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void* e) {
   }
 
   // Handle virtual files
-  if (np_feof(e)) {
+  if (mp_feof(e)) {
     return -1;
   }
 
@@ -900,7 +901,7 @@ NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void* e) {
   size_t pos = 0;
   int c;
 
-  while ((c = np_fgetc(e)) != -1) {
+  while ((c = mp_fgetc(e)) != -1) {
     // Ensure buffer has space for character and null terminator
     if (pos + 1 >= *n) {
       size_t new_size = *n * 2;
@@ -932,8 +933,8 @@ NP_DECL(ssize_t) np_getline(char **lineptr, size_t *n, void* e) {
 }
 #endif
 
-NP_DECL(int) np_fgetc(void* e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fgetc(void* e) {
+  if (MP_FOREIGN_PTR) {
     return fgetc((FILE*)e);
   }
 
@@ -941,14 +942,14 @@ NP_DECL(int) np_fgetc(void* e) {
     return fgetc(((EFILE*)e)->f);
   }
 
-  if(np_feof(e))
+  if(mp_feof(e))
     return -1;
   return (int)(unsigned char)(*(((EFILE*)e)->pos++));
 }
 
 #ifndef _WIN32
-NP_DECL(int) np_getc_unlocked(void* e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_getc_unlocked(void* e) {
+  if (MP_FOREIGN_PTR) {
     return getc_unlocked((FILE*)e);
   }
 
@@ -956,13 +957,13 @@ NP_DECL(int) np_getc_unlocked(void* e) {
     return getc_unlocked(((EFILE*)e)->f);
   }
 
-  return np_fgetc(e);
+  return mp_fgetc(e);
 }
 #endif
 
 
-int64_t np_ftell_priv(void* e) {
-  if (NP_FOREIGN_PTR) {
+int64_t mp_ftell_priv(void* e) {
+  if (MP_FOREIGN_PTR) {
 #ifdef _WIN32
     return _ftelli64((FILE*)e);
 #else
@@ -981,8 +982,8 @@ int64_t np_ftell_priv(void* e) {
   return ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
 }
 
-int np_fseek_priv(void* e, int64_t offset, int origin) {
-  if (NP_FOREIGN_PTR) {
+int mp_fseek_priv(void* e, int64_t offset, int origin) {
+  if (MP_FOREIGN_PTR) {
 #ifdef _WIN32
     return _fseeki64((FILE*)e, offset, origin);
 #else
@@ -1005,7 +1006,7 @@ int np_fseek_priv(void* e, int64_t offset, int origin) {
   if(origin == SEEK_END)
     ((EFILE*)e)->pos = ((EFILE*)e)->end + offset;
 
-  if(((EFILE*)e)->end < ((EFILE*)e)->pos || np_ftell(e) < 0) {
+  if(((EFILE*)e)->end < ((EFILE*)e)->pos || mp_ftell(e) < 0) {
     errno = EINVAL;
     return -1;
   }
@@ -1013,24 +1014,24 @@ int np_fseek_priv(void* e, int64_t offset, int origin) {
   return 0;
 }
 
-NP_DECL(long int) np_ftell(void* e) {
-  return np_ftell_priv(e);
+MP_DECL(long int) mp_ftell(void* e) {
+  return mp_ftell_priv(e);
 }
 
-NP_DECL(int) np_fseek(void* e, long int offset, int origin) {
-  return np_fseek_priv(e, offset, origin);
+MP_DECL(int) mp_fseek(void* e, long int offset, int origin) {
+  return mp_fseek_priv(e, offset, origin);
 }
 
-NP_DECL(int64_t) np_ftello64(void *e) {
-  return np_ftell_priv(e);
+MP_DECL(int64_t) mp_ftello64(void *e) {
+  return mp_ftell_priv(e);
 }
 
-NP_DECL(int) np_fseeko64(void *e, int64_t offset, int origin) {
-  return np_fseek_priv(e, offset, origin);
+MP_DECL(int) mp_fseeko64(void *e, int64_t offset, int origin) {
+  return mp_fseek_priv(e, offset, origin);
 }
 
-NP_DECL(int) np_fscanf(void *e, const char *format, ...) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fscanf(void *e, const char *format, ...) {
+  if (MP_FOREIGN_PTR) {
     va_list args;
     va_start(args, format);
     int result = vfscanf(((FILE*)e), format, args);
@@ -1047,8 +1048,8 @@ NP_DECL(int) np_fscanf(void *e, const char *format, ...) {
   return 0;
 }
 
-NP_DECL(int) np_fputc(int character, void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fputc(int character, void *e) {
+  if (MP_FOREIGN_PTR) {
     return fputc(character, (FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1058,8 +1059,8 @@ NP_DECL(int) np_fputc(int character, void *e) {
   return -1;
 }
 
-NP_DECL(int) np_fputs(const char *str, void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fputs(const char *str, void *e) {
+  if (MP_FOREIGN_PTR) {
     return fputs(str, (FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1069,8 +1070,8 @@ NP_DECL(int) np_fputs(const char *str, void *e) {
   return -1;
 }
 
-NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fprintf(void *e, const char *format, ...) {
+  if (MP_FOREIGN_PTR) {
     va_list args;
     va_start(args, format);
     int result = vfprintf((FILE*)e, format, args);
@@ -1087,8 +1088,8 @@ NP_DECL(int) np_fprintf(void *e, const char *format, ...) {
   errno = EACCES;
   return -1;
 }
-NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_vfprintf(void *e, const char *format, va_list args) {
+  if (MP_FOREIGN_PTR) {
     return vfprintf((FILE*)e, format, args);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1098,8 +1099,8 @@ NP_DECL(int) np_vfprintf(void *e, const char *format, va_list args) {
   return -1;
 }
 
-NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(size_t) mp_fwrite(const void *ptr, size_t size, size_t count, void *e) {
+  if (MP_FOREIGN_PTR) {
     return fwrite(ptr, size, count, (FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1109,8 +1110,8 @@ NP_DECL(size_t) np_fwrite(const void *ptr, size_t size, size_t count, void *e) {
   return -1;
 }
 
-NP_DECL(void) np_setbuf(void *e, char *buffer) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(void) mp_setbuf(void *e, char *buffer) {
+  if (MP_FOREIGN_PTR) {
     setbuf((FILE*)e, buffer);
     return;
   }
@@ -1119,8 +1120,8 @@ NP_DECL(void) np_setbuf(void *e, char *buffer) {
   }
 }
 
-NP_DECL(int) np_setvbuf(void *e, char *buffer, int mode, size_t size) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_setvbuf(void *e, char *buffer, int mode, size_t size) {
+  if (MP_FOREIGN_PTR) {
     return setvbuf((FILE*)e, buffer, mode, size);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1129,8 +1130,8 @@ NP_DECL(int) np_setvbuf(void *e, char *buffer, int mode, size_t size) {
   return 0;
 }
 
-NP_DECL(void) np_rewind(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(void) mp_rewind(void *e) {
+  if (MP_FOREIGN_PTR) {
     rewind((FILE*)e);
     return;
   }
@@ -1139,8 +1140,8 @@ NP_DECL(void) np_rewind(void *e) {
   }
 }
 
-NP_DECL(int) np_fsetpos(void *e, const fpos_t *pos) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fsetpos(void *e, const fpos_t *pos) {
+  if (MP_FOREIGN_PTR) {
     return fsetpos((FILE*)e, pos);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1151,15 +1152,15 @@ NP_DECL(int) np_fsetpos(void *e, const fpos_t *pos) {
   // We can use our fseek implementation with SEEK_SET to position the stream.
 #ifdef __linux__
   // On Linux, fpos_t is a struct, extract the position.
-  return np_fseek_priv(e, pos->__pos, SEEK_SET);
+  return mp_fseek_priv(e, pos->__pos, SEEK_SET);
 #else
   // On other systems, it's typically a numeric type.
-  return np_fseek_priv(e, *pos, SEEK_SET);
+  return mp_fseek_priv(e, *pos, SEEK_SET);
 #endif
 }
 
-NP_DECL(void) np_clearerr(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(void) mp_clearerr(void *e) {
+  if (MP_FOREIGN_PTR) {
     clearerr((FILE*)e);
     return;
   }
@@ -1168,8 +1169,8 @@ NP_DECL(void) np_clearerr(void *e) {
   }
 }
 
-NP_DECL(int) np_ferror(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_ferror(void *e) {
+  if (MP_FOREIGN_PTR) {
     return ferror((FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1178,9 +1179,9 @@ NP_DECL(int) np_ferror(void *e) {
   return 0;
 }
 
-NP_DECL(int) np_fileno(void *e) {
+MP_DECL(int) mp_fileno(void *e) {
   init_fd2file();
-  if (NP_FOREIGN_PTR) {
+  if (MP_FOREIGN_PTR) {
     return fileno((FILE*)e);
   }
   EFILE* efile = (EFILE*)e;
@@ -1192,9 +1193,9 @@ NP_DECL(int) np_fileno(void *e) {
 
   // For a virtual file, first attempt to find the existing file descriptor.
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].f == efile) {
+    if (mp_fd2file[i].f == efile) {
       // Found the existing mapping, which is the correct behavior.
-      return np_fd2file[i].fd;
+      return mp_fd2file[i].fd;
     }
   }
 
@@ -1218,9 +1219,9 @@ NP_DECL(int) np_fileno(void *e) {
 
   // Now, find an empty slot in the map to store this new, leaked descriptor.
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == -1) {
-      np_fd2file[i].fd = new_fd;
-      np_fd2file[i].f = efile;
+    if (mp_fd2file[i].fd == -1) {
+      mp_fd2file[i].fd = new_fd;
+      mp_fd2file[i].f = efile;
       // The function now returns a NEW descriptor that the calling code wasn't expecting.
       return new_fd;
     }
@@ -1233,8 +1234,8 @@ NP_DECL(int) np_fileno(void *e) {
   return -1;
 }
 
-NP_DECL(int) np_fflush(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_fflush(void *e) {
+  if (MP_FOREIGN_PTR) {
     return fflush((FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1244,8 +1245,8 @@ NP_DECL(int) np_fflush(void *e) {
 }
 
 #ifndef _WIN32
-NP_DECL(void) np_flockfile(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(void) mp_flockfile(void *e) {
+  if (MP_FOREIGN_PTR) {
     flockfile((FILE*)e);
     return;
   }
@@ -1254,8 +1255,8 @@ NP_DECL(void) np_flockfile(void *e) {
   }
 }
 
-NP_DECL(void) np_funlockfile(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(void) mp_funlockfile(void *e) {
+  if (MP_FOREIGN_PTR) {
     funlockfile((FILE*)e);
     return;
   }
@@ -1264,8 +1265,8 @@ NP_DECL(void) np_funlockfile(void *e) {
   }
 }
 
-NP_DECL(int) np_ftrylockfile(void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_ftrylockfile(void *e) {
+  if (MP_FOREIGN_PTR) {
     return ftrylockfile((FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1275,8 +1276,8 @@ NP_DECL(int) np_ftrylockfile(void *e) {
 }
 #endif
 
-NP_DECL(int) np_ungetc(int character, void *e) {
-  if (NP_FOREIGN_PTR) {
+MP_DECL(int) mp_ungetc(int character, void *e) {
+  if (MP_FOREIGN_PTR) {
     return ungetc(character, (FILE*)e);
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
@@ -1285,11 +1286,11 @@ NP_DECL(int) np_ungetc(int character, void *e) {
   return character;
 }
 
-NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
+MP_DECL(EFILE*) mp_fdopen(int fd, const char *mode) {
   init_fd2file();
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      return np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      return mp_fd2file[i].f;
     }
   }
 
@@ -1301,15 +1302,15 @@ NP_DECL(EFILE*) np_fdopen(int fd, const char *mode) {
 }
 
 #ifdef _WIN32
-NP_DECL(__int64) np_lseeki64(int fd, __int64 offset, int whence) {
+MP_DECL(__int64) mp_lseeki64(int fd, __int64 offset, int whence) {
 #else
-NP_DECL(ssize_t) np_lseek(int fd, off_t offset, int whence) {
+MP_DECL(ssize_t) mp_lseek(int fd, off_t offset, int whence) {
 #endif
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -1336,9 +1337,9 @@ NP_DECL(ssize_t) np_lseek(int fd, off_t offset, int whence) {
 
 #ifdef _WIN32
 
-NP_DECL(int) np__stat32(const char *file, struct _stat32 *buf) {
+MP_DECL(int) mp__stat32(const char *file, struct _stat32 *buf) {
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1361,12 +1362,12 @@ NP_DECL(int) np__stat32(const char *file, struct _stat32 *buf) {
     return _stat32(file, buf);
 }
 
-NP_DECL(int) np__wstat32(const wchar_t *file, struct _stat32 *buf) {
+MP_DECL(int) mp__wstat32(const wchar_t *file, struct _stat32 *buf) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, file, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1389,9 +1390,9 @@ NP_DECL(int) np__wstat32(const wchar_t *file, struct _stat32 *buf) {
     return _wstat32(file, buf);
 }
 
-NP_DECL(int) np__stat64(const char *file, struct _stat64 *buf) {
+MP_DECL(int) mp__stat64(const char *file, struct _stat64 *buf) {
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1414,12 +1415,12 @@ NP_DECL(int) np__stat64(const char *file, struct _stat64 *buf) {
     return _stat64(file, buf);
 }
 
-NP_DECL(int) np__wstat64(const wchar_t *file, struct _stat64 *buf) {
+MP_DECL(int) mp__wstat64(const wchar_t *file, struct _stat64 *buf) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, file, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1442,9 +1443,9 @@ NP_DECL(int) np__wstat64(const wchar_t *file, struct _stat64 *buf) {
     return _wstat64(file, buf);
 }
 
-NP_DECL(int) np__stat32i64(const char *file, struct _stat32i64 *buf) {
+MP_DECL(int) mp__stat32i64(const char *file, struct _stat32i64 *buf) {
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1467,12 +1468,12 @@ NP_DECL(int) np__stat32i64(const char *file, struct _stat32i64 *buf) {
     return _stat32i64(file, buf);
 }
 
-NP_DECL(int) np__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
+MP_DECL(int) mp__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, file, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1495,9 +1496,9 @@ NP_DECL(int) np__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
     return _wstat32i64(file, buf);
 }
 
-NP_DECL(int) np__stat64i32(const char *file, struct _stat64i32 *buf) {
+MP_DECL(int) mp__stat64i32(const char *file, struct _stat64i32 *buf) {
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1520,12 +1521,12 @@ NP_DECL(int) np__stat64i32(const char *file, struct _stat64i32 *buf) {
     return _stat64i32(file, buf);
 }
 
-NP_DECL(int) np__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
+MP_DECL(int) mp__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, file, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1548,20 +1549,20 @@ NP_DECL(int) np__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
     return _wstat64i32(file, buf);
 }
 
-NP_STD(DWORD) np_GetFileAttributesA(LPCSTR lpFileName) {
+MP_STD(DWORD) mp_GetFileAttributesA(LPCSTR lpFileName) {
     wchar_t wide_path[PATH_MAX];
     if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return GetFileAttributesA(lpFileName);
     }
-    return np_GetFileAttributesW(wide_path);
+    return mp_GetFileAttributesW(wide_path);
 }
 
-NP_STD(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName) {
+MP_STD(DWORD) mp_GetFileAttributesW(LPCWSTR lpFileName) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, lpFileName, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1579,15 +1580,15 @@ NP_STD(DWORD) np_GetFileAttributesW(LPCWSTR lpFileName) {
     return GetFileAttributesW(lpFileName);
 }
 
-NP_STD(BOOL) np_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+MP_STD(BOOL) mp_GetFileAttributesExA(LPCSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
     wchar_t wide_path[PATH_MAX];
     if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return GetFileAttributesExA(lpFileName, fInfoLevelId, lpFileInformation);
     }
-    return np_GetFileAttributesExW(wide_path, fInfoLevelId, lpFileInformation);
+    return mp_GetFileAttributesExW(wide_path, fInfoLevelId, lpFileInformation);
 }
 
-NP_STD(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
+MP_STD(BOOL) mp_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS fInfoLevelId, LPVOID lpFileInformation) {
     // This logic only supports the standard information level.
     if (fInfoLevelId != GetFileExInfoStandard || !lpFileInformation) {
         return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
@@ -1597,7 +1598,7 @@ NP_STD(BOOL) np_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS 
     wcstombs(file_mb, lpFileName, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
         char search_path[PATH_MAX] = {};
@@ -1634,7 +1635,7 @@ struct HNDMAP_S {   // Virtual File Handle
 typedef struct HNDMAP_S HNDMAP;
 
 // An array to store the mappings for open virtual files.
-HNDMAP np_handle2file[512] = {};
+HNDMAP mp_handle2file[512] = {};
 
 
 /**
@@ -1647,31 +1648,31 @@ HNDMAP np_handle2file[512] = {};
  * cleans up the associated resources, and then calls the appropriate
  * underlying close function if necessary.
  */
-NP_STD(BOOL) np_CloseHandle(HANDLE hObject) {
+MP_STD(BOOL) mp_CloseHandle(HANDLE hObject) {
     // Check if it's a handle to a virtual file mapping.
     for (int i = 0; i < 512; i++) {
-        if (np_mapping2file[i].h == hObject) {
+        if (mp_mapping2file[i].h == hObject) {
             // This is a handle to one of our virtual file mappings.
             // Since the "handle" is just a pointer to an EFILE struct
             // and doesn't correspond to a real system object that needs closing,
             // we just clear our tracking entry. The actual EFILE struct
             // will be freed when the original file handle is closed.
-            np_mapping2file[i].h = NULL;
-            np_mapping2file[i].f = NULL;
+            mp_mapping2file[i].h = NULL;
+            mp_mapping2file[i].f = NULL;
             return TRUE; // Indicate success.
         }
     }
 
     // Check if it's a handle to a virtual file created by CreateFile.
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hObject) {
+        if (mp_handle2file[i].h == hObject) {
             // This is a handle to one of our virtual files.
             // Free the memory for the EFILE struct.
-            free(np_handle2file[i].f);
+            free(mp_handle2file[i].f);
 
             // Clear the entry in our map.
-            np_handle2file[i].h = NULL;
-            np_handle2file[i].f = NULL;
+            mp_handle2file[i].h = NULL;
+            mp_handle2file[i].f = NULL;
 
             // Now, close the underlying native handle we created.
             return CloseHandle(hObject);
@@ -1682,7 +1683,7 @@ NP_STD(BOOL) np_CloseHandle(HANDLE hObject) {
     return CloseHandle(hObject);
 }
 
-NP_STD(HANDLE) np_CreateFileA(
+MP_STD(HANDLE) mp_CreateFileA(
         LPCSTR lpFileName,
         DWORD dwDesiredAccess,
         DWORD dwShareMode,
@@ -1695,7 +1696,7 @@ NP_STD(HANDLE) np_CreateFileA(
     if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return CreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
     }
-    return np_CreateFileW(wide_path, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    return mp_CreateFileW(wide_path, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 }
 
 /**
@@ -1707,7 +1708,7 @@ NP_STD(HANDLE) np_CreateFileA(
  * If so, it creates a virtual file handle. Otherwise, it calls the original
  * CreateFileW API.
  */
-NP_STD(HANDLE) np_CreateFileW(
+MP_STD(HANDLE) mp_CreateFileW(
         LPCWSTR lpFileName,
         DWORD dwDesiredAccess,
         DWORD dwShareMode,
@@ -1720,7 +1721,7 @@ NP_STD(HANDLE) np_CreateFileW(
     wcstombs(file_mb, lpFileName, sizeof(file_mb));
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
     if (!get_executable_path(execfolder, executable)) {
@@ -1776,9 +1777,9 @@ NP_STD(HANDLE) np_CreateFileW(
 
         // Find an empty slot in our handle map to store the association.
         for (int i = 0; i < 512; i++) {
-            if (np_handle2file[i].h == NULL) {
-                np_handle2file[i].h = hFake;
-                np_handle2file[i].f = e;
+            if (mp_handle2file[i].h == NULL) {
+                mp_handle2file[i].h = hFake;
+                mp_handle2file[i].f = e;
                 return hFake; // Return the fake handle to the caller.
             }
         }
@@ -1794,20 +1795,20 @@ NP_STD(HANDLE) np_CreateFileW(
     return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
 }
 
-NP_STD(BOOL) np_DeleteFileA(LPCSTR lpFileName) {
+MP_STD(BOOL) mp_DeleteFileA(LPCSTR lpFileName) {
     wchar_t wide_path[PATH_MAX];
     if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return DeleteFileA(lpFileName);
     }
-    return np_DeleteFileW(wide_path);
+    return mp_DeleteFileW(wide_path);
 }
 
-NP_STD(BOOL) np_DeleteFileW(LPCWSTR lpFileName) {
+MP_STD(BOOL) mp_DeleteFileW(LPCWSTR lpFileName) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, lpFileName, sizeof(file_mb));
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
     if (get_executable_path(execfolder, executable)) {
@@ -1832,11 +1833,11 @@ NP_STD(BOOL) np_DeleteFileW(LPCWSTR lpFileName) {
  * Intercepts handles to virtual files and provides the file information from
  * the embedded data map.
  */
-NP_STD(BOOL) np_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
+MP_STD(BOOL) mp_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -1888,11 +1889,11 @@ NP_STD(BOOL) np_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORM
  *
  * Supports retrieving basic and standard information for virtual files.
  */
-NP_STD(BOOL) np_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize) {
+MP_STD(BOOL) mp_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_CLASS FileInformationClass, LPVOID lpFileInformation, DWORD dwBufferSize) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -1955,9 +1956,9 @@ NP_STD(BOOL) np_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_C
  *
  * Reports virtual files as being of type FILE_TYPE_DISK.
  */
-NP_STD(DWORD) np_GetFileType(HANDLE hFile) {
+MP_STD(DWORD) mp_GetFileType(HANDLE hFile) {
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
+        if (mp_handle2file[i].h == hFile) {
             // This handle belongs to one of our virtual files.
             // They behave like disk files.
             return FILE_TYPE_DISK;
@@ -1978,11 +1979,11 @@ NP_STD(DWORD) np_GetFileType(HANDLE hFile) {
  *
  * For virtual files, this returns the path stored within the embedded data.
  */
-NP_STD(DWORD) np_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) {
+MP_STD(DWORD) mp_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -2041,12 +2042,12 @@ NP_STD(DWORD) np_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DW
  *
  * For virtual files, this returns the calculated absolute path.
  */
-NP_STD(DWORD) np_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
+MP_STD(DWORD) mp_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, lpFileName, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
@@ -2085,12 +2086,12 @@ NP_STD(DWORD) np_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWST
  *
  * For virtual files, this retrieves the volume of the executable itself.
  */
-NP_STD(BOOL) np_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength) {
+MP_STD(BOOL) mp_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, lpszFileName, PATH_MAX);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(file_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
@@ -2117,7 +2118,7 @@ NP_STD(BOOL) np_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathNa
  *
  * For virtual paths, this returns the disk space for the volume hosting the executable.
  */
-NP_STD(BOOL) np_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller, PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
+MP_STD(BOOL) mp_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller, PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
     char dir_mb[PATH_MAX];
     if (lpDirectoryName != NULL) {
         wcstombs(dir_mb, lpDirectoryName, PATH_MAX);
@@ -2126,7 +2127,7 @@ NP_STD(BOOL) np_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpF
     }
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(dir_mb, absolute_path, PATH_MAX);
+    mp_get_absolute_path(dir_mb, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
     if (get_executable_path(execfolder, executable)) {
@@ -2181,14 +2182,14 @@ static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
     find_data->nFileSizeLow = fileSize.LowPart;
 }
 
-NP_STD(HANDLE) np_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
+MP_STD(HANDLE) mp_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
     wchar_t wide_path[PATH_MAX];
     if (MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wide_path, PATH_MAX) == 0) {
         return FindFirstFileA(lpFileName, lpFindFileData);
     }
 
     WIN32_FIND_DATAW find_data_w;
-    HANDLE hFindFile = np_FindFirstFileW(wide_path, &find_data_w);
+    HANDLE hFindFile = mp_FindFirstFileW(wide_path, &find_data_w);
 
     if (hFindFile != INVALID_HANDLE_VALUE) {
         ConvertFindDataWtoA(lpFindFileData, &find_data_w);
@@ -2197,11 +2198,11 @@ NP_STD(HANDLE) np_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFil
     return hFindFile;
 }
 
-NP_STD(BOOL) np_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
+MP_STD(BOOL) mp_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileData) {
     VIRTUAL_FIND_HANDLE_DATA* find_handle_data = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_findhandles[i].h == hFindFile) {
-            find_handle_data = np_findhandles[i].data;
+        if (mp_findhandles[i].h == hFindFile) {
+            find_handle_data = mp_findhandles[i].data;
             break;
         }
     }
@@ -2211,7 +2212,7 @@ NP_STD(BOOL) np_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileDat
     }
 
     WIN32_FIND_DATAW find_data_w;
-    if (np_FindNextFileW(hFindFile, &find_data_w)) {
+    if (mp_FindNextFileW(hFindFile, &find_data_w)) {
         ConvertFindDataWtoA(lpFindFileData, &find_data_w);
         return TRUE;
     }
@@ -2225,7 +2226,7 @@ NP_STD(BOOL) np_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileDat
  *
  * Intercepts searches in virtual directories.
  */
-NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
+MP_STD(HANDLE) mp_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
     char file_mb[PATH_MAX];
     wcstombs(file_mb, lpFileName, sizeof(file_mb));
 
@@ -2235,7 +2236,7 @@ NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFi
     char* search_pattern = PathFindFileNameA(file_mb);
 
     char absolute_path[PATH_MAX] = {};
-    np_get_absolute_path(search_dir, absolute_path, PATH_MAX);
+    mp_get_absolute_path(search_dir, absolute_path, PATH_MAX);
 
     char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
     if (!get_executable_path(execfolder, executable)) {
@@ -2270,11 +2271,11 @@ NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFi
                         strcpy(find_handle_data->virtual_dir_path, virtual_dir_path);
 
                         for (int i = 0; i < 512; i++) {
-                            if (np_findhandles[i].h == NULL) {
-                                np_findhandles[i].h = (HANDLE)find_handle_data;
-                                np_findhandles[i].data = find_handle_data;
+                            if (mp_findhandles[i].h == NULL) {
+                                mp_findhandles[i].h = (HANDLE)find_handle_data;
+                                mp_findhandles[i].data = find_handle_data;
                                 populate_find_data(map, lpFindFileData);
-                                return np_findhandles[i].h;
+                                return mp_findhandles[i].h;
                             }
                         }
                         free(find_handle_data);
@@ -2297,11 +2298,11 @@ NP_STD(HANDLE) np_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFi
  * @brief Continues a file search from a previous call to FindFirstFileW.
  * @return Nonzero on success, zero on failure.
  */
-NP_STD(BOOL) np_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
+MP_STD(BOOL) mp_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData) {
     VIRTUAL_FIND_HANDLE_DATA* find_handle_data = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_findhandles[i].h == hFindFile) {
-            find_handle_data = np_findhandles[i].data;
+        if (mp_findhandles[i].h == hFindFile) {
+            find_handle_data = mp_findhandles[i].data;
             break;
         }
     }
@@ -2335,12 +2336,12 @@ NP_STD(BOOL) np_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileDat
  * @brief Closes a file search handle.
  * @return Nonzero on success, zero on failure.
  */
-NP_STD(BOOL) np_FindClose(HANDLE hFindFile) {
+MP_STD(BOOL) mp_FindClose(HANDLE hFindFile) {
     for (int i = 0; i < 512; i++) {
-        if (np_findhandles[i].h == hFindFile) {
-            free(np_findhandles[i].data);
-            np_findhandles[i].h = NULL;
-            np_findhandles[i].data = NULL;
+        if (mp_findhandles[i].h == hFindFile) {
+            free(mp_findhandles[i].data);
+            mp_findhandles[i].h = NULL;
+            mp_findhandles[i].data = NULL;
             return TRUE;
         }
     }
@@ -2357,11 +2358,11 @@ NP_STD(BOOL) np_FindClose(HANDLE hFindFile) {
  * Intercepts handles to virtual files and provides the file size from the
  * embedded data map.
  */
-NP_STD(BOOL) np_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
+MP_STD(BOOL) mp_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -2390,11 +2391,11 @@ NP_STD(BOOL) np_GetFileSizeEx(HANDLE hFile, PLARGE_INTEGER lpFileSize) {
  * Intercepts handles to virtual files and provides the file size from the
  * embedded data map.
  */
-NP_STD(DWORD) np_GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
+MP_STD(DWORD) mp_GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -2421,7 +2422,7 @@ NP_STD(DWORD) np_GetFileSize(HANDLE hFile, LPDWORD lpFileSizeHigh) {
     return GetFileSize(hFile, lpFileSizeHigh);
 }
 
-NP_STD(HANDLE) np_CreateFileMappingA(
+MP_STD(HANDLE) mp_CreateFileMappingA(
     HANDLE                hFile,
     LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
     DWORD                 flProtect,
@@ -2430,7 +2431,7 @@ NP_STD(HANDLE) np_CreateFileMappingA(
     LPCSTR                lpName
 ) {
     // If a name is provided for the mapping object, we need to convert it
-    // to a wide character string to pass to the np_CreateFileMappingW function.
+    // to a wide character string to pass to the mp_CreateFileMappingW function.
     if (lpName) {
         // Determine the required buffer size for the wide string.
         int required_chars = MultiByteToWideChar(CP_ACP, 0, lpName, -1, NULL, 0);
@@ -2450,7 +2451,7 @@ NP_STD(HANDLE) np_CreateFileMappingA(
         MultiByteToWideChar(CP_ACP, 0, lpName, -1, wide_name, required_chars);
 
         // Call our wide-character implementation with the converted name.
-        HANDLE result = np_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, wide_name);
+        HANDLE result = mp_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, wide_name);
 
         // Free the allocated memory for the wide string.
         free(wide_name);
@@ -2458,12 +2459,12 @@ NP_STD(HANDLE) np_CreateFileMappingA(
         return result;
     } else {
         // If no name is provided, we can call the wide-character version directly with NULL.
-        return np_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, NULL);
+        return mp_CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, NULL);
     }
 }
 
 
-NP_STD(HANDLE) np_CreateFileMappingW(
+MP_STD(HANDLE) mp_CreateFileMappingW(
     HANDLE                hFile,
     LPSECURITY_ATTRIBUTES lpFileMappingAttributes,
     DWORD                 flProtect,
@@ -2473,8 +2474,8 @@ NP_STD(HANDLE) np_CreateFileMappingW(
 ) {
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
-        if (np_handle2file[i].h == hFile) {
-            e = np_handle2file[i].f;
+        if (mp_handle2file[i].h == hFile) {
+            e = mp_handle2file[i].f;
             break;
         }
     }
@@ -2499,10 +2500,10 @@ NP_STD(HANDLE) np_CreateFileMappingW(
         // This is a bit of a hack, but it allows us to identify the mapping later.
         // Find an empty slot in our mapping table.
         for (int i = 0; i < 512; i++) {
-            if (np_mapping2file[i].h == NULL) {
+            if (mp_mapping2file[i].h == NULL) {
                 // We use the EFILE pointer itself as the handle.
-                np_mapping2file[i].h = (HANDLE)e;
-                np_mapping2file[i].f = e;
+                mp_mapping2file[i].h = (HANDLE)e;
+                mp_mapping2file[i].f = e;
                 return (HANDLE)e;
             }
         }
@@ -2514,7 +2515,7 @@ NP_STD(HANDLE) np_CreateFileMappingW(
     return CreateFileMappingW(hFile, lpFileMappingAttributes, flProtect, dwMaximumSizeHigh, dwMaximumSizeLow, lpName);
 }
 
-NP_STD(LPVOID) np_MapViewOfFile(
+MP_STD(LPVOID) mp_MapViewOfFile(
     HANDLE hFileMappingObject,
     DWORD  dwDesiredAccess,
     DWORD  dwFileOffsetHigh,
@@ -2524,8 +2525,8 @@ NP_STD(LPVOID) np_MapViewOfFile(
     EFILE* e = NULL;
     for (int i = 0; i < 512; i++) {
         // Check if the mapping object is one of our virtual ones.
-        if (np_mapping2file[i].h == hFileMappingObject) {
-            e = np_mapping2file[i].f;
+        if (mp_mapping2file[i].h == hFileMappingObject) {
+            e = mp_mapping2file[i].f;
             break;
         }
     }
@@ -2548,9 +2549,9 @@ NP_STD(LPVOID) np_MapViewOfFile(
 
         // Store the view so we can recognize it in UnmapViewOfFile
         for (int i = 0; i < 512; i++) {
-            if (np_view2file[i].view == NULL) {
-                np_view2file[i].view = view;
-                np_view2file[i].f = e;
+            if (mp_view2file[i].view == NULL) {
+                mp_view2file[i].view = view;
+                mp_view2file[i].f = e;
                 return view;
             }
         }
@@ -2562,16 +2563,16 @@ NP_STD(LPVOID) np_MapViewOfFile(
     return MapViewOfFile(hFileMappingObject, dwDesiredAccess, dwFileOffsetHigh, dwFileOffsetLow, dwNumberOfBytesToMap);
 }
 
-NP_STD(BOOL) np_UnmapViewOfFile(
+MP_STD(BOOL) mp_UnmapViewOfFile(
     LPCVOID lpBaseAddress
 ) {
     for (int i = 0; i < 512; i++) {
-        if (np_view2file[i].view == lpBaseAddress) {
+        if (mp_view2file[i].view == lpBaseAddress) {
             // This is a view of one of our virtual files.
             // Since we didn't allocate memory with MapViewOfFile,
             // we don't need to free it here. We just clear our tracking entry.
-            np_view2file[i].view = NULL;
-            np_view2file[i].f = NULL;
+            mp_view2file[i].view = NULL;
+            mp_view2file[i].f = NULL;
             return TRUE;
         }
     }
@@ -2580,9 +2581,9 @@ NP_STD(BOOL) np_UnmapViewOfFile(
     return UnmapViewOfFile(lpBaseAddress);
 }
 #else
-NP_DECL(int) np_stat(const char *file, struct stat *buf) {
+MP_DECL(int) mp_stat(const char *file, struct stat *buf) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -2605,9 +2606,9 @@ NP_DECL(int) np_stat(const char *file, struct stat *buf) {
   return stat(file, buf);
 }
 
-NP_DECL(int) np_lstat(const char *file, struct stat *buf) {
+MP_DECL(int) mp_lstat(const char *file, struct stat *buf) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(file, absolute_path, PATH_MAX);
+  mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -2630,12 +2631,12 @@ NP_DECL(int) np_lstat(const char *file, struct stat *buf) {
   return lstat(file, buf);
 }
 
-NP_DECL(int) np_fstat(int fd, struct stat *buf) {
+MP_DECL(int) mp_fstat(int fd, struct stat *buf) {
   init_fd2file();
   // Check if the file descriptor is for a virtual file.
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      EFILE *e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      EFILE *e = mp_fd2file[i].f;
       EMAP *map = e->map;
 
       // This is a virtual file, populate the stat buffer from the map.
@@ -2663,13 +2664,13 @@ NP_DECL(int) np_fstat(int fd, struct stat *buf) {
   return fstat(fd, buf);
 }
 
-NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+MP_DECL(int) mp_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
   init_fd2file();
   // Handle cases where pathname is relative to a virtual directory fd
   if (pathname[0] != '/') {
     for (int i = 0; i < 512; i++) {
-      if (np_fd2file[i].fd == dirfd) {
-        EFILE *e = np_fd2file[i].f;
+      if (mp_fd2file[i].fd == dirfd) {
+        EFILE *e = mp_fd2file[i].f;
         // We found the fd, it corresponds to a virtual file.
         if (e->map->type != ETYPE_DIRECTORY) {
           errno = ENOTDIR;
@@ -2683,7 +2684,7 @@ NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int f
         // The virtual path is already normalized, but the new one might not be (e.g., ../)
         char temp_path_for_norm[PATH_MAX];
         strcpy(temp_path_for_norm, full_virtual_path);
-        np_normalize_path(temp_path_for_norm);
+        mp_normalize_path(temp_path_for_norm);
 
         EMAP *map;
         if (find_embedded_file(temp_path_for_norm, &map)) {
@@ -2707,7 +2708,7 @@ NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int f
 
   // Fallback for absolute paths, AT_FDCWD, or native file descriptors
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+  mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -2734,9 +2735,9 @@ NP_DECL(int) np_fstatat(int dirfd, const char *pathname, struct stat *buf, int f
   return fstatat(dirfd, pathname, buf, flags);
 }
 
-NP_DECL(int) np_access(const char *pathname, int mode) {
+MP_DECL(int) mp_access(const char *pathname, int mode) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(pathname, absolute_path, PATH_MAX);
+  mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -2757,14 +2758,14 @@ NP_DECL(int) np_access(const char *pathname, int mode) {
   return access(pathname, mode);
 }
 
-NP_DECL(int) np_faccessat(int dirfd, const char *pathname, int mode, int flags) {
+MP_DECL(int) mp_faccessat(int dirfd, const char *pathname, int mode, int flags) {
   // This implementation ignores dirfd and flags for virtual files.
-  return np_access(pathname, mode);
+  return mp_access(pathname, mode);
 }
 
-NP_DECL(int) np_statvfs(const char *path, struct statvfs *buf) {
+MP_DECL(int) mp_statvfs(const char *path, struct statvfs *buf) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(path, absolute_path, PATH_MAX);
+  mp_get_absolute_path(path, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
@@ -2779,12 +2780,12 @@ NP_DECL(int) np_statvfs(const char *path, struct statvfs *buf) {
   return statvfs(path, buf);
 }
 
-NP_DECL(int) np_fstatvfs(int fd, struct statvfs *buf) {
+MP_DECL(int) mp_fstatvfs(int fd, struct statvfs *buf) {
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2797,12 +2798,12 @@ NP_DECL(int) np_fstatvfs(int fd, struct statvfs *buf) {
   return fstatvfs(fd, buf);
 }
 
-NP_DECL(ssize_t) np_pwrite(int fd, const void *buf, size_t count, off_t offset) {
+MP_DECL(ssize_t) mp_pwrite(int fd, const void *buf, size_t count, off_t offset) {
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2813,12 +2814,12 @@ NP_DECL(ssize_t) np_pwrite(int fd, const void *buf, size_t count, off_t offset) 
   return pwrite(fd, buf, count, offset);
 }
 
-NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt) {
+MP_DECL(ssize_t) mp_readv(int fd, const struct iovec *iov, int iovcnt) {
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2844,7 +2845,7 @@ NP_DECL(ssize_t) np_readv(int fd, const struct iovec *iov, int iovcnt) {
   return total_read;
 }
 
-NP_DECL(ssize_t) np_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+MP_DECL(ssize_t) mp_preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 #ifdef __APPLE__
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
@@ -2852,8 +2853,8 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2882,13 +2883,13 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 }
 
 #ifdef __linux
-NP_DECL(ssize_t) np_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+MP_DECL(ssize_t) mp_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
   // Ignoring flags for virtual files
-  return np_preadv(fd, iov, iovcnt, offset);
+  return mp_preadv(fd, iov, iovcnt, offset);
 }
 #endif
 
-NP_DECL(ssize_t) np_writev(int fd, const struct iovec *iov, int iovcnt)
+MP_DECL(ssize_t) mp_writev(int fd, const struct iovec *iov, int iovcnt)
 #ifdef __APPLE__
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
@@ -2896,8 +2897,8 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2908,7 +2909,7 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
   return writev(fd, iov, iovcnt);
 }
 
-NP_DECL(ssize_t) np_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
+MP_DECL(ssize_t) mp_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset)
 #ifdef __APPLE__
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
@@ -2916,8 +2917,8 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
@@ -2929,9 +2930,9 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 }
 
 #ifdef __linux
-NP_DECL(ssize_t) np_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
+MP_DECL(ssize_t) mp_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
   // Ignoring flags for virtual files
-  return np_pwritev(fd, iov, iovcnt, offset);
+  return mp_pwritev(fd, iov, iovcnt, offset);
 }
 #endif
 
@@ -2942,11 +2943,11 @@ typedef struct VDIR_S {
 } VDIR;
 
 // A map to associate DIR* pointers with our VDIR structs
-VDIR* np_open_vdirs[512] = {};
+VDIR* mp_open_vdirs[512] = {};
 
-NP_DECL(DIR*) np_opendir(const char* name) {
+MP_DECL(DIR*) mp_opendir(const char* name) {
   char absolute_path[PATH_MAX] = {};
-  np_get_absolute_path(name, absolute_path, PATH_MAX);
+  mp_get_absolute_path(name, absolute_path, PATH_MAX);
 
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
   if (!get_executable_path(execfolder, executable)) {
@@ -2971,8 +2972,8 @@ NP_DECL(DIR*) np_opendir(const char* name) {
     }
 
     for (int i = 0; i < 512; i++) {
-      if (np_open_vdirs[i] == NULL) {
-        np_open_vdirs[i] = vdir;
+      if (mp_open_vdirs[i] == NULL) {
+        mp_open_vdirs[i] = vdir;
         return (DIR*)vdir;
       }
     }
@@ -2983,26 +2984,26 @@ NP_DECL(DIR*) np_opendir(const char* name) {
   return opendir(name);
 }
 
-NP_DECL(DIR*) np_fdopendir(int fd) {
+MP_DECL(DIR*) mp_fdopendir(int fd) {
   init_fd2file();
   EFILE *e = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_fd2file[i].fd == fd) {
-      e = np_fd2file[i].f;
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
       break;
     }
   }
   if (e != NULL) {
     // We have a virtual file descriptor. We can open it if it's a directory.
-    return np_opendir(e->name);
+    return mp_opendir(e->name);
   }
   return fdopendir(fd);
 }
 
-NP_DECL(struct dirent*) np_readdir(DIR *dirp) {
+MP_DECL(struct dirent*) mp_readdir(DIR *dirp) {
   VDIR* vdir = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_open_vdirs[i] == (VDIR*)dirp) {
+    if (mp_open_vdirs[i] == (VDIR*)dirp) {
       vdir = (VDIR*)dirp;
       break;
     }
@@ -3034,21 +3035,21 @@ NP_DECL(struct dirent*) np_readdir(DIR *dirp) {
   return NULL; // No more entries
 }
 
-NP_DECL(int) np_closedir(DIR *dirp) {
+MP_DECL(int) mp_closedir(DIR *dirp) {
   for (int i = 0; i < 512; i++) {
-    if (np_open_vdirs[i] == (VDIR*)dirp) {
-      free(np_open_vdirs[i]);
-      np_open_vdirs[i] = NULL;
+    if (mp_open_vdirs[i] == (VDIR*)dirp) {
+      free(mp_open_vdirs[i]);
+      mp_open_vdirs[i] = NULL;
       return 0;
     }
   }
   return closedir(dirp);
 }
 
-NP_DECL(void) np_rewinddir(DIR *dirp) {
+MP_DECL(void) mp_rewinddir(DIR *dirp) {
   VDIR* vdir = NULL;
   for (int i = 0; i < 512; i++) {
-    if (np_open_vdirs[i] == (VDIR*)dirp) {
+    if (mp_open_vdirs[i] == (VDIR*)dirp) {
       vdir = (VDIR*)dirp;
       break;
     }

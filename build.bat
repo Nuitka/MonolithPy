@@ -39,10 +39,10 @@ if NOT DEFINED PYTHON (
 
 %PYTHON% Lib\mkembeddata.py Embedded Embedded\embed_data
 
-cl /c /Zi /FoEmbedded\np_embed.obj Embedded\np_embed.c /IInclude
-cl /c /FoEmbedded\np_embed_data.obj Embedded\np_embed_data.c
+cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude
+cl /c /FoEmbedded\mp_embed_data.obj Embedded\mp_embed_data.c
 
-lib /OUT:Embedded\np_embed.lib Embedded\np_embed.obj Embedded\np_embed_data.obj
+lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\mp_embed_data.obj
 
 
 rem Build with nuget, it solves the directory structure for us.
@@ -80,11 +80,11 @@ for /d %%d in (externals\libffi*) do (
 
 mkdir %OUTPUT_DIR%\Embedded
 xcopy /i /q /s /y Embedded\embed_data %OUTPUT_DIR%\Embedded\embed_data
-copy Embedded\np_embed.obj %OUTPUT_DIR%\Embedded\np_embed.obj
-copy Embedded\np_embed.lib %OUTPUT_DIR%\libs\np_embed.lib
+copy Embedded\mp_embed.obj %OUTPUT_DIR%\Embedded\mp_embed.obj
+copy Embedded\mp_embed.lib %OUTPUT_DIR%\libs\mp_embed.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython
-%OUTPUT_DIR%\python.exe -c "import __np__.packaging; __np__.packaging.install_build_tool('clang')"
+%OUTPUT_DIR%\python.exe -c "import __mp__.packaging; __mp__.packaging.install_build_tool('clang')"
 
 echo "Ok, MonolithPy now lives in %OUTPUT_DIR% folder"
 

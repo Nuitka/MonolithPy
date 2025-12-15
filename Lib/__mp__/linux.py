@@ -20,7 +20,7 @@ def auto_patch_build_file(fpath):
                 r"cmake_minimum_required *\( *VERSION [0-9\.]+ *\)",
                 f"""cmake_minimum_required(VERSION 3.15)
 
-add_link_options({os.path.join(sysconfig.get_config_var('LIBDIR'), 'libnp_embed.a')})
+add_link_options({os.path.join(sysconfig.get_config_var('LIBDIR'), 'libmp_embed.a')})
 include_directories({sysconfig.get_config_var("INCLUDEPY")})
 """,
                 s,
@@ -44,13 +44,92 @@ def auto_patch_build(folder):
             auto_patch_build_file(fpath)
 
 
+def get_object_symbols(obj):
+    """Get symbols from an object file using nm."""
+    try:
+        return run_with_output("nm", obj).split("\n")
+    except Exception:
+        return None
+
+
+def is_object_file(filename):
+    """Check if a file is an object file for this platform."""
+    return filename.endswith(".o")
+
+
+def is_undefined_symbol(symbol_line):
+    """Check if a symbol line from nm represents an undefined symbol."""
+    # Match the pattern used in rename_symbols_in_file
+    return ' U ' in symbol_line or symbol_line.strip().startswith('U ')
+
+
+def extract_archive_subprocess(lib_path, output_dir):
+    """
+    Extract a static library archive to a directory using subprocess.
+
+    Args:
+        lib_path: Path to the library file to extract
+        output_dir: Directory to extract to
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        import __mp__.tools.extract_ar
+        __mp__.tools.extract_ar.extract_archive(lib_path, output_dir)
+        return True
+    except Exception as e:
+        my_print(f"Failed to extract {lib_path}: {e}", style="red")
+        return False
+
+
+def rename_symbols_in_object(obj_path, rename_arg_file, cwd):
+    """
+    Rename symbols in an object file using a rename arguments file.
+    Handles LLVM bitcode files by converting them first.
+
+    Args:
+        obj_path: Path to the object file
+        rename_arg_file: Path to the file containing rename arguments
+        cwd: Working directory for the operation
+    """
+    # Check if it's LLVM bitcode and convert if needed
+    file_type_output = run_with_output("file", obj_path)
+    if "LLVM bitcode" in file_type_output:
+        bc_path = obj_path + ".bc"
+        os.rename(obj_path, bc_path)
+        run("clang", "-c", bc_path, "-o", obj_path)
+
+    # Use objcopy to rename symbols (matching existing rename_symbols_in_file pattern)
+    run("objcopy", f"--redefine-syms={rename_arg_file}", obj_path)
+
+
+def repack_library(lib_path, obj_list):
+    """
+    Repack object files into a static library using ar.
+    Uses basenames and cwd to match existing pattern.
+
+    Args:
+        lib_path: Path to the output library file
+        obj_list: List of object file paths to include
+    """
+    # Extract directory from first object file (they should all be in same dir)
+    if obj_list:
+        cwd = os.path.dirname(obj_list[0])
+        basenames = [os.path.basename(o) for o in obj_list]
+        run("ar", "rcs", lib_path, *basenames, cwd=cwd)
+    else:
+        # Fallback if no objects
+        run("ar", "rcs", lib_path)
+
+
 def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
     target_lib = os.path.abspath(target_lib)
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
+    import __mp__.packaging
+    __mp__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        import __mp__.tools.extract_ar
+        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
@@ -101,8 +180,8 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
 
 def rename_init_symbol_in_file(target_lib):
     target_lib = os.path.abspath(target_lib)
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
+    import __mp__.packaging
+    __mp__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
         hasher = hashlib.md5()
         with open(target_lib, "rb") as f:
@@ -110,8 +189,8 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        import __mp__.tools.extract_ar
+        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
         obj_list_paths = []
         obj_filenames = []
 
@@ -133,7 +212,7 @@ def rename_init_symbol_in_file(target_lib):
                             "f2pyinittypes" in sym_name or
                             ("pybind11" in sym_name and '@' not in sym_name and '?' not in sym_name)) and \
                             not (' U ' in full_line or full_line.strip().startswith('U ')):
-                        symbols_to_rename_map[sym_name] = f"{sym_name}__np__{file_hash}"
+                        symbols_to_rename_map[sym_name] = f"{sym_name}__mp__{file_hash}"
 
                 if not symbols_to_rename_map:
                     continue
@@ -159,8 +238,8 @@ def rename_init_symbol_in_file(target_lib):
 
 def remove_symbols_in_file(target_lib, object_file_to_modify, symbols_to_remove):
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        import __mp__.tools.extract_ar
+        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
 
         all_obj_filenames = [fn for fn in os.listdir(tmpdir) if fn.endswith(".o")]
         target_obj_path = os.path.join(tmpdir, object_file_to_modify)
@@ -185,7 +264,12 @@ def rename_symbols_in_wheel_file(wheel, filename, prefix, protected_symbols = []
     with TemporaryDirectory() as tmpdir:
         with WheelFile(wheel) as wf:
             wf.extract(filename, tmpdir)
-        from __np__ import rename_symbols_in_file
+        from __mp__ import rename_symbols_in_file
         rename_symbols_in_file(os.path.join(tmpdir, filename), prefix, protected_symbols)
         with WheelFile(wheel, 'a') as wf:
             wf.write(os.path.join(tmpdir, filename), filename)
+
+
+
+# Import the common implementation
+from .common import analyze_and_rename_library_symbols

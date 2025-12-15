@@ -1,7 +1,7 @@
 embed_data/
 data.dat
 map.dat
-np_embed_data.c
+mp_embed_data.c
 *.o
 *.obj
 *.lib

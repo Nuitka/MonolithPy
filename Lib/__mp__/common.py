@@ -1,355 +1,482 @@
-import hashlib
-import json
-from .common import *
+from __future__ import print_function
 
-
-def get_compiler_module():
-    __import__("setuptools._distutils._msvccompiler")
-    return sys.modules["setuptools._distutils._msvccompiler"]
-
-
-def get_vs_version():
-    compiler_module = get_compiler_module()
-    from setuptools._distutils.util import get_host_platform, get_platform
-    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
-        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
-    elif hasattr(compiler_module, "_get_vcvars_spec"):
-        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
-    else:
-        from setuptools._distutils.compilers.C import msvc
-        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-    vc_env = compiler_module._get_vc_env(vcargs)
-    return float(vc_env.get("visualstudioversion"))
-
-
-def find_compiler_exe(exe):
-    compiler_module = get_compiler_module()
-    from setuptools._distutils.util import get_host_platform, get_platform
-    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
-        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
-    elif hasattr(compiler_module, "_get_vcvars_spec"):
-        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
-    else:
-        from setuptools._distutils.compilers.C import msvc
-        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-        vc_env = compiler_module._get_vc_env(vcargs)
-        paths = vc_env.get("path", "").split(os.pathsep)
-        return msvc._find_exe(exe, paths)
-    vc_env = compiler_module._get_vc_env(vcargs)
-    paths = vc_env.get("path", "").split(os.pathsep)
-    return compiler_module._find_exe(exe, paths)
-
-
-def setup_compiler_env():
-    compiler_module = get_compiler_module()
-    from setuptools._distutils.util import get_host_platform, get_platform
-    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
-        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
-    elif hasattr(compiler_module, "_get_vcvars_spec"):
-        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
-    else:
-        from setuptools._distutils.compilers.C import msvc
-        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-    vc_env = compiler_module._get_vc_env(vcargs)
-    os.environ.update(vc_env)
-
-
-def filter_paths_containing(exe_name):
-    new_path = []
-    for dir in os.environ.get("PATH", "").split(os.pathsep):
-        try:
-            if not os.path.exists(os.path.join(dir, exe_name)):
-                new_path.append(dir)
-        except:
-            pass
-
-    os.environ["PATH"] = os.pathsep.join(new_path)
-
-
-def run_compiler_exe(exe, *args):
-    return run_with_output(find_compiler_exe(exe), *args)
-
-
-def msbuild(*args):
-    return run_compiler_exe("msbuild.exe", *args)
-
-
-def nmake(*args):
-    return run_compiler_exe("nmake.exe", *args)
-
-
-def auto_patch_build_file(fpath):
-    try:
-        if fpath.endswith("CMakeLists.txt"):
-            with open(fpath, "r") as f:
-                s = f.read()
-            s2 = s.replace("/MD", "/MT")
-            s2 = s2.replace("-MD", "-MT")
-            escaped_embed_path = os.path.join(sysconfig.get_config_var('base'), 'libs', 'np_embed.lib').replace("\\", "/")
-            escaped_include = sysconfig.get_config_var("INCLUDEPY").replace("\\", "/")
-            s2 = re.sub(
-                r"cmake_minimum_required *\( *VERSION [0-9\.]+ *\)",
-                f"""cmake_minimum_required(VERSION 3.15)
-set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
-foreach(flag_var
-            CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-            CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-            CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-            CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        if(${{flag_var}} MATCHES "/MD")
-            string(REGEX REPLACE "/MD" "/MT" ${{flag_var}} "${{${{flag_var}}}}")
-        endif()
-    endforeach(flag_var)
-
-add_link_options({escaped_embed_path} Shlwapi.lib)
-include_directories({escaped_include})
-""",
-                s2,
-                flags=re.IGNORECASE,
-            )
-            s2 = re.sub(
-                r"cmake_policy\(VERSION [0-9\.]+\)", "", s2, flags=re.IGNORECASE
-            )
-            if s != s2:
-                my_print("Fixed up file: %s" % fpath, style="blue")
-                with open(fpath, "w") as f:
-                    f.write(s2)
-        elif not is_file_binary(fpath):
-            with open(fpath, "r") as f:
-                s = f.read()
-            s2 = s.replace("/MD", "/MT")
-            s2 = s2.replace("-MD", "-MT")
-            if s != s2:
-                my_print("Fixed up file: %s" % fpath, style="blue")
-                with open(fpath, "w") as f:
-                    f.write(s2)
-    except Exception:
-        pass
-
-
-def auto_patch_build(folder):
-    for dname, dirs, files in os.walk(folder):
-        for fname in files:
-            fpath = os.path.join(dname, fname)
-            if ".git" in fpath or ".svn" in fpath:
-                continue
-
-            auto_patch_build_file(fpath)
-
-
-def get_object_symbols(obj):
-    try:
-        return run_build_tool_exe("clang", "llvm-nm.exe", obj, quiet=True).split("\n")
-    except subprocess.CalledProcessError:
-        return None
-
-
-def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
-    if protected_symbols is None:
-        protected_symbols = []
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
-    target_lib_abs = os.path.abspath(target_lib)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
-        obj_list = []
-        known_symbols = set()
-        unmatched_symbols = set()
-        keep_symbols = set()
-        for obj in os.listdir(tmpdir):
-            if obj.endswith(".obj"):
-                obj_abs = os.path.abspath(os.path.join(tmpdir, obj))
-                obj_list.append(obj_abs)
-                symbol_data = get_object_symbols(obj_abs)
-                if symbol_data is None:
-                    continue
-                obj_symbols = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if len(x) > 3]
-                obj_symbols = [x for x in obj_symbols if not x[0].startswith(".")]
-                for sym in obj_symbols:
-                    if any(re.fullmatch(x, sym[0]) for x in protected_symbols):
-                        keep_symbols.add(sym[0])
-                    if sym[0].startswith("PyInit_") or (not re.fullmatch(r"[a-zA-Z0-9_-]+", sym[0]) and "pybind" not in sym[0]):
-                        keep_symbols.add(sym[0])
-                    if ' u ' in sym[1].lower():
-                        unmatched_symbols.add(sym[0])
-                    else:
-                        known_symbols.add(sym[0])
-
-        rename_args = []
-        unmatched_symbols = unmatched_symbols - known_symbols
-        for sym in known_symbols - unmatched_symbols - keep_symbols:
-            rename_args.append(sym + " " + prefix + sym)
-
-        with tempfile.TemporaryDirectory() as rename_tmpdir:
-            rename_arg_file = os.path.join(rename_tmpdir, "rename_args.txt")
-            with open(rename_arg_file, "w") as f:
-                f.write('\n'.join(rename_args) + "\n")
-
-            for obj in obj_list:
-                run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file, obj, cwd=tmpdir)
-
-        os.rename(target_lib, target_lib + ".orig")
-        run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + target_lib, *obj_list)
-
-
-def rename_init_symbol_in_file(target_lib):
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
-    target_lib_abs = os.path.abspath(target_lib)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        hasher = hashlib.md5()
-        with open(target_lib_abs, "rb") as f_lib:
-            for chunk in iter(lambda: f_lib.read(65536), b""):
-                hasher.update(chunk)
-        file_hash = hasher.hexdigest()
-
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
-
-        obj_paths_in_tmpdir = []
-        modified_any_obj = False
-
-        for item_name in os.listdir(tmpdir):
-            if item_name.lower().endswith(".obj"):
-                obj_full_path = os.path.join(tmpdir, item_name)
-                obj_paths_in_tmpdir.append(obj_full_path)  # Keep track for re-archiving
-
-                symbols_to_rename_map = {}  # old_sym -> new_sym
-
-                symbol_data = get_object_symbols(obj_full_path)
-                if symbol_data is None:
-                    continue
-
-                for line in symbol_data:
-                    line = line.strip()
-                    if not line or ' ' not in line: continue
-                    try:
-                        sym_name = line[line.rindex(' ') + 1:]
-                        if not sym_name or sym_name.startswith('.'): continue
-                    except ValueError:
-                        continue  # Skip lines not matching expected format
-
-                    # Check if it's a PyInit symbol and if it's defined (not 'U')
-                    if ((sym_name.startswith("PyInit_") or sym_name.startswith("_PyInit_") or
-                            "pyx_CommonTypesMetaclass" in sym_name or
-                        ("pybind11" in sym_name and '@' not in sym_name and '?' not in sym_name)) and
-                            not (' u ' in line.lower() or line.lower().startswith('u '))) or "f2pyinittypes" in sym_name:
-                        symbols_to_rename_map[sym_name] = f"{sym_name}__np__{file_hash}"
-
-                if not symbols_to_rename_map:
-                    continue
-
-                modified_any_obj = True
-                with tempfile.TemporaryDirectory() as rename_tmpdir_init:  # Unique temp dir name
-                    rename_arg_file_path = os.path.join(rename_tmpdir_init, "rename_init_args.txt")
-                    with open(rename_arg_file_path, "w") as f_rename:
-                        for old_sym, new_sym in symbols_to_rename_map.items():
-                            print(f"Renaming {old_sym} to {new_sym} in {item_name}")
-                            f_rename.write(f"{old_sym} {new_sym}\n")
-
-                    run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file_path, obj_full_path, cwd=tmpdir)
-
-        if not modified_any_obj:
-            print(f"No PyInit_ symbols found or requiring rename in {target_lib}")
-            return
-
-        backup_lib_path = target_lib_abs + ".orig"
-        if os.path.exists(backup_lib_path):
-            os.remove(backup_lib_path)
-        os.rename(target_lib_abs, backup_lib_path)
-
-        run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + target_lib_abs, *obj_paths_in_tmpdir)
-
-
-def remove_symbols_in_file(target_lib, object_file, symbols):
-    target_lib_abs = os.path.abspath(target_lib)
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        import __np__.tools.extract_ar
-        __np__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
-
-        obj_list = [os.path.join(tmpdir, x) for x in os.listdir(tmpdir) if x.endswith(".obj")]
-
-        with tempfile.TemporaryDirectory() as rename_tmpdir:
-            remove_arg_file = os.path.join(rename_tmpdir, "remove_args.txt")
-            with open(remove_arg_file, "w") as f:
-                f.write('\n'.join(symbols) + "\n")
-
-            run_build_tool_exe("clang", "llvm-objcopy.exe", "--strip-symbols", remove_arg_file, os.path.join(tmpdir, object_file), cwd=tmpdir)
-
-        os.rename(target_lib, target_lib + ".orig")
-        subprocess.run(["lib", "/OUT:" + target_lib] + obj_list)
-
-
-def rename_symbols_in_wheel_file(wheel, filename, prefix, protected_symbols = []):
-    from wheel.wheelfile import WheelFile
-    with TemporaryDirectory() as tmpdir:
-        with WheelFile(wheel) as wf:
-            wf.extract(filename, tmpdir)
-        rename_symbols_in_file(os.path.join(tmpdir, filename), prefix, protected_symbols)
-        with WheelFile(wheel, 'a') as wf:
-            wf.write(os.path.join(tmpdir, filename), filename)
-
-
+import contextlib
+import glob
 import os
-if os.name == "nt":
-    import ctypes
-    from ctypes import wintypes
-    _GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
-    _GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
-    _GetShortPathNameW.restype = wintypes.DWORD
-
-def get_short_path(path):
-    output_buf_size = 0
-    while True:
-        output_buf = ctypes.create_unicode_buffer(output_buf_size)
-        needed = _GetShortPathNameW(path, output_buf, output_buf_size)
-        if needed == 0:
-            raise ctypes.WinError()
-        if output_buf_size >= needed:
-            return output_buf.value
-        else:
-            output_buf_size = needed
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import sysconfig
+import tempfile
 
 
-def _extract_archive_subprocess(lib_path, output_dir):
+def getDependencyInstallDir():
+    import sysconfig
+
+    return os.path.join(sysconfig.get_config_var("prefix"), "dependency_libs")
+
+
+def getToolsInstallDir():
+    import sysconfig
+
+    return os.path.join(sysconfig.get_config_var("prefix"), "build_tools")
+
+
+def getEnableStyleCode(style):
+    if style == "pink":
+        style = "\033[95m"
+    elif style == "blue":
+        style = "\033[94m"
+    elif style == "green":
+        style = "\033[92m"
+    elif style == "yellow":
+        style = "\033[93m"
+    elif style == "red":
+        style = "\033[91m"
+    elif style == "bold":
+        style = "\033[1m"
+    elif style == "underline":
+        style = "\033[4m"
+    else:
+        style = None
+
+    return style
+
+
+_enabled_ansi = False
+
+
+def _enableAnsi():
+    # singleton, pylint: disable=global-statement
+    global _enabled_ansi
+    if not _enabled_ansi:
+
+        # Only necessary on Windows, as a side effect of this, ANSI colors get enabled
+        # for the terminal and never deactivated, so we are free to use them after
+        # this.
+        if os.name == "nt":
+            os.system("")
+
+        _enabled_ansi = True
+
+
+def getDisableStyleCode():
+    return "\033[0m"
+
+
+def my_print(*args, **kwargs):
+    """Make sure we flush after every print.
+
+    Not even the "-u" option does more than that and this is easy enough.
+
+    Use kwarg style=[option] to print in a style listed below
     """
-    Extract an archive using __np__.tools.extract_ar in a subprocess.
+
+    file_output = kwargs.get("file", sys.stdout)
+    is_atty = file_output.isatty()
+
+    if "style" in kwargs:
+        style = kwargs["style"]
+        del kwargs["style"]
+
+        if "end" in kwargs:
+            end = kwargs["end"]
+            del kwargs["end"]
+        else:
+            end = "\n"
+
+        if style is not None and is_atty:
+            enable_style = getEnableStyleCode(style)
+
+            if enable_style is None:
+                raise ValueError(
+                    "%r is an invalid value for keyword argument style" % style
+                )
+
+            _enableAnsi()
+
+            print(enable_style, end="", **kwargs)
+
+        print(*args, end=end, **kwargs)
+
+        if style is not None and is_atty:
+            print(getDisableStyleCode(), end="", **kwargs)
+    else:
+        print(*args, **kwargs)
+
+    # Flush the output.
+    file_output.flush()
+
+
+@contextlib.contextmanager
+def TemporaryDirectory():
+
+    dirpath = tempfile.mkdtemp()
+    yield dirpath
+
+    def delete_readonly_file(_, path, e):
+        if len(e) > 2 and e[1].errno == 13:
+            os.chmod(path, stat.S_IWRITE)
+            os.unlink(path)
+        else:
+            raise e[1]
+
+    shutil.rmtree(dirpath, onerror=delete_readonly_file)
+
+
+class NoSuchURL(Exception):
+    pass
+
+
+def copytree(src, dst, symlinks=False, ignore_errors=None, executable=False):
+    if not os.path.exists(dst):
+        os.makedirs(dst)
+    for item in os.listdir(src):
+        s = os.path.join(src, item)
+        if os.name == "nt":
+            from __mp__.windows import get_short_path
+            try:
+                s = os.path.join(get_short_path(os.path.dirname(s)), os.path.basename(s))
+            except:
+                pass
+        d = os.path.join(dst, item)
+        if os.name == "nt":
+            try:
+                d = os.path.join(get_short_path(os.path.dirname(d)), os.path.basename(d))
+            except:
+                pass
+        if os.path.isdir(s):
+            copytree(s, d, symlinks, ignore_errors)
+        else:
+            try:
+                shutil.copy2(s, d)
+            except:
+                if not ignore_errors:
+                    raise
+            if executable:
+                os.chmod(d, 509)  # 775
+
+def cleanup_file_name(filename):
+    if '?' in filename:
+        filename = filename[:filename.index('?')]
+    return filename
+
+def download_file(url, destination):
+    if str is bytes:
+        from urllib2 import URLError, HTTPError, Request, urlopen
+    else:
+        from urllib.request import URLError, HTTPError, Request, urlopen
+
+    try:
+        my_print("Attempting to download '%s'." % url, style="blue")
+
+        req = Request(url, headers={"User-Agent": "MonolithPy"})
+        with contextlib.closing(urlopen(req)) as fp:
+            if (
+                "content-disposition" in fp.headers
+                and "filename=" in fp.headers["content-disposition"]
+            ):
+                destination_file = os.path.join(
+                    destination,
+                    fp.headers["content-disposition"].split("filename=")[-1].strip('"'),
+                )
+            else:
+                destination_file = os.path.join(
+                    destination, cleanup_file_name(os.path.basename(fp.geturl()))
+                )
+
+            parent_dir = os.path.dirname(destination_file)
+            if not os.path.exists(parent_dir):
+                os.makedirs(parent_dir)
+
+            with open(destination_file, "wb") as out_file:
+                bs = 1024 * 8
+                while True:
+                    block = fp.read(bs)
+                    if not block:
+                        break
+                    out_file.write(block)
+
+    except HTTPError as e:
+        if e.code == 404:
+            raise NoSuchURL(url)
+        else:
+            raise
+    except URLError as e:
+        # Seems that macOS throws this error instead for file:// links. :(
+        if 'Errno 2' in str(e.reason) or 'WinError 3' in str(e.reason):
+            raise NoSuchURL(url)
+        else:
+            raise
+    except OSError as e:
+        if e.errno == 2:
+            raise NoSuchURL(url)
+        else:
+            raise
+
+    return destination_file
+
+
+def extract_archive(archive_file, destination=None):
+    if destination is None:
+        destination = os.path.splitext(archive_file)[0]
+        if destination.endswith(".tar"):
+            destination = destination[:-4]
+    shutil.unpack_archive(archive_file, destination)
+    return destination
+
+
+def download_extract(url, destination):
+    with TemporaryDirectory() as dir:
+        downloaded_file = download_file(url, dir)
+        extract_archive(downloaded_file, destination)
+
+
+def run(*args, **kwargs):
+    import subprocess
+
+    stdin = kwargs.pop("stdin", None)
+    quiet = kwargs.pop("quiet", False)
+    cwd = kwargs.pop("cwd", os.getcwd())
+    env = kwargs.pop("env", os.environ.copy())
+    assert not kwargs
+
+    # Don't use the pip path customization here. Just replicate our current path.
+    env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
+
+    p = subprocess.Popen(
+        args,
+        universal_newlines=True,
+        stdin=stdin,
+        env=env,
+        cwd=cwd,
+    )
+
+    p.wait()
+    if p.returncode != 0:
+        raise subprocess.CalledProcessError(p.returncode, args)
+
+def run_with_output(*args, **kwargs):
+    import subprocess
+
+    stdin = kwargs.pop("stdin", None)
+    quiet = kwargs.pop("quiet", False)
+    cwd = kwargs.pop("cwd", os.getcwd())
+    env = kwargs.pop("env", os.environ.copy())
+    assert not kwargs
+
+    # Don't use the pip path customization here. Just replicate our current path.
+    env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
+
+    p = subprocess.Popen(
+        args,
+        universal_newlines=True,
+        stdin=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        cwd=cwd,
+    )
+
+    output = ""
+    for line in p.stdout:
+        if not quiet:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        output += line
+    p.wait()
+    if p.returncode != 0:
+        raise subprocess.CalledProcessError(p.returncode, args, output)
+    return output
+
+
+def install_files(dst, *files, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    executable = kwargs.pop("executable", None)
+    ignore_errors = kwargs.pop("ignore_errors", None)
+    assert not kwargs
+
+    if not os.path.isdir(dst):
+        os.makedirs(dst, exist_ok=True)
+    for file_glob in files:
+        for file in glob.glob(file_glob):
+            destination_filename = os.path.basename(file)
+            if base_dir is not None and file.startswith(base_dir):
+                destination_filename = file[len(base_dir) + 1 :]
+            file_dst = os.path.join(dst, destination_filename)
+            if not os.path.exists(os.path.dirname(file_dst)):
+                os.makedirs(os.path.dirname(file_dst))
+            if os.path.isdir(file):
+                copytree(file, os.path.join(dst, destination_filename), executable=executable, ignore_errors=ignore_errors)
+            else:
+                shutil.copy(file, os.path.join(dst, destination_filename))
+                if executable:
+                    os.chmod(os.path.join(dst, destination_filename), 509)  # 775
+
+
+def install_dep_include(dependency_name, *files, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    dependency_location = os.path.join(
+        getDependencyInstallDir(), dependency_name, "include"
+    )
+    install_files(dependency_location, *files, base_dir=base_dir)
+
+
+def install_dep_libs(dependency_name, *files, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    dependency_location = os.path.join(
+        getDependencyInstallDir(), dependency_name, "lib"
+    )
+    install_files(dependency_location, *files, base_dir=base_dir)
+
+
+def install_build_tool(tool_name, *files, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    ignore_errors = kwargs.pop("ignore_errors", None)
+    assert not kwargs
+
+    dependency_location = os.path.join(getToolsInstallDir(), tool_name)
+    install_files(dependency_location, *files, base_dir=base_dir, executable=True, ignore_errors=ignore_errors)
+
+
+def find_build_tool_exe(tool_name, exe):
+    if os.name != "nt" and tool_name == "patch":
+        return "patch"
+
+    return (
+        glob.glob(os.path.join(getToolsInstallDir(), tool_name, exe))
+        + glob.glob(os.path.join(getToolsInstallDir(), tool_name, "bin", exe))
+    )[0]
+
+
+def run_build_tool_exe(tool_name, exe, *args, **kwargs):
+    return run_with_output(find_build_tool_exe(tool_name, exe), *args, **kwargs)
+
+
+def apply_patch(patch_file, directory):
+    """Apply a patch file to a directory."""
+    my_print("Applying patch '%s' to '%s'" % (patch_file, directory))
+    with open(patch_file, "rb") as stdin:
+        run_build_tool_exe(
+            "patch",
+            "patch.exe" if os.name == "nt" else "patch",
+            "-d",
+            directory,
+            "-p",
+            "1",
+            "--verbose",
+            stdin=stdin,
+        )
+
+
+def find_dep_root(dep_name):
+    return os.path.join(getDependencyInstallDir(), dep_name)
+
+
+def find_dep_include(dep_name):
+    return os.path.join(getDependencyInstallDir(), dep_name, "include")
+
+
+def find_dep_libs(dep_name):
+    return os.path.join(getDependencyInstallDir(), dep_name, "lib")
+
+
+def prepend_to_file(file, prepend_str):
+    output = prepend_str
+    with open(file, "r") as f:
+        output += f.read()
+    with open(file, "w") as f:
+        f.write(output)
+
+
+def is_file_binary(file_path):
+    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7F})
+    with open(file_path, "rb") as f:
+        return bool(f.read(1024).translate(None, textchars))
+
+
+def get_num_jobs():
+    return os.environ.get("NUM_JOBS", os.cpu_count())
+
+
+def shall_link_statically(name):
+    import fnmatch
+
+    static_pattern = os.environ.get("NUITKA_PYTHON_STATIC_PATTERN")
+    if not static_pattern or not fnmatch.fnmatch(name, static_pattern):
+        return False
+
+    return True
+
+
+def write_linker_json(
+    result_path, libraries, library_dirs, runtime_library_dirs, extra_args
+):
+    import json
+
+    with open(result_path + ".link.json", "w") as f:
+        json.dump(
+            {
+                "libraries": libraries,
+                "library_dirs": library_dirs,
+                "runtime_library_dirs": runtime_library_dirs,
+                "extra_postargs": extra_args,
+            },
+            f,
+        )
+
+def importFileAsModule(modulename, filename):
+    """Import Python module given as a file name.
+
+    Notes:
+        Provides a Python version independent way to import any script files.
 
     Args:
-        lib_path: Path to the library file to extract
-        output_dir: Directory to extract to
+        filename: complete path of a Python script
 
     Returns:
-        True if successful, False otherwise
+        Imported Python module with code from the filename.
     """
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "__np__.tools.extract_ar", lib_path, output_dir],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        my_print(f"Failed to extract {lib_path}: {e.stderr}", style="red")
-        return False
-    except Exception as e:
-        my_print(f"Failed to extract {lib_path}: {e}", style="red")
-        return False
+    import importlib.machinery
+    import importlib.util  # pylint: disable=I0021,import-error,no-name-in-module
+
+    build_script_spec = importlib.util.spec_from_loader(
+        modulename, importlib.machinery.SourceFileLoader(modulename, filename)
+    )
+    build_script_module = importlib.util.module_from_spec(build_script_spec)
+    build_script_spec.loader.exec_module(build_script_module)
+    return build_script_module
+
+def patch_all_source(path):
+    for subdir, _, files in os.walk(path):
+        for file in files:
+            if file.endswith(('.c', '.cxx', '.cpp')):
+                filepath = os.path.join(subdir, file)
+                with open(filepath, 'rb+') as f:
+                    content = f.read()
+                    f.seek(0, 0)
+                    f.write(b"#include <mp_embed.h>\n" + content)
 
 
-def analyze_and_rename_library_symbols(root_folder, global_suffix, library_pattern="*.lib", protected_symbols=None, symbol_mapping=None, write_debug=False, num_threads=5):
+def analyze_and_rename_library_symbols(root_folder, global_suffix, library_pattern=None, protected_symbol_patterns=None, symbol_mapping=None, write_debug=False, num_threads=5, exclude_libraries=None, exclude_objects=None):
     """
     Analyze all static libraries under a given folder structure and rename symbols.
 
     Args:
         root_folder: Root directory to search for static libraries
         global_suffix: Global suffix to add to all renamed symbols
-        library_pattern: Glob pattern for library files (default: "*.lib")
-        protected_symbols: List of regex patterns for symbols that should not be renamed
+        library_pattern: Glob pattern for library files (default: "*.lib" on Windows, "*.a" on Linux/macOS)
+        protected_symbol_patterns: List of regex patterns for symbols that should not be renamed
         symbol_mapping: Optional dict to disambiguate symbols defined in multiple libraries.
                        Format: {
                            "symbol_name": {
@@ -365,19 +492,69 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                        }
         write_debug: Write debug information to a file named rename_data.json in the current directory.
         num_threads: Number of threads to use for parallel processing (default: 5)
+        exclude_libraries: List of library names or glob patterns to exclude entirely from symbol renaming.
+                          Symbols in excluded libraries will not be renamed, but they will still be analyzed
+                          for dependency tracking. Example: ["libfoo.a", "libbar*.a"]
+        exclude_objects: Dict mapping library names to lists of object file names or glob patterns to exclude
+                        from symbol renaming within that library. Symbols defined in excluded objects will not
+                        be renamed, but they will still be analyzed for dependency tracking.
+                        Format: {
+                            "library_name.a": ["object1.o", "object2*.o"]
+                        }
+                        Example: {
+                            "libcrypto.a": ["x86cpuid.o", "aes*.o"]
+                        }
 
     Returns:
         Dictionary with analysis results and renamed libraries
     """
-    if protected_symbols is None:
-        protected_symbols = []
+    # Set default library_pattern based on platform
+    if library_pattern is None:
+        if sys.platform == "win32":
+            library_pattern = "*.lib"
+        else:  # Linux and macOS
+            library_pattern = "*.a"
+
+    if protected_symbol_patterns is None:
+        protected_symbol_patterns = []
     if symbol_mapping is None:
         symbol_mapping = {}
+    if exclude_libraries is None:
+        exclude_libraries = []
+    if exclude_objects is None:
+        exclude_objects = {}
 
-    import __np__.packaging
-    __np__.packaging.install_build_tool("clang")
+    import hashlib
+    import json
     import fnmatch
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def is_library_excluded(lib_path):
+        """Check if a library should be excluded from symbol renaming."""
+        lib_name = os.path.basename(lib_path)
+        for pattern in exclude_libraries:
+            if fnmatch.fnmatch(lib_name, pattern):
+                return True
+        return False
+
+    def is_object_excluded(lib_path, obj_name):
+        """Check if an object file should be excluded from symbol renaming within a library."""
+        lib_name = os.path.basename(lib_path)
+        # Check if this library has any object exclusions
+        for lib_pattern, obj_patterns in exclude_objects.items():
+            if fnmatch.fnmatch(lib_name, lib_pattern):
+                for obj_pattern in obj_patterns:
+                    if fnmatch.fnmatch(obj_name, obj_pattern):
+                        return True
+        return False
+
+    # Import platform-specific module
+    if sys.platform == "win32":
+        from . import windows as platform_module
+    elif sys.platform == "darwin":
+        from . import darwin as platform_module
+    else:
+        from . import linux as platform_module
 
     library_files = []
     for dirpath, dirnames, filenames in os.walk(root_folder):
@@ -411,8 +588,8 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
             extract_dir = os.path.join(extraction_tmpdir, f"{lib_name}_{lib_hash}")
             os.makedirs(extract_dir, exist_ok=True)
 
-            # Extract using subprocess to avoid GIL
-            if _extract_archive_subprocess(lib_abs, extract_dir):
+            # Extract using platform-specific method
+            if platform_module.extract_archive_subprocess(lib_abs, extract_dir):
                 return (lib_abs, extract_dir)
             else:
                 return (lib_abs, None)
@@ -439,21 +616,37 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
         my_print(f"Analyzing symbols from extracted libraries...", style="blue")
 
+        # Track excluded libraries and objects for reporting
+        excluded_library_set = set()
+        excluded_object_symbols = {}  # lib_path -> set of symbols from excluded objects
+
         # For every extracted library,
         for lib_abs, extract_dir in extraction_results.items():
             library_extract_dirs[lib_abs] = extract_dir
 
+            # Check if this library is excluded
+            lib_is_excluded = is_library_excluded(lib_abs)
+            if lib_is_excluded:
+                excluded_library_set.add(lib_abs)
+                my_print(f"  Library excluded from renaming: {os.path.basename(lib_abs)}", style="yellow")
+
             defined_symbols = set()
             undefined_symbols = set()
+            excluded_obj_syms = set()  # Symbols from excluded objects in this library
 
             # Enumerate all object files...
             for obj in os.listdir(extract_dir):
-                if obj.endswith(".obj") or obj.endswith(".o"):
+                if platform_module.is_object_file(obj):
                     obj_abs = os.path.join(extract_dir, obj)
-                    symbol_data = get_object_symbols(obj_abs)
+                    symbol_data = platform_module.get_object_symbols(obj_abs)
 
                     if symbol_data is None:
                         continue
+
+                    # Check if this object is excluded
+                    obj_is_excluded = is_object_excluded(lib_abs, obj)
+                    if obj_is_excluded:
+                        my_print(f"    Object excluded from renaming: {obj} in {os.path.basename(lib_abs)}", style="yellow")
 
                     for line in symbol_data:
                         line = line.strip()
@@ -471,15 +664,20 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                             continue
 
                         # Sort the contained symbols into ones that are defined in this object file and ones that this object file references.
-                        if ' u ' in line.lower() or line.lower().startswith('u '):
+                        if platform_module.is_undefined_symbol(line):
                             undefined_symbols.add(sym_name)
                         else:
                             defined_symbols.add(sym_name)
+                            # Track symbols from excluded objects
+                            if obj_is_excluded:
+                                excluded_obj_syms.add(sym_name)
 
             library_symbols[lib_abs] = {
                 'defined': defined_symbols,
                 'undefined': undefined_symbols
             }
+            if excluded_obj_syms:
+                excluded_object_symbols[lib_abs] = excluded_obj_syms
 
         # Analyze symbol dependencies between libraries
         all_defined = set()
@@ -516,8 +714,22 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         # at least one library references it without defining it. If all libraries that
         # reference it also define it, then each library has its own independent implementation
         # and the symbol should be treated as internal to each library.
+        #
+        # Additional insight: If a symbol is only referenced by libraries that also define it
+        # (i.e., all references are self-references), then it should be treated as internal
+        # to each library, even if multiple libraries define it.
+        #
+        # Self-referential pattern detection: For symbols defined in multiple libraries,
+        # check if each defining library only references its own version (self-reference).
+        # If a symbol is defined in libraries A and B, and:
+        # - Library A references it (but also defines it)
+        # - Library B references it (but also defines it)
+        # - No other library references it
+        # Then this is a self-referential pattern and should be treated as internal.
         external_symbols = set()
         external_symbol_reasons = {}  # symbol -> list of reasons why it's external
+
+        protected_symbols = set()
 
         for lib_path, symbols in library_symbols.items():
             lib_name = os.path.basename(lib_path)
@@ -526,17 +738,26 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
                 # Check if this symbol is referenced by other libraries (that don't define it)
                 if sym in symbol_references:
+                    # Only mark as external if at least one referencing library doesn't define it
+                    has_external_reference = False
                     for other_lib_path in symbol_references[sym]:
-                        if other_lib_path != lib_path:
+                        # Check if the referencing library also defines this symbol
+                        # If it does, this is an internal reference (library using its own version)
+                        if sym not in library_symbols[other_lib_path]['defined']:
+                            # This library references the symbol but doesn't define it - external reference
                             other_lib_name = os.path.basename(other_lib_path)
                             reasons.append(f"referenced_by:{other_lib_name}")
-                            external_symbols.add(sym)
+                            has_external_reference = True
+
+                    if has_external_reference:
+                        external_symbols.add(sym)
 
                 # Check if symbol matches protected patterns
-                for pattern in protected_symbols:
+                for pattern in protected_symbol_patterns:
                     if re.fullmatch(pattern, sym):
                         reasons.append(f"protected_pattern:{pattern}")
                         external_symbols.add(sym)
+                        protected_symbols.add(sym)
                         break
 
                 # Track reasons for this symbol
@@ -644,6 +865,17 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         external_rename_map = {}  # old_sym -> new_sym (for external symbols only)
         disambiguated_symbol_maps = {}  # sym -> {defining_lib_path -> new_name}
 
+        # Collect all symbols that should be excluded from renaming
+        # This includes symbols from excluded libraries and symbols from excluded objects
+        excluded_symbols = set()
+        for lib_path in excluded_library_set:
+            excluded_symbols.update(library_symbols[lib_path]['defined'])
+        for lib_path, obj_syms in excluded_object_symbols.items():
+            excluded_symbols.update(obj_syms)
+
+        if excluded_symbols:
+            my_print(f"Excluding {len(excluded_symbols)} symbols from renaming (from excluded libraries/objects)", style="blue")
+
         def normalize_sym_part(part):
             return re.sub(r'[^a-zA-Z0-9_]', '_', part)
 
@@ -658,9 +890,18 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
             library_rename_maps[lib_path] = {}
 
+            # Skip entirely if this library is excluded
+            if lib_path in excluded_library_set:
+                continue
+
             # Map internal symbols (defined in this lib only)
+            # Exclude symbols that are in excluded objects
             internal_symbols = symbols['defined'] - external_symbols
+            lib_excluded_obj_syms = excluded_object_symbols.get(lib_path, set())
             for sym in internal_symbols:
+                # Skip symbols from excluded objects
+                if sym in lib_excluded_obj_syms:
+                    continue
                 new_name = f"{sym}_{global_suffix}_{normalize_sym_part(lib_name)}_{lib_hash}"
                 library_rename_maps[lib_path][sym] = new_name
 
@@ -669,10 +910,16 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         disambiguated_symbols = set()
         for sym in symbol_disambiguation.keys():
             if sym in duplicate_externals:
+                # Skip if this symbol is excluded
+                if sym in excluded_symbols:
+                    continue
                 disambiguated_symbols.add(sym)
                 disambiguated_symbol_maps[sym] = {}
 
                 for defining_lib_path in symbol_definitions[sym]:
+                    # Skip if this library is excluded
+                    if defining_lib_path in excluded_library_set:
+                        continue
                     lib_name = os.path.splitext(os.path.basename(defining_lib_path))[0]
                     hasher = hashlib.md5()
                     hasher.update(defining_lib_path.encode('utf-8'))
@@ -682,8 +929,9 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
         # Map external symbols (shared between libraries) - these are the same across all libraries
         # Exclude disambiguated symbols as they are handled separately
+        # Also exclude symbols from excluded libraries/objects
         for sym in external_symbols:
-            if sym not in disambiguated_symbols:
+            if sym not in disambiguated_symbols and sym not in protected_symbols and sym not in excluded_symbols:
                 new_name = f"{sym}_{global_suffix}"
                 external_rename_map[sym] = new_name
 
@@ -711,8 +959,16 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                 "total_internal_symbols": sum(len(m) for m in library_rename_maps.values()),
                 "duplicate_external_symbols": len(duplicate_externals),
                 "internal_duplicate_symbols": len(internal_duplicate_symbols),
-                "disambiguated_symbols": len(disambiguated_symbols)
+                "disambiguated_symbols": len(disambiguated_symbols),
+                "excluded_libraries": len(excluded_library_set),
+                "excluded_symbols": len(excluded_symbols)
             },
+            "excluded_libraries": [os.path.basename(lib) for lib in excluded_library_set],
+            "excluded_object_symbols": {
+                os.path.basename(lib): sorted(list(syms))
+                for lib, syms in excluded_object_symbols.items()
+            },
+            "internal_symbols": {lib: list(syms.keys()) for lib, syms in library_rename_maps.items()},
             "external_symbols": sorted(list(external_symbols)),
             "external_symbol_reasons": external_symbol_reasons,
             "external_symbol_definitions": external_symbol_definitions,
@@ -749,7 +1005,8 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                     "defined_count": len(symbols['defined']),
                     "undefined_count": len(symbols['undefined']),
                     "internal_count": len(library_rename_maps[lib_path]),
-                    "external_defined_count": len(symbols['defined'] & external_symbols)
+                    "external_defined_count": len(symbols['defined'] & external_symbols),
+                    "excluded": lib_path in excluded_library_set
                 }
                 for lib_path, symbols in library_symbols.items()
             }
@@ -764,21 +1021,29 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         def process_library(lib_path):
             """Process a single library - rename symbols using pre-extracted directory and repack"""
             lib_name = os.path.splitext(os.path.basename(lib_path))[0]
+
+            # Check if this library is excluded
+            lib_is_excluded = lib_path in excluded_library_set
+
             symbols = library_symbols[lib_path]
             lib_rename_map = library_rename_maps[lib_path]
 
             # Build the complete rename map for this library
             complete_rename_map = {}
-            complete_rename_map.update(lib_rename_map)  # Internal symbols for this library
+            # Only include internal symbols if library is not excluded
+            if not lib_is_excluded:
+                complete_rename_map.update(lib_rename_map)  # Internal symbols for this library
             complete_rename_map.update(external_rename_map)  # External symbols (same for all)
 
             for sym in disambiguated_symbols:
                 # If this library defines the symbol, rename it to its library-specific version
-                if sym in symbols['defined']:
+                # But only if the library is not excluded
+                if sym in symbols['defined'] and not lib_is_excluded:
                     if lib_path in disambiguated_symbol_maps[sym]:
                         complete_rename_map[sym] = disambiguated_symbol_maps[sym][lib_path]
 
                 # If this library references the symbol, rename it to the preferred definition's version
+                # This applies even to excluded libraries - they still need to reference renamed symbols
                 elif sym in symbols['undefined']:
                     if sym in symbol_disambiguation and lib_path in symbol_disambiguation[sym]:
                         preferred_lib = symbol_disambiguation[sym][lib_path]
@@ -788,12 +1053,14 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
             # Determine which symbols in this library need renaming
             symbols_to_rename = set()
 
-            # Add defined symbols that are in the rename map
-            for sym in symbols['defined']:
-                if sym in complete_rename_map:
-                    symbols_to_rename.add(sym)
+            # Add defined symbols that are in the rename map (only if not excluded)
+            if not lib_is_excluded:
+                for sym in symbols['defined']:
+                    if sym in complete_rename_map:
+                        symbols_to_rename.add(sym)
 
             # Add undefined symbols (references) that are in the rename map
+            # This applies even to excluded libraries - they still need to reference renamed symbols
             for sym in symbols['undefined']:
                 if sym in complete_rename_map:
                     symbols_to_rename.add(sym)
@@ -815,9 +1082,12 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                 obj_list = []
 
                 for obj in os.listdir(extract_dir):
-                    if obj.endswith(".obj") or obj.endswith(".o"):
+                    if platform_module.is_object_file(obj):
                         obj_abs = os.path.join(extract_dir, obj)
                         obj_list.append(obj_abs)
+
+                # Get symbols from excluded objects in this library
+                lib_excluded_obj_syms = excluded_object_symbols.get(lib_path, set())
 
                 rename_args = []
                 for sym in symbols_to_rename:
@@ -830,12 +1100,33 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                         with open(rename_arg_file, "w") as f:
                             f.write('\n'.join(rename_args) + "\n")
 
+                        # Build a separate rename file for excluded objects that only renames references
+                        # (excludes defined symbols from excluded objects)
+                        excluded_obj_rename_args = []
+                        for sym in symbols_to_rename:
+                            if sym in complete_rename_map and sym not in lib_excluded_obj_syms:
+                                excluded_obj_rename_args.append(f"{sym} {complete_rename_map[sym]}")
+
+                        excluded_obj_rename_arg_file = None
+                        if excluded_obj_rename_args and lib_excluded_obj_syms:
+                            excluded_obj_rename_arg_file = os.path.join(rename_tmpdir, "excluded_obj_rename_args.txt")
+                            with open(excluded_obj_rename_arg_file, "w") as f:
+                                f.write('\n'.join(excluded_obj_rename_args) + "\n")
+
                         my_print(f"  Renaming {len(rename_args)} symbols in {lib_name}", style="green")
 
                         for obj in obj_list:
+                            obj_name = os.path.basename(obj)
+                            obj_is_excluded = is_object_excluded(lib_path, obj_name)
+
                             try:
-                                run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms",
-                                                 rename_arg_file, obj, cwd=extract_dir, quiet=True)
+                                if obj_is_excluded and excluded_obj_rename_arg_file:
+                                    # For excluded objects, use the filtered rename file
+                                    # that doesn't rename their defined symbols
+                                    platform_module.rename_symbols_in_object(obj, excluded_obj_rename_arg_file, extract_dir)
+                                else:
+                                    # For normal objects, use the full rename file
+                                    platform_module.rename_symbols_in_object(obj, rename_arg_file, extract_dir)
                             except Exception as e:
                                 my_print(f"  Warning: Failed to rename symbols in {obj}: {e}", style="yellow")
 
@@ -845,7 +1136,7 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                     os.rename(lib_abs, backup_path)
 
                     try:
-                        run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + lib_abs, *obj_list, quiet=True)
+                        platform_module.repack_library(lib_abs, obj_list)
                         my_print(f"  Successfully renamed symbols in {lib_name}", style="green")
 
                         defined_renamed = len(symbols['defined'] & symbols_to_rename)
@@ -891,34 +1182,7 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         # Clean up the extraction temporary directory
         if extraction_tmpdir and os.path.exists(extraction_tmpdir):
             try:
-                import shutil
                 shutil.rmtree(extraction_tmpdir)
                 my_print(f"Cleaned up extraction directory", style="blue")
             except Exception as e:
                 my_print(f"Warning: Failed to clean up extraction directory: {e}", style="yellow")
-
-
-EXE_MANIFEST = """\
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity type="win32" name="Mini" version="1.0.0.0"/>
-  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-    <application>
-      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
-      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
-      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
-      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
-      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
-    </application>
-  </compatibility>
-  <asmv3:application>
-    <asmv3:windowsSettings xmlns:ws2="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
-      <ws2:longPathAware>true</ws2:longPathAware>
-    </asmv3:windowsSettings>
-  </asmv3:application>
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
-    </dependentAssembly>
-  </dependency>
-</assembly>
-"""

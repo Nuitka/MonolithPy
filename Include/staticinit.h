@@ -37,7 +37,7 @@ extern "C" {
 }
 #endif // __cplusplus
 
-static inline void Py_InitStaticModules() {
+static inline void Py_InitStaticModules(void) {
 
 #if defined(_WIN64) || defined(_WIN32)
     PyImport_AppendInittab("unicodedata", PyInit_unicodedata);

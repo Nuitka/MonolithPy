@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package >
   <metadata>
-    <id>NuitkaPythonx86</id>
+    <id>MonolithPyx86</id>
     <title>MonolithPy (32-bit)</title>
     <version>0.0.0.0</version>
     <authors>Nuitka Organization contributors</authors>

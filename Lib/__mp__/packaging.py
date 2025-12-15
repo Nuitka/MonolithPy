@@ -4,7 +4,7 @@ import platform
 import json
 import fnmatch
 
-import __np__
+import __mp__
 
 PACKAGE_BASE_URL = os.environ.get(
     "MONOLITHPY_PACKAGE_URL",
@@ -36,10 +36,10 @@ def getPackageUrl(section, name):
 
 def getPackageJson(section, name):
     if name is None:
-        raise __np__.NoSuchURL("")
+        raise __mp__.NoSuchURL("")
     package_dir_url = getPackageUrl(section, name)
-    with __np__.TemporaryDirectory() as temp_dir:
-        data_filename = __np__.download_file(
+    with __mp__.TemporaryDirectory() as temp_dir:
+        data_filename = __mp__.download_file(
             "{package_dir_url}/index.json".format(**locals()),
             temp_dir,
         )
@@ -60,10 +60,10 @@ def install_build_tool(name):
             install_build_tool(tool)
 
     if os.path.isfile(
-        os.path.join(__np__.getToolsInstallDir(), name, "version.txt")
+        os.path.join(__mp__.getToolsInstallDir(), name, "version.txt")
     ):
         with open(
-            os.path.join(__np__.getToolsInstallDir(), name, "version.txt"), "r"
+            os.path.join(__mp__.getToolsInstallDir(), name, "version.txt"), "r"
         ) as f:
             version = f.read()
             if version == package_index["version"]:
@@ -72,9 +72,9 @@ def install_build_tool(name):
 
     print("Setting up build tool {name}...".format(**locals()))
 
-    with __np__.TemporaryDirectory() as temp_dir:
+    with __mp__.TemporaryDirectory() as temp_dir:
         for file in package_index["files"]:
-            __np__.download_file(
+            __mp__.download_file(
                 "{package_dir_url}/{file}".format(**locals()),
                 temp_dir,
             )
@@ -83,7 +83,7 @@ def install_build_tool(name):
         initcwd = os.getcwd()
         initenviron = dict(os.environ)
 
-        build_script_module = __np__.importFileAsModule(
+        build_script_module = __mp__.importFileAsModule(
             build_script_module_name,
             os.path.join(temp_dir, package_index["build_script"]),
         )
@@ -101,7 +101,7 @@ def install_build_tool(name):
             os.environ.update(initenviron)
 
     with open(
-        os.path.join(__np__.getToolsInstallDir(), name, "version.txt"), "w"
+        os.path.join(__mp__.getToolsInstallDir(), name, "version.txt"), "w"
     ) as f:
         f.write(package_index["version"])
 
@@ -118,10 +118,10 @@ def install_dependency(name):
             install_dependency(dep)
 
     if os.path.isfile(
-        os.path.join(__np__.getDependencyInstallDir(), name, "version.txt")
+        os.path.join(__mp__.getDependencyInstallDir(), name, "version.txt")
     ):
         with open(
-            os.path.join(__np__.getDependencyInstallDir(), name, "version.txt"), "r"
+            os.path.join(__mp__.getDependencyInstallDir(), name, "version.txt"), "r"
         ) as f:
             version = f.read()
             if version == package_index["version"]:
@@ -130,9 +130,9 @@ def install_dependency(name):
 
     print("Compiling dependency {name}...".format(**locals()))
 
-    with __np__.TemporaryDirectory() as temp_dir:
+    with __mp__.TemporaryDirectory() as temp_dir:
         for file in package_index["files"]:
-            __np__.download_file(
+            __mp__.download_file(
                 "{package_dir_url}/{file}".format(**locals()),
                 temp_dir,
             )
@@ -141,7 +141,7 @@ def install_dependency(name):
         initcwd = os.getcwd()
         initenviron = dict(os.environ)
 
-        build_script_module = __np__.importFileAsModule(
+        build_script_module = __mp__.importFileAsModule(
             build_script_module_name,
             os.path.join(temp_dir, package_index["build_script"]),
         )
@@ -159,7 +159,7 @@ def install_dependency(name):
             os.environ.update(initenviron)
 
     with open(
-        os.path.join(__np__.getDependencyInstallDir(), name, "version.txt"), "w"
+        os.path.join(__mp__.getDependencyInstallDir(), name, "version.txt"), "w"
     ) as f:
         f.write(package_index["version"])
 
@@ -177,7 +177,7 @@ def build_package(package_name, version, script_metadata, wheel_directory):
 
     for file in script_metadata["files"]:
         package_dir_url = getPackageUrl("packages", package_name)
-        __np__.download_file(
+        __mp__.download_file(
             "{package_dir_url}/{file}".format(**locals()),
             install_temp_dir,
         )
@@ -186,7 +186,7 @@ def build_package(package_name, version, script_metadata, wheel_directory):
 
     initcwd = os.getcwd()
     initenviron = dict(os.environ)
-    build_script_module = __np__.importFileAsModule(
+    build_script_module = __mp__.importFileAsModule(
         build_script_module_name,
         os.path.join(install_temp_dir, script_metadata["build_script"]),
     )
@@ -213,7 +213,7 @@ def build_package(package_name, version, script_metadata, wheel_directory):
 def find_source_by_link(package_name, link):
     try:
         package_index = getPackageJson("packages", package_name)
-    except __np__.NoSuchURL:
+    except __mp__.NoSuchURL:
         return None
 
     if "sources" in package_index:
@@ -226,7 +226,7 @@ def find_source_by_link(package_name, link):
 def get_extra_sources_for_package(package_name):
     try:
         package_index = getPackageJson("packages", package_name)
-    except __np__.NoSuchURL:
+    except __mp__.NoSuchURL:
         return []
 
     package_sources = []
@@ -245,7 +245,7 @@ def get_extra_sources_for_package(package_name):
 def find_build_script_for_package(package_name, version=None):
     try:
         package_index = getPackageJson("packages", package_name)
-    except __np__.NoSuchURL:
+    except __mp__.NoSuchURL:
         return None
 
     matched_source = None

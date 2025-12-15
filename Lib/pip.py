@@ -9,8 +9,8 @@ import rebuildpython
 import re
 import importlib.machinery
 
-import __np__
-import __np__.packaging
+import __mp__
+import __mp__.packaging
 
 # Make the standard pip, the real pip module.
 # Need to keep a reference alive, or the module will loose all attributes.
@@ -66,8 +66,8 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
     has_setup = os.path.isfile(setup_py)
 
     # We will be taking over the build process.
-    if not req_name.startswith("file://") and os.path.isfile(os.path.join(os.path.dirname(pyproject_toml), "..", "np_script.json")):
-        with open(os.path.join(os.path.dirname(pyproject_toml), "..", "np_script.json"), 'r') as f:
+    if not req_name.startswith("file://") and os.path.isfile(os.path.join(os.path.dirname(pyproject_toml), "..", "mp_script.json")):
+        with open(os.path.join(os.path.dirname(pyproject_toml), "..", "mp_script.json"), 'r') as f:
             data = json.load(f)
 
         package_name = re.split(r'[><= ]', req_name, maxsplit=1)[0]
@@ -80,7 +80,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
             if 'dist_requires' in package_data['script_metadata']:
                 requires += package_data['script_metadata']['dist_requires']
             return pip._internal.pyproject.BuildSystemDetails(
-                requires, "__np__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
+                requires, "__mp__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
 
     result = load_pyproject_toml_orig(use_pep517, pyproject_toml, setup_py, req_name)
     if result is None:
@@ -107,7 +107,7 @@ import pip._internal.distributions.sdist
 
 orig_SourceDistribution_get_build_requires_wheel = pip._internal.distributions.sdist.SourceDistribution._get_build_requires_wheel
 def SourceDistribution_get_build_requires_wheel(self):
-    our_source = __np__.packaging.find_source_by_link(self.req.name,self.req.link.url)
+    our_source = __mp__.packaging.find_source_by_link(self.req.name,self.req.link.url)
 
     if our_source is not None:
         requires = []
@@ -146,13 +146,13 @@ class PackageFinder(_PackageFinder):
 
         base_candidates = _PackageFinder.find_all_candidates(self, project_name)
 
-        build_script = __np__.packaging.find_build_script_for_package(project_name)
+        build_script = __mp__.packaging.find_build_script_for_package(project_name)
 
         if build_script:
             # If we have a build script, filter out wheels.
             base_candidates = [x for x in base_candidates if not x.link.is_wheel]
 
-        return __np__.packaging.get_extra_sources_for_package(project_name) + base_candidates
+        return __mp__.packaging.get_extra_sources_for_package(project_name) + base_candidates
 
 
 pip._internal.index.package_finder.PackageFinder = PackageFinder
@@ -208,14 +208,14 @@ orig_prepare_distribution = pip._internal.resolution.resolvelib.candidates.LinkC
 
 def _prepare_distribution(self):
     try:
-        build_script = __np__.packaging.find_build_script_for_package(self.name, self.version.public)
+        build_script = __mp__.packaging.find_build_script_for_package(self.name, self.version.public)
     except:
         build_script = None
 
     if build_script is not None:
         data = {}
         try:
-            with open(os.path.join(self._factory.preparer.build_dir, 'np_script.json'), 'r') as f:
+            with open(os.path.join(self._factory.preparer.build_dir, 'mp_script.json'), 'r') as f:
                 data = json.load(f)
         except:
             pass
@@ -224,7 +224,7 @@ def _prepare_distribution(self):
                 "version": self.version.public,
                 "script_metadata": build_script
             }
-        with open(os.path.join(self._factory.preparer.build_dir, 'np_script.json'), 'w') as f:
+        with open(os.path.join(self._factory.preparer.build_dir, 'mp_script.json'), 'w') as f:
             json.dump(data, f)
 
     result = orig_prepare_distribution(self)
@@ -244,7 +244,7 @@ pip._vendor.packaging.tags._generic_abi = our_generic_abi
 import pip._vendor.distlib.scripts
 
 if os.name == "nt":
-    pip._vendor.distlib.scripts._DEFAULT_MANIFEST = pip._vendor.distlib.scripts.ScriptMaker.manifest = __np__.EXE_MANIFEST
+    pip._vendor.distlib.scripts._DEFAULT_MANIFEST = pip._vendor.distlib.scripts.ScriptMaker.manifest = __mp__.EXE_MANIFEST
 
 
 def main():

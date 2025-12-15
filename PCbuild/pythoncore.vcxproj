@@ -140,7 +140,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\Include\np_embed.h" />
+    <ClInclude Include="..\Include\mp_embed.h" />
     <ClInclude Include="..\Include\Python.h" />
     <ClInclude Include="..\Include\abstract.h" />
     <ClInclude Include="..\Include\audit.h" />
