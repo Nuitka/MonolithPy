@@ -123,10 +123,10 @@ export "CPPFLAGS=$CPPFLAGS_bak"
 cd ..
 fi
 
-if [ ! -d openssl-3.1.8 ]; then
-download_file https://www.openssl.org/source/openssl-3.1.8.tar.gz openssl.tar.gz
+if [ ! -d openssl-3.5.4 ]; then
+download_file https://www.openssl.org/source/openssl-3.5.4.tar.gz openssl.tar.gz
 tar -xf openssl.tar.gz
-cd openssl-3.1.8
+cd openssl-3.5.4
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
@@ -191,7 +191,7 @@ tar -xf libpng.tar.gz
 cd libpng-1.6.39
 ./configure --prefix=${PREFIX} --disable-shared
 make pnglibconf.h
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 sed -i -e 's/define PNG_ZLIB_VERNUM 0x[0-9a-z][0-9a-z][0-9a-z][0-9a-z]/define PNG_ZLIB_VERNUM 0/g' pnglibconf.h
 make -j$(nproc --all)
 make install
@@ -202,7 +202,7 @@ if [ ! -d harfbuzz-8.3.0 ]; then
 download_file https://github.com/harfbuzz/harfbuzz/releases/download/8.3.0/harfbuzz-8.3.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
 cd harfbuzz-8.3.0
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "np_embed.h"\n\'$'\n/g'
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install

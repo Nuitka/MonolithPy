@@ -19,21 +19,21 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdint.h>
 #ifdef _WIN32
 #define NOMINMAX
-#include <wchar.h>
-#include <basetsd.h>
-#include <intsafe.h>
 #if defined(_M_IX86)
 #define _X86_
 #elif defined(_M_X64)
 #define _AMD64_
 #elif defined(_M_ARM)
 #define _ARM_
-    #elif defined(_M_ARM64)
-    #define _ARM64_
+#elif defined(_M_ARM64)
+#define _ARM64_
 #endif  /* _M_IX86 || _M_X64 || _M_ARM || _M_ARM64 */
 
+#include <wchar.h>
+#include <basetsd.h>
 #include <fileapi.h>
 #include <handleapi.h>
 #include <windef.h>
@@ -208,7 +208,7 @@ typedef SSIZE_T ssize_t;
 #define NOMINMAX
 #include <wchar.h>
 #include <basetsd.h>
-#include <intsafe.h>
+#include <stdint.h>
 #if defined(_M_IX86)
 #define _X86_
 #elif defined(_M_X64)
@@ -378,7 +378,6 @@ typedef SSIZE_T ssize_t;
 
 #include <errno.h>
 #include <stdarg.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #ifdef __cplusplus

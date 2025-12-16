@@ -73,18 +73,18 @@
           "checksumValue": "b182d567878188049c3d0853e97e64a246fcdcdab3fb166bd8876170b06ab5ed"
         }
       ],
-      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/openssl-3.1.8.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/openssl-3.5.4.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.1.8:*:*:*:*:*:*:*",
+          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.5.4:*:*:*:*:*:*:*",
           "referenceType": "cpe23Type"
         }
       ],
       "licenseConcluded": "NOASSERTION",
       "name": "openssl",
       "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "3.1.8"
+      "versionInfo": "3.5.4"
     },
     {
       "SPDXID": "SPDXRef-PACKAGE-sqlite",
