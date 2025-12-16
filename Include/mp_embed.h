@@ -12,6 +12,8 @@
 # define _GNU_SOURCE
 #endif  /* __linux */
 
+#include <stdint.h>
+
 #ifdef FOPEN_MAX
 // This means that we were loaded too late so we can't intercept the necessary calls.
 // Don't even try in that case.
@@ -19,7 +21,6 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <stdint.h>
 #ifdef _WIN32
 #define NOMINMAX
 #if defined(_M_IX86)
@@ -208,7 +209,6 @@ typedef SSIZE_T ssize_t;
 #define NOMINMAX
 #include <wchar.h>
 #include <basetsd.h>
-#include <stdint.h>
 #if defined(_M_IX86)
 #define _X86_
 #elif defined(_M_X64)
