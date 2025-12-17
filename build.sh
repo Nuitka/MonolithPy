@@ -419,6 +419,8 @@ export "CPPFLAGS=-I${PREFIX}/include"
   CFLAGS="-g $CFLAGS" \
   LDFLAGS="-g -Xlinker -export-dynamic -rdynamic -Bsymbolic-functions -Wl,-z,relro -Wl,-allow-multiple-definition $LDFLAGS" \
   LIBS="-l:libffi.a -l:libbz2.a -l:libuuid.a -l:libsqlite3.a -l:liblzma.a -l:librt.a -l:libmp_embed.a" \
+  PROFILE_TASK='-m test --pgo -x test_json ' \
+  MODULE_BUILDTYPE=static \
   ax_cv_c_float_words_bigendian=no \
   ac_cv_lib_sqlite3_sqlite3_bind_double=yes ac_cv_lib_sqlite3_sqlite3_column_decltype=yes ac_cv_lib_sqlite3_sqlite3_column_double=yes \
   ac_cv_lib_sqlite3_sqlite3_complete=yes ac_cv_lib_sqlite3_sqlite3_enable_shared_cache=yes ac_cv_lib_sqlite3_sqlite3_progress_handler=yes \
