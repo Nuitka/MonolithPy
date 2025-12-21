@@ -7,7 +7,7 @@ set -x
 # TODO: Support Fedora/CentOS/etc. as well.
 if command -v apt &> /dev/null
 then
-  pkgs='build-essential libc6-dev xorg-dev'
+  pkgs='build-essential libc6-dev gperf'
   install=false
   for pkg in $pkgs; do
     status="$(dpkg-query -W --showformat='${db:Status-Status}' "$pkg" 2>&1)"
