@@ -291,6 +291,16 @@ make install
 cd ..
 fi
 
+if [ ! -d libXau-1.0.12 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXau-1.0.12.tar.gz libXau.tar.gz
+tar -xf libXau.tar.gz
+cd libXau-1.0.12
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
 if [ ! -d libxcb-1.16 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libxcb-1.16.tar.gz libxcb.tar.gz
 tar -xf libxcb.tar.gz
@@ -356,16 +366,6 @@ if [ ! -d libXrandr-1.5.4 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXrandr-1.5.4.tar.gz libXrandr.tar.gz
 tar -xf libXrandr.tar.gz
 cd libXrandr-1.5.4
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
-cd ..
-fi
-
-if [ ! -d libXau-1.0.11 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXau-1.0.11.tar.gz libXau.tar.gz
-tar -xf libXau.tar.gz
-cd libXau-1.0.11
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
