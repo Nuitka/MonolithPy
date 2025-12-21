@@ -321,6 +321,26 @@ make install
 cd ..
 fi
 
+if [ ! -d libXext-1.3.5 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXext-1.3.5.tar.gz libXext.tar.gz
+tar -xf libXext.tar.gz
+cd libXext-1.3.5
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d scrnsaverproto-1.2.2 ]; then
+download_file https://www.x.org/archive/individual/proto/scrnsaverproto-1.2.2.tar.gz scrnsaverproto.tar.gz
+tar -xf scrnsaverproto.tar.gz
+cd scrnsaverproto-1.2.2
+./configure --prefix=${PREFIX}
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
 if [ ! -d libXScrnSaver-1.2.4 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXScrnSaver-1.2.4.tar.gz libXScrnSaver.tar.gz
 tar -xf libXScrnSaver.tar.gz
@@ -336,16 +356,6 @@ download_file https://xorg.freedesktop.org/releases/individual/lib/libXft-2.3.8.
 tar -xf libXft.tar.gz
 cd libXft-2.3.8
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
-cd ..
-fi
-
-if [ ! -d libXext-1.3.5 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXext-1.3.5.tar.gz libXext.tar.gz
-tar -xf libXext.tar.gz
-cd libXext-1.3.5
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
