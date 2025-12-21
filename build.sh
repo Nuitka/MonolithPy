@@ -219,6 +219,16 @@ make install
 cd ..
 fi
 
+if [ ! -d xcb-proto-1.16.0 ]; then
+download_file https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.16.0.tar.gz xcb-proto.tar.gz
+tar -xf xcb-proto.tar.gz
+cd xcb-proto-1.16.0
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
 if [ ! -d libX11-1.8.7 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libX11-1.8.7.tar.gz libX11.tar.gz
 tar -xf libX11.tar.gz
@@ -258,16 +268,6 @@ find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -i
 ./configure --prefix=${PREFIX} --disable-shared
 make CPPFLAGS="-I${PREFIX}/include -I${PYTHON_BASE}/Include -DBYPASS_MP_EMBED" -j$(nproc --all) install || true
 echo ----- It is normal for fontconfig to fail to build the executables. The libs should be enough. -----
-cd ..
-fi
-
-if [ ! -d xcb-proto-1.16.0 ]; then
-download_file https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.16.0.tar.gz xcb-proto.tar.gz
-tar -xf xcb-proto.tar.gz
-cd xcb-proto-1.16.0
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
 cd ..
 fi
 
