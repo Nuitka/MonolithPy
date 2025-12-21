@@ -229,21 +229,31 @@ make install
 cd ..
 fi
 
-if [ ! -d libX11-1.8.7 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libX11-1.8.7.tar.gz libX11.tar.gz
-tar -xf libX11.tar.gz
-cd libX11-1.8.7
-./configure --prefix=${PREFIX} --disable-shared
+if [ ! -d xextproto-7.3.0 ]; then
+download_file https://www.x.org/archive/individual/proto/xextproto-7.3.0.tar.gz xextproto.tar.gz
+tar -xf xextproto.tar.gz
+cd xextproto-7.3.0
+./configure --prefix=${PREFIX}
 make -j$(nproc --all)
 make install
 cd ..
 fi
 
-if [ ! -d libXScrnSaver-1.2.4 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXScrnSaver-1.2.4.tar.gz libXScrnSaver.tar.gz
-tar -xf libXScrnSaver.tar.gz
-cd libXScrnSaver-1.2.4
-./configure --prefix=${PREFIX} --disable-shared
+if [ ! -d kbproto-1.0.7 ]; then
+download_file https://www.x.org/archive/individual/proto/kbproto-1.0.7.tar.gz kbproto.tar.gz
+tar -xf kbproto.tar.gz
+cd kbproto-1.0.7
+./configure --prefix=${PREFIX}
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d inputproto-2.3.2 ]; then
+download_file https://www.x.org/archive/individual/proto/inputproto-2.3.2.tar.gz inputproto.tar.gz
+tar -xf inputproto.tar.gz
+cd inputproto-2.3.2
+./configure --prefix=${PREFIX}
 make -j$(nproc --all)
 make install
 cd ..
@@ -285,6 +295,26 @@ if [ ! -d libxcb-1.16 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libxcb-1.16.tar.gz libxcb.tar.gz
 tar -xf libxcb.tar.gz
 cd libxcb-1.16
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d libX11-1.8.7 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libX11-1.8.7.tar.gz libX11.tar.gz
+tar -xf libX11.tar.gz
+cd libX11-1.8.7
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d libXScrnSaver-1.2.4 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXScrnSaver-1.2.4.tar.gz libXScrnSaver.tar.gz
+tar -xf libXScrnSaver.tar.gz
+cd libXScrnSaver-1.2.4
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
