@@ -341,6 +341,26 @@ make install
 cd ..
 fi
 
+if [ ! -d randrproto-1.5.0 ]; then
+download_file https://www.x.org/archive/individual/proto/randrproto-1.5.0.tar.gz randrproto.tar.gz
+tar -xf randrproto.tar.gz
+cd randrproto-1.5.0
+./configure --prefix=${PREFIX}
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d renderproto-0.11.1 ]; then
+download_file https://www.x.org/archive/individual/proto/renderproto-0.11.1.tar.gz renderproto.tar.gz
+tar -xf renderproto.tar.gz
+cd renderproto-0.11.1
+./configure --prefix=${PREFIX}
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
 if [ ! -d libXScrnSaver-1.2.4 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXScrnSaver-1.2.4.tar.gz libXScrnSaver.tar.gz
 tar -xf libXScrnSaver.tar.gz
@@ -361,20 +381,20 @@ make install
 cd ..
 fi
 
-if [ ! -d libXrandr-1.5.4 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXrandr-1.5.4.tar.gz libXrandr.tar.gz
-tar -xf libXrandr.tar.gz
-cd libXrandr-1.5.4
+if [ ! -d libXrender-0.9.11 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXrender-0.9.11.tar.gz libXrender.tar.gz
+tar -xf libXrender.tar.gz
+cd libXrender-0.9.11
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
 cd ..
 fi
 
-if [ ! -d libXrender-0.9.11 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXrender-0.9.11.tar.gz libXrender.tar.gz
-tar -xf libXrender.tar.gz
-cd libXrender-0.9.11
+if [ ! -d libXrandr-1.5.4 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXrandr-1.5.4.tar.gz libXrandr.tar.gz
+tar -xf libXrandr.tar.gz
+cd libXrandr-1.5.4
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
