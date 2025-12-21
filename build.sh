@@ -351,17 +351,6 @@ make install
 cd ..
 fi
 
-if [ ! -d libXft-2.3.8 ]; then
-download_file https://xorg.freedesktop.org/releases/individual/lib/libXft-2.3.8.tar.gz libXft.tar.gz
-tar -xf libXft.tar.gz
-cd libXft-2.3.8
-find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
-cd ..
-fi
-
 if [ ! -d libXdmcp-1.1.4 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXdmcp-1.1.4.tar.gz libXdmcp.tar.gz
 tar -xf libXdmcp.tar.gz
@@ -386,6 +375,17 @@ if [ ! -d libXrender-0.9.11 ]; then
 download_file https://xorg.freedesktop.org/releases/individual/lib/libXrender-0.9.11.tar.gz libXrender.tar.gz
 tar -xf libXrender.tar.gz
 cd libXrender-0.9.11
+./configure --prefix=${PREFIX} --disable-shared
+make -j$(nproc --all)
+make install
+cd ..
+fi
+
+if [ ! -d libXft-2.3.8 ]; then
+download_file https://xorg.freedesktop.org/releases/individual/lib/libXft-2.3.8.tar.gz libXft.tar.gz
+tar -xf libXft.tar.gz
+cd libXft-2.3.8
+find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
