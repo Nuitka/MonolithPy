@@ -36,7 +36,7 @@ Windows:
 
 This produces a portable Python installation in the ``output`` folder. It has a ``pip`` and ``setuptools``, but not ``wheel`` out of the box. 
 
-Nuitka-Python supports all of these, though with differences to standard CPython, that make it essentially always compile from source. 
+Nuitka-Python supports all of these, though with differences to standard CPython that make it essentially always compile from source. 
 
 Especially the architecture of
 Nuitka-Python will be different, so binary wheels from PyPI cannot be
