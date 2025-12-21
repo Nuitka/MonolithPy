@@ -40,7 +40,7 @@ Nuitka-Python supports all of these, though with differences to standard CPython
 
 Especially the architecture of
 Nuitka-Python will be different, so binary wheels from PyPI cannot be
-installed, which will make it fallback to compiling from source.
+installed, which will make it fall back to compiling from source.
 
 The ``output`` folder can be moved freely, even to other machines. 
 When you install via ``python.exe -m pip`` however, it will be self-modifying the ``python.exe`` to include the newly installed packages with static linking.
