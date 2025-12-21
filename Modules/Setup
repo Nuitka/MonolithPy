@@ -127,6 +127,7 @@ PYTHONPATH=$(COREPYTHONPATH)
 # detail; also note that *static* or *disabled* cancels this effect):
 
 #*shared*
+*static*
 
 # Modules that should always be present (POSIX and Windows):
 
@@ -211,11 +212,8 @@ zlib  zlibmodule.c -l:libz.a
 #_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lcrypto
 
 # To statically link OpenSSL:
-_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -l:libssl.a \
-    -l:libcrypto.a
-_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
-    -l:libcrypto.a
+_ssl _ssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -l:libssl.a -l:libcrypto.a
+_hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -l:libcrypto.a
 
 # The _tkinter module.
 #
@@ -228,37 +226,7 @@ _hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) \
 # done by the shell's "read" command and it may not be implemented on
 # every system.
 
-# *** Always uncomment this (leave the leading underscore in!):
-_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) \
-# *** Uncomment and edit to reflect where your Tcl/Tk libraries are:
-#	-L/usr/local/lib \
-# *** Uncomment and edit to reflect where your Tcl/Tk headers are:
-#	-I/usr/include/tcl8.6 \
-# *** Uncomment and edit to reflect where your X11 header files are:
-#	-I/usr/X11R6/include \
-# *** Or uncomment this for Solaris:
-#	-I/usr/openwin/include \
-# *** Uncomment and edit for Tix extension only:
-#	-DWITH_TIX -ltix8.1.8.2 \
-# *** Uncomment and edit for BLT extension only:
-#	-DWITH_BLT -I/usr/local/blt/blt8.0-unoff/include -lBLT8.0 \
-# *** Uncomment and edit for PIL (TkImaging) extension only:
-#     (See http://www.pythonware.com/products/pil/ for more info)
-#	-DWITH_PIL -I../Extensions/Imaging/libImaging  tkImaging.c \
-# *** Uncomment and edit for TOGL extension only:
-#	-DWITH_TOGL togl.c \
-# *** Uncomment and edit to reflect your Tcl/Tk versions:
-	-l:libtk8.6.a -l:libtcl8.6.a \
-# *** Uncomment and edit to reflect where your X11 libraries are:
-#	-L/usr/X11R6/lib \
-# *** Or uncomment this for Solaris:
-#	-L/usr/openwin/lib \
-# *** Uncomment these for TOGL extension only:
-#	-lGL -lGLU -lXext -lXmu \
-# *** Uncomment for AIX:
-#	-lld \
-# *** Always uncomment this; X11 libraries to link with:
-	  -l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a
+_tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) -l:libtk8.6.a -l:libtcl8.6.a -l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a
 
 # Some system have -lcurses
 _curses -l:libncursesw.a _cursesmodule.c
@@ -310,6 +278,20 @@ nis
 _ctypes_test
 ossaudiodev
 xxlimited
+-lcrypto
+-lssl
+-ltk8.6
+-lz
+_sqlite3
+_testclinic
+_testclinic_limited
+_testinternalcapi
+_testlimitedcapi
+_uuid
+xxlimited_35
+xxsubtype
+_gdbm
+readline
 #_lzma
 #
 # _sqlite3 _tkinter _curses pyexpat

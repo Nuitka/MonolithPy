@@ -83,10 +83,10 @@ download_file() {
   return 1
 }
 
-if [ ! -d ncurses-6.4 ]; then
-download_file https://ftp.gnu.org/gnu/ncurses/ncurses-6.4.tar.gz ncurses.tar.gz
+if [ ! -d ncurses-6.5 ]; then
+download_file https://ftp.gnu.org/gnu/ncurses/ncurses-6.5.tar.gz ncurses.tar.gz
 tar -xf ncurses.tar.gz
-cd ncurses-6.4
+cd ncurses-6.5
 ./configure --prefix=${PREFIX} --disable-shared --enable-termcap --enable-widec --enable-getcap --without-cxx-binding
 make libs -j$(nproc --all)
 make install.libs install.includes
@@ -342,10 +342,10 @@ make install
 cd ..
 fi
 
-if [ ! -d tcl8.6.13 ]; then
-download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.13/tcl8.6.13-src.tar.gz tcl.tar.gz
+if [ ! -d tcl8.6.15 ]; then
+download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.15/tcl8.6.15-src.tar.gz tcl.tar.gz
 tar -xf tcl.tar.gz
-cd tcl8.6.13
+cd tcl8.6.15
 rm -rf pkgs/tdbc* pkgs/sqlite*
 cd unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads
@@ -364,10 +364,10 @@ make install
 cd ..
 fi
 
-if [ ! -d tk8.6.13 ]; then
-download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.13/tk8.6.13-src.tar.gz tk.tar.gz
+if [ ! -d tk8.6.15 ]; then
+download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.15/tk8.6.15-src.tar.gz tk.tar.gz
 tar -xf tk.tar.gz
-cd tk8.6.13/unix
+cd tk8.6.15/unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads --with-tcl=${PREFIX}/lib
 make -j$(nproc --all) "X11_LIB_SWITCHES=-l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a -l:libbz2.a"
 make install
@@ -432,17 +432,22 @@ make -j $(nproc --all) \
         EXTRA_CFLAGS="-flto -fuse-linker-plugin -fno-fat-lto-objects" \
         profile-opt
 
-make build_all_merge_profile
-
 # Delayed deletion of old installation, to avoid having it not there for testing purposes
 # while compiling, which is slow due to PGO beign applied.
-$ELEVATE rm -rf "$target" && $ELEVATE make install
+$ELEVATE rm -rf "$target" && $ELEVATE make libinstall install
+
+rm pybuilddir.txt
 
 # Make sure to have pip installed, might even remove it afterwards, Debian
 # e.g. doesn't include it.
 $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long_version}/pip.py.bak" && \
     $ELEVATE "$target/bin/python${long_version}" -m ensurepip && \
     $ELEVATE mv "$target/lib/python${long_version}/pip.py.bak" "$target/lib/python${long_version}/pip.py"
+
+# Copy embedded data
+$ELEVATE mv ${PREFIX}/lib/libmp_embed.a "$target/lib/libmp_embed.a"
+
+cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
 
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
@@ -474,5 +479,6 @@ $ELEVATE ln -s base "$target/dependency_libs/xtrans"
 $ELEVATE ln -s base "$target/dependency_libs/xz"
 $ELEVATE ln -s base "$target/dependency_libs/zlib"
 
+find "$target" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs $ELEVATE rm -rf
 
 $ELEVATE "$target/bin/python${long_version}" -m rebuildpython
