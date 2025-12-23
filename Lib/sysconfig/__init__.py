@@ -481,10 +481,11 @@ def _init_config_vars():
         try:
             _init_posix(_CONFIG_VARS)
             orig_deps_prefix = _CONFIG_VARS["CONFIG_ARGS"].split("___ORIG_DEPS_PREFIX=", 2)[1].split("___'", 2)[0]
+            orig_prefix = _CONFIG_VARS['prefix']
             base_deps_location = os.path.join(_PREFIX, "dependency_libs", "base")
             for var in _CONFIG_VARS:
                 if isinstance(_CONFIG_VARS[var], str):
-                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(_CONFIG_VARS['prefix'], _PREFIX).replace(orig_deps_prefix, base_deps_location)
+                    _CONFIG_VARS[var] = _CONFIG_VARS[var].replace(orig_prefix, _PREFIX).replace(orig_deps_prefix, base_deps_location)
         except ModuleNotFoundError:
             pass
 
