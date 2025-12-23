@@ -310,7 +310,7 @@ fi
   PROFILE_TASK='-m test --pgo -x test_json ' \
   MODULE_BUILDTYPE=static \
   ax_cv_c_float_words_bigendian=no \
-  ___ORIG_DEPS_PREFIX=${PREFIX}___
+  "___ORIG_DEPS_PREFIX=${PREFIX}___"
 
 make -j $(sysctl -n hw.ncpu) \
         profile-opt
