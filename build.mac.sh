@@ -62,6 +62,9 @@ then
 fi
 
 mkdir -p ${PREFIX}/lib
+mkdir -p ${PREFIX}/include
+
+cp Include/mp_embed.h ${PREFIX}/include/
 
 # Preparing embedded resources
 mkdir -p Embedded/embed_data/vfs/ssl
