@@ -511,6 +511,9 @@ $ELEVATE rm -rf "$target" && $ELEVATE make libinstall install
 
 rm pybuilddir.txt
 
+# Some things use the existance of this folder as an anchor so lets make srue it exists.
+$ELEVATE mkdir -p "$target/lib/python${long_version}/lib-dynload"
+
 # Make sure to have pip installed, might even remove it afterwards, Debian
 # e.g. doesn't include it.
 $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long_version}/pip.py.bak" && \
@@ -520,7 +523,7 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
 # Copy embedded data
 $ELEVATE mv ${PREFIX}/lib/libmp_embed.a "$target/lib/libmp_embed.a"
 
-cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
+$ELEVATE cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
 
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
