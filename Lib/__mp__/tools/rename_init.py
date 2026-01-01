@@ -1,4 +1,11 @@
-import sys
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import sys, os
+
+sys.path = [os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "site-packages"))]
+
 import time
 
 import __mp__
