@@ -5,6 +5,11 @@ MonolithPy is a fork of CPython (currently based on Python 3.13) that produces
 fully statically linked Python interpreters. It is designed for creating portable,
 self-contained Python distributions.
 
+The primary use-case for MonolithPy is to offer an environment that Nuitka, the
+Python compiler, can be installed into. In this configuration, Nuitka can produce 
+standalone, static binaries for your Python projects. This allow users to benefit
+from stronger code protection and some degree of performance improvement.
+
 Goals
 =====
 
