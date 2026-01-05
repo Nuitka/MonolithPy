@@ -121,7 +121,7 @@ Installing packages works normally, but with important differences:
 What happens:
 
 1. pip downloads the source distribution (wheels are incompatible)
-2. MonolithPy-specific build scripts may be fetched from the packages repo
+2. MonolithPy-specific build scripts may be fetched from the packages repo: https://github.com/Nuitka/MonolithPy-packages
 3. The package is compiled with static linking
 4. ``rebuildpython`` is invoked to relink the interpreter
 5. The new interpreter includes the extension as a builtin module
