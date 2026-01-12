@@ -61,7 +61,7 @@ pip._internal.utils.subprocess.call_subprocess = our_call_subprocess
 import pip._internal.pyproject
 
 load_pyproject_toml_orig = pip._internal.pyproject.load_pyproject_toml
-def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
+def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
     has_pyproject = os.path.isfile(pyproject_toml)
     has_setup = os.path.isfile(setup_py)
 
@@ -82,7 +82,7 @@ def our_load_pyproject_toml(use_pep517, pyproject_toml, setup_py, req_name):
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__mp__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
 
-    result = load_pyproject_toml_orig(use_pep517, pyproject_toml, setup_py, req_name)
+    result = load_pyproject_toml_orig(pyproject_toml, setup_py, req_name)
     if result is None:
         return None
     return pip._internal.pyproject.BuildSystemDetails(
@@ -185,7 +185,6 @@ orig_install = pip._internal.req.req_install.InstallRequirement.install
 
 def install(
     self,
-    global_options=None,
     root=None,
     home=None,
     prefix=None,
@@ -193,7 +192,7 @@ def install(
     use_user_site=False,
     pycompile=True,
 ):
-    orig_install(self, global_options, root, home, prefix, warn_script_location, use_user_site, pycompile)
+    orig_install(self, root, home, prefix, warn_script_location, use_user_site, pycompile)
 
     rebuildpython.run_rebuild()
 
