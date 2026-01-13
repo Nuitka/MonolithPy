@@ -63,6 +63,31 @@ def is_undefined_symbol(symbol_line):
     return ' U ' in symbol_line or symbol_line.strip().startswith('U ')
 
 
+def is_local_symbol(symbol_line):
+    """Check if a symbol line from nm represents a local (non-global) symbol.
+
+    In nm output:
+    - Uppercase letters (T, D, B, etc.) = global symbols
+    - Lowercase letters (t, d, b, etc.) = local symbols
+    - U = undefined (not local, not global)
+    """
+    line = symbol_line.strip()
+    # Skip undefined symbols
+    if ' U ' in symbol_line or line.startswith('U '):
+        return False
+    # Look for the symbol type character (single letter between spaces)
+    # Format is typically: "address type name" or "type name"
+    parts = line.split()
+    if len(parts) >= 2:
+        # The type is usually the second-to-last element before the symbol name
+        # or the first element if there's no address
+        for part in parts[:-1]:  # Exclude the symbol name (last part)
+            if len(part) == 1 and part.isalpha():
+                # Found the type character - lowercase means local
+                return part.islower()
+    return False
+
+
 def extract_archive_subprocess(lib_path, output_dir):
     """
     Extract a static library archive to a directory using subprocess.
