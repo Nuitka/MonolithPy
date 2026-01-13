@@ -632,6 +632,7 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
             defined_symbols = set()
             undefined_symbols = set()
+            local_symbols = set()  # Symbols that are local (not visible outside the object)
             excluded_obj_syms = set()  # Symbols from excluded objects in this library
 
             # Enumerate all object files...
@@ -668,13 +669,17 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                             undefined_symbols.add(sym_name)
                         else:
                             defined_symbols.add(sym_name)
+                            # Track if this is a local symbol (can't cause conflicts, shouldn't be renamed)
+                            if hasattr(platform_module, 'is_local_symbol') and platform_module.is_local_symbol(line):
+                                local_symbols.add(sym_name)
                             # Track symbols from excluded objects
                             if obj_is_excluded:
                                 excluded_obj_syms.add(sym_name)
 
             library_symbols[lib_abs] = {
                 'defined': defined_symbols,
-                'undefined': undefined_symbols
+                'undefined': undefined_symbols,
+                'local': local_symbols
             }
             if excluded_obj_syms:
                 excluded_object_symbols[lib_abs] = excluded_obj_syms
@@ -706,8 +711,17 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                         symbol_references[sym] = set()
                     symbol_references[sym].add(lib_path)
 
+        # Build a map of which libraries have each symbol as local
+        # symbol -> set of lib_paths where it's local
+        symbol_local_in = {}
+        for lib_path, symbols in library_symbols.items():
+            for sym in symbols.get('local', set()):
+                if sym not in symbol_local_in:
+                    symbol_local_in[sym] = set()
+                symbol_local_in[sym].add(lib_path)
+
         # External symbols are those that are:
-        # - Defined in one or more libraries AND referenced by a library that does NOT define it
+        # - Defined GLOBALLY (not local) in one or more libraries AND referenced by a library that does NOT define it
         # - OR match protected symbol patterns
         #
         # Key insight: If a symbol is defined in multiple libraries, it's only external if
@@ -726,6 +740,11 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
         # - Library B references it (but also defines it)
         # - No other library references it
         # Then this is a self-referential pattern and should be treated as internal.
+        #
+        # Local symbol handling: If a symbol is local (lowercase in nm output like 't' instead of 'T'),
+        # it's not visible outside the object file and can't cause conflicts in that library.
+        # But if the same symbol is global in another library, that global version should be renamed.
+        # When building per-library rename maps, we skip renaming local symbols in each library.
         external_symbols = set()
         external_symbol_reasons = {}  # symbol -> list of reasons why it's external
 
@@ -733,7 +752,14 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
 
         for lib_path, symbols in library_symbols.items():
             lib_name = os.path.basename(lib_path)
+            local_syms = symbols.get('local', set())
             for sym in symbols['defined']:
+                # Skip if this symbol is local in THIS library - but it might be global in another
+                # We only skip adding reasons for this library; other libraries with global definitions
+                # will still add their reasons
+                if sym in local_syms:
+                    continue
+
                 reasons = []
 
                 # Check if this symbol is referenced by other libraries (that don't define it)
@@ -894,13 +920,19 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
             if lib_path in excluded_library_set:
                 continue
 
+            # Get local symbols for this library - these should not be renamed
+            local_syms = symbols.get('local', set())
+
             # Map internal symbols (defined in this lib only)
-            # Exclude symbols that are in excluded objects
+            # Exclude symbols that are in excluded objects or are local
             internal_symbols = symbols['defined'] - external_symbols
             lib_excluded_obj_syms = excluded_object_symbols.get(lib_path, set())
             for sym in internal_symbols:
                 # Skip symbols from excluded objects
                 if sym in lib_excluded_obj_syms:
+                    continue
+                # Skip local symbols - they can't cause conflicts and renaming them breaks things
+                if sym in local_syms:
                     continue
                 new_name = f"{sym}_{global_suffix}_{normalize_sym_part(lib_name)}_{lib_hash}"
                 library_rename_maps[lib_path][sym] = new_name
@@ -919,6 +951,9 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                 for defining_lib_path in symbol_definitions[sym]:
                     # Skip if this library is excluded
                     if defining_lib_path in excluded_library_set:
+                        continue
+                    # Skip if this symbol is local in this library - can't be used externally
+                    if sym in library_symbols[defining_lib_path].get('local', set()):
                         continue
                     lib_name = os.path.splitext(os.path.basename(defining_lib_path))[0]
                     hasher = hashlib.md5()

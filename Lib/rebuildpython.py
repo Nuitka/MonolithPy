@@ -23,6 +23,10 @@ if platform.system() == "Windows":
 else:
     interpreter_prefix = sysconfig.get_config_var("prefix")
 
+all_defined_symbols = set()
+library2defined_symbols = {}
+library2undefined_symbols = {}
+
 
 def find_files(directory, pattern):
     for root, dirs, files in os.walk(directory):
@@ -46,12 +50,29 @@ def getPythonInitFunctions(compiler, filename):
         if platform.system() == "Windows" and "32" in platform.architecture()[0]:
             initFunctions = [x[1:] if x.startswith("_") else x for x in initFunctions]
     else:
-        functions = [
-            x.decode("ascii").split(" ")[-1]
+        nm_lines = [
+            x.decode("ascii")
             for x in subprocess.check_output(["nm", filename]).split(
                 os.linesep.encode("ascii")
             )
         ]
+        functions = [
+            x.split(" ")[-1]
+            for x in nm_lines
+        ]
+        undefined = set([
+            x.split(" ")[-1]
+            for x in nm_lines
+            if " u " in x.lower()
+        ])
+        defined = set([
+            x.split(" ")[-1]
+            for x in nm_lines
+            if " u " not in x.lower()
+        ])
+        all_defined_symbols.update(defined)
+        library2defined_symbols[filename] = defined
+        library2undefined_symbols[filename] = undefined - defined
         functions = [x[1:] if x.startswith("_") else x for x in functions]
         initFunctions = [
             x for x in functions if x.startswith("init" if str is bytes else "PyInit_")
@@ -341,6 +362,14 @@ def run_rebuild():
     link_libs = list(set(link_libs))
     library_dirs = list(set(library_dirs))
 
+    # Scan any libraries that haven't been scanned yet for symbol information
+    for lib in link_libs:
+        if lib not in library2defined_symbols and os.path.isfile(lib) and lib.endswith(".a"):
+            try:
+                getPythonInitFunctions(compiler, lib)
+            except Exception:
+                pass  # Ignore errors for libraries we can't scan
+
     print("Generating interpreter sources...")
 
     staticinitheader = """#ifndef Py_STATICINIT_H
@@ -557,11 +586,47 @@ static inline void Py_InitStaticModules(void) {
             macros=macros,
         )
 
+        # GCC/Clang actually require libs to be specified in the right order...
+        # Libraries that USE symbols must come BEFORE libraries that DEFINE them.
+        # We delay a library if it defines symbols that are still needed by unplaced libraries.
+        needed_symbols = set()
+        for lib in link_libs:
+            if lib in library2undefined_symbols:
+                needed_symbols.update((library2undefined_symbols[lib] - library2defined_symbols.get(lib, set())) & all_defined_symbols)
+
+        ordered_link_libs = []
+        remaining_libs = list(link_libs)
+
+        made_progress = True
+        while remaining_libs and made_progress:
+            made_progress = False
+            for link_lib in remaining_libs[:]:
+                if link_lib in library2defined_symbols:
+                    # Check if this library defines symbols still needed by remaining libraries
+                    defines_needed = library2defined_symbols[link_lib] & needed_symbols
+                    if defines_needed:
+                        # This library defines symbols needed by others, delay it
+                        continue
+
+                # Place this library
+                ordered_link_libs.append(link_lib)
+                remaining_libs.remove(link_lib)
+                made_progress = True
+
+                # Remove this library's undefined symbols from needed_symbols
+                if link_lib in library2undefined_symbols:
+                    lib_needs = (library2undefined_symbols[link_lib] - library2defined_symbols.get(link_lib, set())) & all_defined_symbols
+                    needed_symbols -= lib_needs
+
+        # Add any remaining libs at the end
+        for lib in remaining_libs:
+            ordered_link_libs.append(lib)
+
         compiler.link_executable(
             objects=[os.path.join(sysconfig.get_config_var("prefix"), "python.o")],
             output_progname="python",
             output_dir=build_dir,
-            libraries=link_libs,
+            libraries=ordered_link_libs,
             library_dirs=library_dirs,
             extra_preargs=sysconfig.get_config_var("LDFLAGS").split()
                           + [
@@ -652,11 +717,47 @@ static inline void Py_InitStaticModules(void) {
                 final_extra_link_args += [extra_args_combined[i]]
                 i += 1
 
+        # GCC/Clang actually require libs to be specified in the right order...
+        # Libraries that USE symbols must come BEFORE libraries that DEFINE them.
+        # We delay a library if it defines symbols that are still needed by unplaced libraries.
+        needed_symbols = set()
+        for lib in link_libs:
+            if lib in library2undefined_symbols:
+                needed_symbols.update((library2undefined_symbols[lib] - library2defined_symbols.get(lib, set())) & all_defined_symbols)
+
+        ordered_link_libs = []
+        remaining_libs = list(link_libs)
+
+        made_progress = True
+        while remaining_libs and made_progress:
+            made_progress = False
+            for link_lib in remaining_libs[:]:
+                if link_lib in library2defined_symbols:
+                    # Check if this library defines symbols still needed by remaining libraries
+                    defines_needed = library2defined_symbols[link_lib] & needed_symbols
+                    if defines_needed:
+                        # This library defines symbols needed by others, delay it
+                        continue
+
+                # Place this library
+                ordered_link_libs.append(link_lib)
+                remaining_libs.remove(link_lib)
+                made_progress = True
+
+                # Remove this library's undefined symbols from needed_symbols
+                if link_lib in library2undefined_symbols:
+                    lib_needs = (library2undefined_symbols[link_lib] - library2defined_symbols.get(link_lib, set())) & all_defined_symbols
+                    needed_symbols -= lib_needs
+
+        # Add any remaining libs at the end
+        for lib in remaining_libs:
+            ordered_link_libs.append(lib)
+
         compiler.link_executable(
             objects=[os.path.join(sysconfig.get_config_var("prefix"), "python.o")],
             output_progname="python",
             output_dir=build_dir,
-            libraries=link_libs,
+            libraries=ordered_link_libs,
             library_dirs=library_dirs,
             extra_preargs=["-g", "-Xlinker"],
             extra_midargs=final_extra_link_args,
