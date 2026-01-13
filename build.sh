@@ -511,8 +511,9 @@ $ELEVATE rm -rf "$target" && $ELEVATE make libinstall install
 
 rm pybuilddir.txt
 
-# Some things use the existance of this folder as an anchor so lets make srue it exists.
+# Some things use the existence of this folder as an anchor so lets make sure it exists.
 $ELEVATE mkdir -p "$target/lib/python${long_version}/lib-dynload"
+$ELEVATE touch "$target/lib/python${long_version}/lib-dynload/.empty"
 
 # Make sure to have pip installed, might even remove it afterwards, Debian
 # e.g. doesn't include it.
