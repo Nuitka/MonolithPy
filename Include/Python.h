@@ -5,10 +5,10 @@
 #ifndef Py_PYTHON_H
 #define Py_PYTHON_H
 
-// Since this is a "meta-include" file, "#ifdef __cplusplus / extern "C" {"
-// is not needed.
-
 #include "mp_embed.h"
+
+// This seems to be needed for better stability on windows when embedding.
+#define PYBIND11_SIMPLE_GIL_MANAGEMENT
 
 // Since this is a "meta-include" file, no #ifdef __cplusplus / extern "C" {
 
