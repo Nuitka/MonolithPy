@@ -302,16 +302,32 @@ def run_rebuild():
             os.path.join(sysconfig.get_config_var("prefix"), "dependency_libs", "base", "lib"),
         ]
 
-    # Scrape all available libs from the libs directory. We will let the linker worry about filtering out extra symbols.
-    for file in find_files(
-        sysconfig.get_config_var("prefix"),
-        "*.lib" if platform.system() == "Windows" else "*.a",
-    ):
-        if "interpreter_build" in file:
-            continue
-        if __mp__.getToolsInstallDir() in file:
-            continue
-        link_libs.append(file)
+    # Scrape all available libs that we can find. We will let the linker worry about filtering out extra symbols.
+    lib_scan_roots = [sysconfig.get_config_var("prefix")]
+
+    # Also scan any pip build environment roots found in sys.path.
+    for path in sys.path:
+        if "pip-build-env-" in path:
+            # Extract the build env root (e.g., .../pip-build-env-XXXXXXXX/overlay)
+            # and scan from the site-packages level
+            idx = path.find("pip-build-env-")
+            if idx >= 0:
+                # Find the overlay directory
+                build_env_path = path[:idx + len("pip-build-env-") + 8]  # include the random suffix
+                overlay_path = os.path.join(build_env_path, "overlay")
+                if os.path.isdir(overlay_path) and overlay_path not in lib_scan_roots:
+                    lib_scan_roots.append(overlay_path)
+
+    for scan_root in lib_scan_roots:
+        for file in find_files(
+            scan_root,
+            "*.lib" if platform.system() == "Windows" else "*.a",
+        ):
+            if "interpreter_build" in file:
+                continue
+            if __mp__.getToolsInstallDir() in file:
+                continue
+            link_libs.append(file)
 
     for _name, path in foundLibs.items():
         link_libs += [path]
