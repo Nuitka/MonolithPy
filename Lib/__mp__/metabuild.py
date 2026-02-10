@@ -12,7 +12,10 @@ class ManagedBackend():
         with open(os.path.join("..", "mp_script.json")) as f:
             metadata = json.load(f)
         package_dir_name = os.path.basename(os.getcwd())
-        package_name = package_dir_name[0:package_dir_name.rfind("_")]
+        if "_" in package_dir_name:
+            package_name = package_dir_name[0:package_dir_name.rfind("_")]
+        else:
+            package_name = package_dir_name
         package_metadata = metadata[package_name]
         with open(os.path.join(metadata_directory, "METADATA"), 'w') as f:
             f.write("Metadata-Version: 2.1\n")
@@ -33,7 +36,10 @@ class ManagedBackend():
         with open(os.path.join("..", "mp_script.json")) as f:
             metadata = json.load(f)
         package_dir_name = os.path.basename(os.getcwd())
-        package_name = package_dir_name[0:package_dir_name.rfind("_")]
+        if "_" in package_dir_name:
+            package_name = package_dir_name[0:package_dir_name.rfind("_")]
+        else:
+            package_name = package_dir_name
         package_metadata = metadata[package_name]
 
         return __mp__.packaging.build_package(package_metadata['name'], package_metadata['version'], package_metadata['script_metadata'], wheel_directory)
