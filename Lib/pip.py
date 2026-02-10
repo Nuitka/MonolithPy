@@ -70,7 +70,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
         with open(os.path.join(os.path.dirname(pyproject_toml), "..", "mp_script.json"), 'r') as f:
             data = json.load(f)
 
-        package_name = re.split(r'[><= ]', req_name, maxsplit=1)[0]
+        package_name = re.split(r'[><=! ]', req_name, maxsplit=1)[0]
         if package_name in data:
             package_data = data[package_name]
 
@@ -206,9 +206,12 @@ import pip._vendor.pkg_resources
 orig_prepare_distribution = pip._internal.resolution.resolvelib.candidates.LinkCandidate._prepare_distribution
 
 def _prepare_distribution(self):
-    try:
-        build_script = __mp__.packaging.find_build_script_for_package(self.name, self.version.public)
-    except:
+    name = self._name
+    version = self._version.public if self._version is not None else None
+
+    if name is not None:
+        build_script = __mp__.packaging.find_build_script_for_package(name, version)
+    else:
         build_script = None
 
     if build_script is not None:
@@ -218,9 +221,9 @@ def _prepare_distribution(self):
                 data = json.load(f)
         except:
             pass
-        data[self.name] = {
-                "name": self.name,
-                "version": self.version.public,
+        data[name] = {
+                "name": name,
+                "version": version,
                 "script_metadata": build_script
             }
         with open(os.path.join(self._factory.preparer.build_dir, 'mp_script.json'), 'w') as f:
