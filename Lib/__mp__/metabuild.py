@@ -2,6 +2,7 @@ import os
 import json
 import setuptools.build_meta
 import pip._vendor.pkg_resources as pkg_resources
+from email.message import Message
 
 import __mp__.packaging
 
@@ -17,13 +18,18 @@ class ManagedBackend():
         else:
             package_name = package_dir_name
         package_metadata = metadata[package_name]
+        msg = Message()
+        msg.add_header("Metadata-Version", "2.1")
+        msg.add_header("Name", package_metadata['name'])
+        msg.add_header("Version", package_metadata['version'])
+        if 'dependencies' in package_metadata['script_metadata']:
+            for dependency in package_metadata['script_metadata']['dependencies']:
+                msg.add_header("Requires-Dist", f"mpy-dep-{dependency}")
+        if 'dist_requires' in package_metadata['script_metadata']:
+            for dependency in package_metadata['script_metadata']['dist_requires']:
+                msg.add_header("Requires-Dist", dependency)
         with open(os.path.join(metadata_directory, "METADATA"), 'w') as f:
-            f.write("Metadata-Version: 2.1\n")
-            f.write(f"Name: {package_metadata['name']}\n")
-            f.write(f"Version: {package_metadata['version']}\n")
-            if 'dist_requires' in package_metadata['script_metadata']:
-                for dependency in package_metadata['script_metadata']['dist_requires']:
-                    f.write(f"Requires-Dist: {dependency}\n")
+            f.write(msg.as_string())
 
         return "."
 
