@@ -1681,6 +1681,144 @@ class ZipFile:
         with self.open(name, "r", pwd) as fp:
             return fp.read()
 
+    def read_batch(self, names):
+        """Read multiple files from the archive efficiently.
+
+        Returns a dict mapping each name (or ZipInfo) to its decompressed
+        bytes.  This is significantly faster than calling read() or open()
+        in a loop for archives with many small files because it:
+
+        * Sorts entries by their offset so the underlying file is read
+          sequentially (better I/O patterns).
+        * Reads each entry's local header + compressed payload with
+          minimal syscalls, bypassing the per-file _SharedFile /
+          ZipExtFile / BufferedIOBase object creation overhead.
+        * Decompresses and CRC-checks each entry in a tight loop.
+
+        Encrypted entries and entries with unsupported flags are
+        transparently handled by falling back to the regular open() path.
+
+        *names* is an iterable of file names (str) or ZipInfo objects.
+        """
+        if not self.fp:
+            raise ValueError(
+                "Attempt to use ZIP archive that was already closed")
+        if self._writing:
+            raise ValueError("Can't read from the ZIP file while there "
+                    "is an open writing handle on it. "
+                    "Close the writing handle before trying to read.")
+
+        # Resolve all names to ZipInfo objects and remember original keys
+        entries = []  # list of (original_name, zinfo)
+        for name in names:
+            if isinstance(name, ZipInfo):
+                entries.append((name, name))
+            else:
+                entries.append((name, self.getinfo(name)))
+
+        # Sort by header_offset for sequential I/O
+        entries.sort(key=lambda pair: pair[1].header_offset)
+
+        result = {}
+        fp = self.fp
+
+        for original_name, zinfo in entries:
+            # Fall back to regular open() for encrypted or patched entries
+            if (zinfo.flag_bits & _MASK_ENCRYPTED or
+                zinfo.flag_bits & _MASK_COMPRESSED_PATCH or
+                zinfo.flag_bits & _MASK_STRONG_ENCRYPTION):
+                with self.open(zinfo, "r") as f:
+                    result[original_name] = f.read()
+                continue
+
+            # Read local file header directly from the underlying file
+            with self._lock:
+                fp.seek(zinfo.header_offset)
+                fheader = fp.read(sizeFileHeader)
+                if len(fheader) != sizeFileHeader:
+                    raise BadZipFile("Truncated file header")
+                fheader = struct.unpack(structFileHeader, fheader)
+                if fheader[_FH_SIGNATURE] != stringFileHeader:
+                    raise BadZipFile("Bad magic number for file header")
+
+                fname_len = fheader[_FH_FILENAME_LENGTH]
+                extra_len = fheader[_FH_EXTRA_FIELD_LENGTH]
+
+                # Skip past filename and extra field to reach compressed data
+                # Read filename for validation
+                fname = fp.read(fname_len)
+                if extra_len:
+                    fp.seek(extra_len, os.SEEK_CUR)
+
+                # Validate filename matches central directory
+                if fheader[_FH_GENERAL_PURPOSE_FLAG_BITS] & _MASK_UTF_FILENAME:
+                    fname_str = fname.decode("utf-8")
+                else:
+                    fname_str = fname.decode(
+                        self.metadata_encoding or "cp437")
+                if fname_str != zinfo.orig_filename:
+                    raise BadZipFile(
+                        'File name in directory %r and header %r differ.'
+                        % (zinfo.orig_filename, fname))
+
+                # Check for overlapping entries (zip bomb detection)
+                if (zinfo._end_offset is not None and
+                    fp.tell() + zinfo.compress_size > zinfo._end_offset):
+                    if zinfo._end_offset == zinfo.header_offset:
+                        import warnings
+                        warnings.warn(
+                            f"Overlapped entries: "
+                            f"{zinfo.orig_filename!r} "
+                            f"(possible zip bomb)",
+                            skip_file_prefixes=(
+                                os.path.dirname(__file__),))
+                    else:
+                        raise BadZipFile(
+                            f"Overlapped entries: "
+                            f"{zinfo.orig_filename!r} "
+                            f"(possible zip bomb)")
+
+                # Read all compressed data in one call
+                if zinfo.compress_size > 0:
+                    raw_data = fp.read(zinfo.compress_size)
+                    if len(raw_data) != zinfo.compress_size:
+                        raise BadZipFile(
+                            "Truncated data for %r" % zinfo.orig_filename)
+                else:
+                    raw_data = b''
+
+            # Decompress outside the lock
+            if zinfo.compress_type == ZIP_STORED:
+                data = raw_data
+            elif zinfo.compress_type == ZIP_DEFLATED:
+                data = zlib.decompress(raw_data, -15)
+            elif zinfo.compress_type == ZIP_BZIP2:
+                data = bz2.decompress(raw_data)
+            elif zinfo.compress_type == ZIP_LZMA:
+                data = LZMADecompressor().decompress(raw_data)
+            else:
+                descr = compressor_names.get(zinfo.compress_type)
+                if descr:
+                    raise NotImplementedError(
+                        "compression type %d (%s)"
+                        % (zinfo.compress_type, descr))
+                else:
+                    raise NotImplementedError(
+                        "compression type %d" % zinfo.compress_type)
+
+            # Truncate to declared file_size (safety)
+            data = data[:zinfo.file_size]
+
+            # CRC check
+            if hasattr(zinfo, 'CRC'):
+                if crc32(data) != zinfo.CRC:
+                    raise BadZipFile(
+                        "Bad CRC-32 for file %r" % zinfo.orig_filename)
+
+            result[original_name] = data
+
+        return result
+
     def open(self, name, mode="r", pwd=None, *, force_zip64=False):
         """Return file-like object for 'name'.
 
@@ -2018,6 +2156,74 @@ class ZipFile:
         with self._lock:
             with self.open(zinfo, mode='w') as dest:
                 dest.write(data)
+
+    def write_batch(self, entries):
+        """Write multiple files to the archive efficiently.
+
+        entries is a list of (zinfo, data) tuples where zinfo is a ZipInfo
+        instance and data is bytes.
+
+        This method is faster than calling writestr() in a loop because it:
+        - Pre-computes CRC32 and compressed data before writing
+        - Writes complete headers with correct CRC/sizes (no seek-back needed)
+        - Avoids creating _ZipWriteFile objects per entry
+        - Acquires the lock only once for the entire batch
+        """
+        if not self.fp:
+            raise ValueError(
+                "Attempt to write to ZIP archive that was already closed")
+        if self._writing:
+            raise ValueError(
+                "Can't write to ZIP archive while an open writing handle exists.")
+
+        # Pre-process all entries: compute CRC32 and compress data
+        prepared = []
+        for zinfo, data in entries:
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+
+            zinfo.file_size = len(data)
+            zinfo.CRC = crc32(data)
+            zinfo.flag_bits = 0x00
+            if zinfo.compress_type == ZIP_LZMA:
+                zinfo.flag_bits |= _MASK_COMPRESS_OPTION_1
+            if not zinfo.external_attr:
+                zinfo.external_attr = 0o600 << 16
+
+            compressor = _get_compressor(zinfo.compress_type,
+                                         zinfo.compress_level
+                                         if hasattr(zinfo, 'compress_level')
+                                         else None)
+            if compressor:
+                compressed = compressor.compress(data) + compressor.flush()
+                zinfo.compress_size = len(compressed)
+            else:
+                compressed = data
+                zinfo.compress_size = zinfo.file_size
+
+            zip64 = zinfo.file_size > ZIP64_LIMIT or zinfo.compress_size > ZIP64_LIMIT
+            if not self._allowZip64 and zip64:
+                raise LargeZipFile("Filesize would require ZIP64 extensions")
+
+            prepared.append((zinfo, compressed, zip64))
+
+        # Write all entries sequentially under a single lock
+        with self._lock:
+            for zinfo, compressed, zip64 in prepared:
+                self._writecheck(zinfo)
+                self._didModify = True
+
+                if self._seekable:
+                    self.fp.seek(self.start_dir)
+                zinfo.header_offset = self.fp.tell()
+
+                # Write header with correct CRC and sizes already filled in
+                self.fp.write(zinfo.FileHeader(zip64))
+                self.fp.write(compressed)
+
+                self.start_dir = self.fp.tell()
+                self.filelist.append(zinfo)
+                self.NameToInfo[zinfo.filename] = zinfo
 
     def mkdir(self, zinfo_or_directory_name, mode=511):
         """Creates a directory inside the zip archive."""

@@ -28,6 +28,12 @@ import ensurepip
 builtin_packages = ensurepip._get_packages()
 
 
+# Use our own pypi proxy at the default to prefer our wheels.
+import pip._internal.models.index
+pip._internal.models.index.PyPI = pip._internal.models.index.PackageIndex(
+    "https://pip-mpy.ohrtech.net/main/", file_storage_domain="assets-mpy.ohrtech.net")
+
+
 import pip._internal.utils.subprocess
 
 call_subprocess_orig = pip._internal.utils.subprocess.call_subprocess
@@ -66,8 +72,18 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
     has_setup = os.path.isfile(setup_py)
 
     # We will be taking over the build process.
-    if not req_name.startswith("file://") and os.path.isfile(os.path.join(os.path.dirname(pyproject_toml), "..", "mp_script.json")):
-        with open(os.path.join(os.path.dirname(pyproject_toml), "..", "mp_script.json"), 'r') as f:
+    # mp_script.json is written to build_dir. pyproject.toml may be one level deeper
+    # (flat sdist: build_dir/pkg_hash/pyproject.toml) or two levels deeper
+    # (sdist with top-level dir: build_dir/pkg_hash/pkg-ver/pyproject.toml).
+    _pyproject_dir = os.path.dirname(pyproject_toml)
+    _mp_script_path = None
+    for _up in ("..", os.path.join("..", "..")):
+        _candidate = os.path.join(_pyproject_dir, _up, "mp_script.json")
+        if os.path.isfile(_candidate):
+            _mp_script_path = os.path.normpath(_candidate)
+            break
+    if not req_name.startswith("file://") and _mp_script_path is not None:
+        with open(_mp_script_path, 'r') as f:
             data = json.load(f)
 
         package_name = re.split(r'[><=! ]', req_name, maxsplit=1)[0]
@@ -79,6 +95,12 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
                 requires += package_data['script_metadata']['build_requires']
             if 'dist_requires' in package_data['script_metadata']:
                 requires += package_data['script_metadata']['dist_requires']
+            if 'dependencies' in package_data['script_metadata']:
+                requires += [f"mpy-dep-{x}" for x in package_data['script_metadata']['dependencies']]
+            if 'build_tools' in package_data['script_metadata']:
+                requires += [f"mpy-tool-{x}" for x in package_data['script_metadata']['build_tools']]
+            if "mpy-tool-clang" not in requires:
+                requires.append("mpy-tool-clang")
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__mp__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
 
@@ -115,6 +137,12 @@ def SourceDistribution_get_build_requires_wheel(self):
             requires += our_source['script_metadata']['build_requires']
         if 'dist_requires' in our_source['script_metadata']:
             requires += our_source['script_metadata']['dist_requires']
+        if 'dependencies' in our_source['script_metadata']:
+            requires += [f"mpy-dep-{x}" for x in our_source['script_metadata']['dependencies']]
+        if 'build_tools' in our_source['script_metadata']:
+            requires += [f"mpy-tool-{x}" for x in our_source['script_metadata']['build_tools']]
+        if "mpy-tool-clang" not in requires:
+            requires.append("mpy-tool-clang")
         return requires
 
     return orig_SourceDistribution_get_build_requires_wheel(self)
@@ -143,6 +171,11 @@ class PackageFinder(_PackageFinder):
             return [InstallationCandidate(
                 project_name, pkg_version, Link(our_uri)
             )]
+
+        if project_name.startswith("mpy-tool-"):
+            return __mp__.packaging.get_sources_for_build_tool(project_name[len("mpy-tool-"):])
+        if project_name.startswith("mpy-dep-"):
+            return __mp__.packaging.get_sources_for_dependency(project_name[len("mpy-dep-"):])
 
         base_candidates = _PackageFinder.find_all_candidates(self, project_name)
 
@@ -219,7 +252,7 @@ def _prepare_distribution(self):
         try:
             with open(os.path.join(self._factory.preparer.build_dir, 'mp_script.json'), 'r') as f:
                 data = json.load(f)
-        except:
+        except FileNotFoundError:
             pass
         data[name] = {
                 "name": name,
@@ -241,7 +274,6 @@ def our_generic_abi():
     return [pip._vendor.packaging.tags._normalize_string(sysconfig.get_config_var("SOABI"))]
 
 pip._vendor.packaging.tags._generic_abi = our_generic_abi
-
 
 import pip._vendor.distlib.scripts
 

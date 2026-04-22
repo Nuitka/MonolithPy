@@ -10,6 +10,9 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+from wheel.wheelfile import WheelFile
+from email import message_from_bytes
+from email.message import Message
 
 
 def getDependencyInstallDir():
@@ -296,6 +299,122 @@ def run_with_output(*args, **kwargs):
     return output
 
 
+def get_wheel_tag():
+    import packaging.tags
+    return str(next(packaging.tags.sys_tags()))
+
+
+def get_wheel_name(pkg, version):
+    import packaging.utils
+    return f"{packaging.utils.canonicalize_name(pkg).replace('-', '_')}-{version}-{get_wheel_tag()}.whl"
+
+
+def add_wheel_files(wheel_file, target_path, *file_globs, **kwargs):
+    """
+    Adds files matching glob patterns to the wheel's installation prefix.
+
+    Args:
+        wheel_file (wheel.wheelfile.WheelFile): An open WheelFile object.
+        target_path (str): The specific folder inside <prefix> where files should go.
+                           Example: 'dependency_libs/mylib'
+        *file_globs: One or more glob patterns for source files (e.g., 'libs/*.lib').
+        base_dir (str, optional): If provided and a matched file path starts with
+                                  base_dir, the relative path from base_dir is
+                                  preserved in the wheel instead of just the basename.
+    """
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    # 1. Derive the .data directory name from the wheel filename
+    distribution_namever = wheel_file.parsed_filename.group('namever')
+    data_dir_root = f"{distribution_namever}.data/data"
+
+    # 2. Collect all (source_file, arcname) pairs
+    file_entries = []
+
+    def _collect_file(source_file, relative_base=None):
+        destination_filename = os.path.basename(source_file)
+        effective_base = base_dir if relative_base is None else relative_base
+        if effective_base is not None and source_file.startswith(effective_base):
+            destination_filename = source_file[len(effective_base) + 1:]
+        arcname = f"{data_dir_root}/{target_path}/{destination_filename}".replace("\\", "/")
+        file_entries.append((source_file, arcname))
+
+    for file_glob in file_globs:
+        matched_file_count = 0
+        for match in glob.glob(file_glob, recursive=True):
+            if os.path.isdir(match):
+                effective_base = base_dir if base_dir is not None else os.path.dirname(match)
+                for dirpath, dirnames, filenames in os.walk(match):
+                    for filename in filenames:
+                        full_path = os.path.join(dirpath, filename)
+                        _collect_file(full_path, relative_base=effective_base)
+                        matched_file_count += 1
+            else:
+                _collect_file(match)
+                matched_file_count += 1
+
+        if matched_file_count == 0:
+            my_print(f"WARNING: No files matched glob '{file_glob}'", style="yellow")
+
+    # 3. Use batch write if available and there are enough files to benefit
+    if hasattr(wheel_file, 'write_batch') and len(file_entries) > 1:
+        wheel_file.write_batch(file_entries)
+    else:
+        for source_file, arcname in file_entries:
+            wheel_file.write(source_file, arcname=arcname)
+
+
+def add_wheel_dep_include(wheel_file, dependency_name, *file_globs, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    target_path = f"dependency_libs/{dependency_name}/include"
+    add_wheel_files(wheel_file, target_path, *file_globs, base_dir=base_dir)
+
+
+def add_wheel_dep_libs(wheel_file, dependency_name, *file_globs, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    target_path = f"dependency_libs/{dependency_name}/lib"
+    add_wheel_files(wheel_file, target_path, *file_globs, base_dir=base_dir)
+
+
+def add_wheel_build_tool(wheel_file, tool_name, *file_globs, **kwargs):
+    base_dir = kwargs.pop("base_dir", None)
+    assert not kwargs
+
+    target_path = f"build_tools/{tool_name}"
+    add_wheel_files(wheel_file, target_path, *file_globs, base_dir=base_dir)
+
+
+def add_wheel_manifest(wheelfile, package, version):
+    # Write the WHEEL file
+    wheel_message = Message()
+    wheel_message.add_header("Wheel-Version", "1.0")
+    wheel_message.add_header("Generator", "wheel mpy")
+    wheel_message.add_header("Root-Is-Purelib", "false")
+    wheel_message.add_header("Tag", get_wheel_tag())
+
+    wheelfile.writestr(
+        f"{wheelfile.dist_info_path}/WHEEL",
+        wheel_message.as_string().encode("utf-8"),
+    )
+
+    # Write the METADATA file
+    wheel_message = Message()
+    wheel_message.add_header("Metadata-Version", "2.3")
+    wheel_message.add_header("Name", package)
+    wheel_message.add_header("Version", version)
+    wheel_message.set_payload(f"{package} {version}")
+
+    wheelfile.writestr(
+        f"{wheelfile.dist_info_path}/METADATA",
+        wheel_message.as_string().encode("utf-8"),
+    )
+
+
 def install_files(dst, *files, **kwargs):
     base_dir = kwargs.pop("base_dir", None)
     executable = kwargs.pop("executable", None)
@@ -349,14 +468,70 @@ def install_build_tool(tool_name, *files, **kwargs):
     install_files(dependency_location, *files, base_dir=base_dir, executable=True, ignore_errors=ignore_errors)
 
 
+def get_pip_base_path():
+    for path in sys.path:
+        if os.path.sep + "pip-build-env-" in path and os.path.sep + "overlay" + os.path.sep in path:
+            return path[:path.index(os.path.sep + "overlay" + os.path.sep) + 8]
+    return None
+
+
+def get_all_pip_base_paths():
+    import tempfile
+
+    seen = set()
+    paths = []
+
+    def _add_overlay(overlay_path):
+        normalized = os.path.normpath(overlay_path)
+        if normalized not in seen and os.path.isdir(normalized):
+            seen.add(normalized)
+            paths.append(normalized)
+
+    # Check sys.path and PYTHONPATH env var
+    candidate_paths = list(sys.path)
+    for env_path in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        if env_path:
+            candidate_paths.append(env_path)
+    for path in candidate_paths:
+        normalized = path.replace("/", os.sep)
+        sep = os.sep
+        marker = sep + "pip-build-env-"
+        overlay_marker = sep + "overlay" + sep
+        if marker in normalized and overlay_marker in normalized:
+            base = normalized[:normalized.index(overlay_marker) + len(overlay_marker) - 1]
+            _add_overlay(base)
+
+    # Also scan the system temp dir — outer pip overlays are visible here even if not in sys.path
+    try:
+        tmpdir = tempfile.gettempdir()
+        for entry in os.listdir(tmpdir):
+            if entry.startswith("pip-build-env-"):
+                overlay = os.path.join(tmpdir, entry, "overlay")
+                _add_overlay(overlay)
+    except Exception:
+        pass
+
+    return paths
+
+
 def find_build_tool_exe(tool_name, exe):
     if os.name != "nt" and tool_name == "patch":
         return "patch"
 
-    return (
-        glob.glob(os.path.join(getToolsInstallDir(), tool_name, exe))
-        + glob.glob(os.path.join(getToolsInstallDir(), tool_name, "bin", exe))
-    )[0]
+    extra_paths = tuple()
+    for base_path in get_all_pip_base_paths():
+        extra_paths += (os.path.join(base_path, "build_tools", tool_name, exe),
+                        os.path.join(base_path, "build_tools", tool_name, "bin", exe))
+
+    extra_paths += (os.path.join(getToolsInstallDir(), tool_name, exe),
+                   os.path.join(getToolsInstallDir(), tool_name, "bin", exe))
+
+    for possible_path in extra_paths:
+        glob_result = glob.glob(possible_path)
+        if glob_result:
+            return glob_result[0]
+
+    raise Exception(f"Could not find build tool {tool_name} executable {exe} in {extra_paths}")
 
 
 def run_build_tool_exe(tool_name, exe, *args, **kwargs):
@@ -380,14 +555,23 @@ def apply_patch(patch_file, directory):
 
 
 def find_dep_root(dep_name):
+    base_path = get_pip_base_path()
+    if base_path and os.path.isdir(os.path.join(base_path, "dependency_libs", dep_name)):
+        return os.path.join(base_path, "dependency_libs", dep_name)
     return os.path.join(getDependencyInstallDir(), dep_name)
 
 
 def find_dep_include(dep_name):
+    base_path = get_pip_base_path()
+    if base_path and os.path.isdir(os.path.join(base_path, "dependency_libs", dep_name)):
+        return os.path.join(base_path, "dependency_libs", dep_name, "include")
     return os.path.join(getDependencyInstallDir(), dep_name, "include")
 
 
 def find_dep_libs(dep_name):
+    base_path = get_pip_base_path()
+    if base_path and os.path.isdir(os.path.join(base_path, "dependency_libs", dep_name)):
+        return os.path.join(base_path, "dependency_libs", dep_name, "lib")
     return os.path.join(getDependencyInstallDir(), dep_name, "lib")
 
 
@@ -1221,3 +1405,106 @@ def analyze_and_rename_library_symbols(root_folder, global_suffix, library_patte
                 my_print(f"Cleaned up extraction directory", style="blue")
             except Exception as e:
                 my_print(f"Warning: Failed to clean up extraction directory: {e}", style="yellow")
+
+
+def fix_wheel_metadata(wheel_path):
+    """Fix folded RFC 5322 continuation lines in a wheel's own .dist-info/METADATA file."""
+    import hashlib, base64, csv, io, zipfile, tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fixed_path = os.path.join(tmpdir, os.path.basename(wheel_path))
+        files_data = {}
+        # Only the top-level .dist-info/METADATA (exactly one path component before /METADATA)
+        dist_info_metadata_key = None
+        with zipfile.ZipFile(wheel_path, 'r') as zin:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                parts = item.filename.split('/')
+                if len(parts) == 2 and parts[0].endswith('.dist-info') and parts[1] == 'METADATA':
+                    dist_info_metadata_key = item.filename
+                    text = data.decode('utf-8')
+                    text = re.sub(r'\r?\n[ \t]+', ' ', text)
+                    text = re.sub(r'^(Requires-Dist: [^;\n]+);[ \t]*$', r'\1', text, flags=re.MULTILINE)
+                    data = text.encode('utf-8')
+                files_data[item.filename] = (item, data)
+        record_key = next((f for f in files_data if f.endswith('/RECORD') or f == 'RECORD'), None)
+        if record_key and dist_info_metadata_key:
+            record_item, record_data = files_data[record_key]
+            rows = list(csv.reader(io.StringIO(record_data.decode('utf-8'))))
+            for i, row in enumerate(rows):
+                if row and row[0] == dist_info_metadata_key:
+                    new_data = files_data[dist_info_metadata_key][1]
+                    digest = base64.urlsafe_b64encode(hashlib.sha256(new_data).digest()).rstrip(b'=').decode()
+                    rows[i] = [row[0], 'sha256=' + digest, str(len(new_data))]
+            buf = io.StringIO()
+            csv.writer(buf).writerows(rows)
+            files_data[record_key] = (record_item, buf.getvalue().encode('utf-8'))
+        with zipfile.ZipFile(fixed_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for fname, (item, data) in files_data.items():
+                zout.writestr(item, data)
+        shutil.copy(fixed_path, wheel_path)
+
+
+def add_wheel_requirements(wheel_path, new_requirements):
+    """
+    Adds extra requirements to a wheel file, replacing it in-place.
+    """
+
+    # Write to a temporary file next to the original, then replace it.
+    # Must keep the .whl extension since WheelFile validates the filename.
+    base, ext = os.path.splitext(wheel_path)
+    tmp_path = base + ".tmp" + ext
+
+    try:
+        # 1. Open the source wheel for reading
+        with WheelFile(wheel_path, 'r') as wf_in:
+
+            # 2. Open the temporary wheel for writing
+            # WheelFile automatically calculates hashes and writes the RECORD file on exit
+            with WheelFile(tmp_path, 'w') as wf_out:
+
+                # Identify the METADATA file path inside the wheel
+                # It is always inside a directory ending in .dist-info
+                metadata_path = None
+                for filename in wf_in.namelist():
+                    if filename.endswith('.dist-info/METADATA'):
+                        metadata_path = filename
+                        break
+
+                if not metadata_path:
+                    raise ValueError("Invalid Wheel: Could not find METADATA")
+
+                # 3. Iterate through all files in the source wheel
+                for zipinfo in wf_in.infolist():
+
+                    # Skip the RECORD file; WheelFile will generate a new one automatically
+                    if zipinfo.filename.endswith('/RECORD'):
+                        continue
+
+                    # Handle the METADATA file specifically
+                    if zipinfo.filename == metadata_path:
+                        # Read raw bytes
+                        metadata_bytes = wf_in.read(metadata_path)
+
+                        # Parse into a Message object
+                        msg: Message = message_from_bytes(metadata_bytes)
+
+                        # Add new Requires-Dist headers
+                        # 'add_header' appends duplicates rather than overwriting,
+                        # which is exactly what we need for multiple requirements.
+                        for req in new_requirements:
+                            msg.add_header('Requires-Dist', req)
+
+                        # Write the modified Message back to the new wheel
+                        # as_bytes() handles the encoding to utf-8 automatically
+                        wf_out.writestr(zipinfo.filename, msg.as_bytes())
+                    else:
+                        # Copy all other files exactly as they are
+                        wf_out.writestr(zipinfo, wf_in.read(zipinfo.filename))
+
+        # 4. Replace the original wheel with the modified one
+        os.replace(tmp_path, wheel_path)
+    except:
+        # Clean up the temporary file on failure
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
