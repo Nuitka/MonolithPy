@@ -292,6 +292,7 @@ cd ..
 
 
 long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
+long_version=$(echo $long_version | sed -e 's#-.*##')
 short_version=$(echo $long_version | sed -e 's#\.##')
 
 cp Modules/Setup.macos Modules/Setup
