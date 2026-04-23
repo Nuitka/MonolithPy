@@ -59,6 +59,7 @@ def our_call_subprocess(
 
     # Some packages cause this error code to be returned even if all is ok.
     our_extra_ok_returncodes += [3221225477]
+    sys.stderr.write(f"Running command: {cmd} in {cwd}\n")
     return call_subprocess_orig(cmd, show_stdout, cwd, on_returncode, our_extra_ok_returncodes, extra_environ, unset_environ, spinner, log_failed_cmd, stdout_only, command_desc=command_desc)
 
 pip._internal.utils.subprocess.call_subprocess = our_call_subprocess
@@ -99,7 +100,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
                 requires += [f"mpy-dep-{x}" for x in package_data['script_metadata']['dependencies']]
             if 'build_tools' in package_data['script_metadata']:
                 requires += [f"mpy-tool-{x}" for x in package_data['script_metadata']['build_tools']]
-            if "mpy-tool-clang" not in requires:
+            if "mpy-tool-clang" not in requires and req_name != "mpy-tool-clang":
                 requires.append("mpy-tool-clang")
             return pip._internal.pyproject.BuildSystemDetails(
                 requires, "__mp__.metabuild:managed_build", [], [os.path.dirname(__file__), real_pip_dir])
@@ -141,7 +142,7 @@ def SourceDistribution_get_build_requires_wheel(self):
             requires += [f"mpy-dep-{x}" for x in our_source['script_metadata']['dependencies']]
         if 'build_tools' in our_source['script_metadata']:
             requires += [f"mpy-tool-{x}" for x in our_source['script_metadata']['build_tools']]
-        if "mpy-tool-clang" not in requires:
+        if "mpy-tool-clang" not in requires and self.req.name != "mpy-tool-clang":
             requires.append("mpy-tool-clang")
         return requires
 
