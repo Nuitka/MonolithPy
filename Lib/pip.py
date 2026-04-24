@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import os
+import shutil
 import sys
 import sysconfig
 import warnings
@@ -8,6 +9,7 @@ import platform
 import rebuildpython
 import re
 import importlib.machinery
+import pathlib
 
 import __mp__
 import __mp__.packaging
@@ -164,8 +166,6 @@ _PackageFinder = pip._internal.index.package_finder.PackageFinder
 class PackageFinder(_PackageFinder):
     def find_all_candidates(self, project_name):
         if project_name in builtin_packages:
-            import pathlib
-
             pkg_version = [x for x in ensurepip._PROJECTS if x[0] == project_name][0][1]
 
             our_uri = pathlib.Path(os.path.join(os.path.dirname(ensurepip.__file__), '_bundled',
@@ -293,6 +293,90 @@ import pip._vendor.distlib.scripts
 
 if os.name == "nt":
     pip._vendor.distlib.scripts._DEFAULT_MANIFEST = pip._vendor.distlib.scripts.ScriptMaker.manifest = __mp__.EXE_MANIFEST
+
+
+# Each unique wheel version is extracted once; every subsequent install into a
+# build-isolation env creates hardlinks from the cache.
+import tempfile
+import pip._internal.operations.install.wheel as _iw
+
+_WHEEL_CACHE_DIR = pathlib.Path(
+    os.environ.get("MPY_WHEEL_CACHE_DIR",
+                   os.path.join(tempfile.gettempdir(), "mpy-wheel-cache"))
+)
+_CACHE_COMPLETE = "_COMPLETE"
+_orig_install_wheel = _iw.install_wheel
+
+
+def _cached_install_wheel(name, wheel_path, scheme, req_description,
+                           pycompile=True, warn_script_location=True,
+                           direct_url=None, requested=False):
+    cache_dir = _WHEEL_CACHE_DIR / pathlib.Path(wheel_path).stem
+    cache_complete = cache_dir / _CACHE_COMPLETE
+
+    if cache_complete.exists():
+        sys.stderr.write(f"[mpy-wheel-cache] HIT {name}\n")
+        _install_from_cache(cache_dir, scheme)
+        return
+
+    sys.stderr.write(f"[mpy-wheel-cache] MISS {name}\n")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    orig_save = _iw.ZipBackedFile.save
+
+    def _caching_save(self):
+        orig_save(self)
+        cache_file = cache_dir / self.src_record_path
+        if not cache_file.exists():
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(self.dest_path, cache_file)
+            except OSError:
+                shutil.copy2(self.dest_path, cache_file)
+
+    _iw.ZipBackedFile.save = _caching_save
+    try:
+        _orig_install_wheel(name, wheel_path, scheme, req_description,
+                            pycompile, warn_script_location, direct_url, requested)
+        cache_complete.touch()
+    finally:
+        _iw.ZipBackedFile.save = orig_save
+
+
+def _install_from_cache(cache_dir: pathlib.Path, scheme):
+    """Hardlink cached wheel files into the correct scheme paths."""
+    scheme_map = {
+        "data":    scheme.data,
+        "purelib": scheme.purelib,
+        "platlib": scheme.platlib,
+        "scripts": scheme.scripts,
+        "headers": scheme.headers,
+    }
+    for cached_file in cache_dir.rglob("*"):
+        if not cached_file.is_file() or cached_file.name == _CACHE_COMPLETE:
+            continue
+        rel = cached_file.relative_to(cache_dir)
+        parts = rel.parts
+        # Wheel .data section: {name}.data/{category}/rest → scheme.{category}
+        if len(parts) >= 3 and parts[0].endswith(".data"):
+            base = scheme_map.get(parts[1], scheme.data)
+            dest = pathlib.Path(base) / pathlib.Path(*parts[2:])
+        else:
+            # dist-info and top-level package files → purelib
+            dest = pathlib.Path(scheme.purelib) / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            dest.unlink()
+        try:
+            os.link(cached_file, dest)
+        except OSError:
+            shutil.copy2(cached_file, dest)
+
+
+_iw.install_wheel = _cached_install_wheel
+# req_install imports install_wheel by name at module load; rebind its copy too
+import pip._internal.req.req_install as _req_install
+_req_install.install_wheel = _cached_install_wheel
 
 
 def main():
