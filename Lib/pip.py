@@ -175,8 +175,20 @@ class PackageFinder(_PackageFinder):
             )]
 
         if project_name.startswith("mpy-tool-"):
+            try:
+                fl_candidates = [c for c in _PackageFinder.find_all_candidates(self, project_name) if c.link.is_wheel]
+            except Exception:
+                fl_candidates = []
+            if fl_candidates:
+                return fl_candidates
             return __mp__.packaging.get_sources_for_build_tool(project_name[len("mpy-tool-"):])
         if project_name.startswith("mpy-dep-"):
+            try:
+                fl_candidates = [c for c in _PackageFinder.find_all_candidates(self, project_name) if c.link.is_wheel]
+            except Exception:
+                fl_candidates = []
+            if fl_candidates:
+                return fl_candidates
             return __mp__.packaging.get_sources_for_dependency(project_name[len("mpy-dep-"):])
 
         base_candidates = _PackageFinder.find_all_candidates(self, project_name)
