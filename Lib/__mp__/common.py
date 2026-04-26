@@ -237,6 +237,33 @@ def download_extract(url, destination):
         extract_archive(downloaded_file, destination)
 
 
+def _get_pip_overlay_script_dirs():
+    import tempfile
+    dirs = []
+    seen = set()
+    scripts_name = "Scripts" if os.name == "nt" else "bin"
+    try:
+        tmpdir = tempfile.gettempdir()
+        for entry in os.listdir(tmpdir):
+            if entry.startswith("pip-build-env-"):
+                for sub in ("overlay", "normal"):
+                    scripts = os.path.join(tmpdir, entry, sub, scripts_name)
+                    norm = os.path.normcase(scripts)
+                    if norm not in seen and os.path.isdir(scripts):
+                        seen.add(norm)
+                        dirs.append(scripts)
+    except Exception:
+        pass
+    return dirs
+
+
+def _setup_subprocess_env(env):
+    env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
+    overlay_dirs = _get_pip_overlay_script_dirs()
+    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + overlay_dirs + path_data)
+
+
 def run(*args, **kwargs):
     import subprocess
 
@@ -246,10 +273,7 @@ def run(*args, **kwargs):
     env = kwargs.pop("env", os.environ.copy())
     assert not kwargs
 
-    # Don't use the pip path customization here. Just replicate our current path.
-    env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
-    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
-    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
+    _setup_subprocess_env(env)
 
     p = subprocess.Popen(
         args,
@@ -272,10 +296,7 @@ def run_with_output(*args, **kwargs):
     env = kwargs.pop("env", os.environ.copy())
     assert not kwargs
 
-    # Don't use the pip path customization here. Just replicate our current path.
-    env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
-    path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
-    env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + path_data)
+    _setup_subprocess_env(env)
 
     p = subprocess.Popen(
         args,

@@ -313,64 +313,49 @@ def _cached_install_wheel(name, wheel_path, scheme, req_description,
                            direct_url=None, requested=False):
     cache_dir = _WHEEL_CACHE_DIR / pathlib.Path(wheel_path).stem
     cache_complete = cache_dir / _CACHE_COMPLETE
+    is_hit = cache_complete.exists()
 
-    if cache_complete.exists():
+    if is_hit:
         sys.stderr.write(f"[mpy-wheel-cache] HIT {name}\n")
-        _install_from_cache(cache_dir, scheme)
-        return
-
-    sys.stderr.write(f"[mpy-wheel-cache] MISS {name}\n")
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        sys.stderr.write(f"[mpy-wheel-cache] MISS {name}\n")
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
     orig_save = _iw.ZipBackedFile.save
 
-    def _caching_save(self):
-        orig_save(self)
-        cache_file = cache_dir / self.src_record_path
-        if not cache_file.exists():
-            cache_file.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                os.link(self.dest_path, cache_file)
-            except OSError:
-                shutil.copy2(self.dest_path, cache_file)
+    if is_hit:
+        def _from_cache_save(self):
+            cache_file = cache_dir / self.src_record_path
+            if self.dest_path and os.path.exists(self.dest_path):
+                os.unlink(self.dest_path)
+            os.makedirs(os.path.dirname(self.dest_path), exist_ok=True)
+            if cache_file.exists():
+                try:
+                    os.link(cache_file, self.dest_path)
+                except OSError:
+                    shutil.copy2(cache_file, self.dest_path)
+            else:
+                orig_save(self)
+        _iw.ZipBackedFile.save = _from_cache_save
+    else:
+        def _caching_save(self):
+            orig_save(self)
+            cache_file = cache_dir / self.src_record_path
+            if not cache_file.exists():
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    os.link(self.dest_path, cache_file)
+                except OSError:
+                    shutil.copy2(self.dest_path, cache_file)
+        _iw.ZipBackedFile.save = _caching_save
 
-    _iw.ZipBackedFile.save = _caching_save
     try:
         _orig_install_wheel(name, wheel_path, scheme, req_description,
                             pycompile, warn_script_location, direct_url, requested)
-        cache_complete.touch()
+        if not is_hit:
+            cache_complete.touch()
     finally:
         _iw.ZipBackedFile.save = orig_save
-
-
-def _install_from_cache(cache_dir: pathlib.Path, scheme):
-    """Hardlink cached wheel files into the correct scheme paths."""
-    scheme_map = {
-        "data":    scheme.data,
-        "purelib": scheme.purelib,
-        "platlib": scheme.platlib,
-        "scripts": scheme.scripts,
-        "headers": scheme.headers,
-    }
-    for cached_file in cache_dir.rglob("*"):
-        if not cached_file.is_file() or cached_file.name == _CACHE_COMPLETE:
-            continue
-        rel = cached_file.relative_to(cache_dir)
-        parts = rel.parts
-        # Wheel .data section: {name}.data/{category}/rest → scheme.{category}
-        if len(parts) >= 3 and parts[0].endswith(".data"):
-            base = scheme_map.get(parts[1], scheme.data)
-            dest = pathlib.Path(base) / pathlib.Path(*parts[2:])
-        else:
-            # dist-info and top-level package files → purelib
-            dest = pathlib.Path(scheme.purelib) / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            dest.unlink()
-        try:
-            os.link(cached_file, dest)
-        except OSError:
-            shutil.copy2(cached_file, dest)
 
 
 _iw.install_wheel = _cached_install_wheel
