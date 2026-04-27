@@ -95,6 +95,15 @@ def get_lib_hash():
     else:
         extra_scan_dirs.append(interpreter_prefix)
 
+    for path in sys.path:
+        if "pip-build-env-" in path:
+            idx = path.find("pip-build-env-")
+            if idx >= 0:
+                build_env_path = path[:idx + len("pip-build-env-") + 8]
+                overlay_path = os.path.join(build_env_path, "overlay")
+                if os.path.isdir(overlay_path) and overlay_path not in extra_scan_dirs:
+                    extra_scan_dirs.append(overlay_path)
+
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
         # Ignore the working directory so we don't grab duplicate stuff. Also ignore the pip temp path that is
@@ -104,12 +113,13 @@ def get_lib_hash():
 
         for lib_file in list(glob.glob(os.path.join("**", "*.a"), root_dir=path, recursive=True)) + list(
             glob.glob(os.path.join("**", "*.lib"), root_dir=path, recursive=True)):
-            if os.path.basename(lib_file) in read_files:
+            full_path = os.path.join(path, lib_file)
+            if full_path in read_files:
                 continue
 
-            with open(os.path.join(path, lib_file), 'rb') as f:
+            with open(full_path, 'rb') as f:
                 hash_string += hashlib.file_digest(f, "sha512").hexdigest()
-            read_files.add(os.path.basename(lib_file))
+            read_files.add(full_path)
 
     return hashlib.sha256(hash_string.encode('ascii')).hexdigest()
 
