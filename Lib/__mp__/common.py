@@ -10,7 +10,6 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-import zipfile
 from wheel.wheelfile import WheelFile
 from email import message_from_bytes
 from email.message import Message
@@ -379,17 +378,8 @@ def add_wheel_files(wheel_file, target_path, *file_globs, **kwargs):
         if matched_file_count == 0:
             my_print(f"WARNING: No files matched glob '{file_glob}'", style="yellow")
 
-    # 3. Write files, preserving executable permission bits on Unix
-    def _write_preserving_permissions(wf, src, arc):
-        zinfo = zipfile.ZipInfo.from_file(src, arc)
-        if os.name != 'nt' and os.stat(src).st_mode & stat.S_IXUSR:
-            zinfo.external_attr = (0o100755 << 16)
-        with open(src, 'rb') as f:
-            data = f.read()
-        wf.writestr(zinfo, data)
-
-    for source_file, arcname in file_entries:
-        _write_preserving_permissions(wheel_file, source_file, arcname)
+    # 3. write_batch preserves Unix permission bits from the source files.
+    wheel_file.write_batch(file_entries)
 
 
 def add_wheel_dep_include(wheel_file, dependency_name, *file_globs, **kwargs):
