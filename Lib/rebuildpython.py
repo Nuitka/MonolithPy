@@ -337,8 +337,6 @@ def run_rebuild():
         ):
             if "interpreter_build" in file:
                 continue
-            if __mp__.getToolsInstallDir() in file:
-                continue
             if "build_tools" in file:
                 continue
             link_libs.append(file)
@@ -349,19 +347,6 @@ def run_rebuild():
     link_libs = list(set(link_libs))
     library_dirs = list(set(library_dirs))
     extra_link_args = []
-
-    if os.path.isdir(__mp__.getToolsInstallDir()):
-        for build_tool in os.listdir(__mp__.getToolsInstallDir()):
-            tool_link_file = os.path.join(__mp__.getToolsInstallDir(), build_tool, "link.json")
-            if os.path.isfile(tool_link_file):
-                with open(tool_link_file, "r") as f:
-                    linkData = json.load(f)
-                    link_libs += [os.path.join(os.path.dirname(tool_link_file), x) if os.path.isfile(
-                        os.path.join(os.path.dirname(tool_link_file), x)) else x for x in linkData.get("libraries", [])]
-                    library_dirs += [
-                        os.path.join(os.path.dirname(tool_link_file), x)
-                        for x in linkData.get("library_dirs", [])
-                    ]
 
     library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__mp__.getDependencyInstallDir(), "*")) if
                      os.path.isdir(os.path.join(x, "lib"))]
@@ -419,7 +404,7 @@ extern "C" {
     inittab_code = ""
 
     for module_fullname, filename in foundLibs.items():
-        if __mp__.getToolsInstallDir() in filename:
+        if "build_tools" in filename:
             continue
         if not is_lib_valid(filename):
             continue
@@ -516,7 +501,7 @@ static inline void Py_InitStaticModules(void) {
         for file in find_files(
             interpreter_prefix, "*.res"
         ):
-            if __mp__.getToolsInstallDir() in file:
+            if "build_tools" in file:
                 continue
             link_flags += [file]
 
