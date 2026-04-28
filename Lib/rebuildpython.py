@@ -116,6 +116,8 @@ def get_lib_hash():
             full_path = os.path.join(path, lib_file)
             if full_path in read_files:
                 continue
+            if "build_tools" in lib_file:
+                continue
 
             with open(full_path, 'rb') as f:
                 hash_string += hashlib.file_digest(f, "sha512").hexdigest()
@@ -336,6 +338,8 @@ def run_rebuild():
             if "interpreter_build" in file:
                 continue
             if __mp__.getToolsInstallDir() in file:
+                continue
+            if "build_tools" in file:
                 continue
             link_libs.append(file)
 
