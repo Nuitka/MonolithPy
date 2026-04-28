@@ -295,6 +295,11 @@ if os.name == "nt":
     pip._vendor.distlib.scripts._DEFAULT_MANIFEST = pip._vendor.distlib.scripts.ScriptMaker.manifest = __mp__.EXE_MANIFEST
 
 
+# Always persistently cache built wheels so dependency wheels (e.g. openblas)
+# built during one install are reused by later installs without rebuilding.
+import pip._internal.wheel_builder as _wb
+_wb._should_cache = lambda req: not (req.editable or not req.source_dir)
+
 # Each unique wheel version is extracted once; every subsequent install into a
 # build-isolation env creates hardlinks from the cache.
 import tempfile
