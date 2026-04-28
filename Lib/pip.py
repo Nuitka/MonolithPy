@@ -241,6 +241,8 @@ def install(
 ):
     orig_install(self, root, home, prefix, warn_script_location, use_user_site, pycompile)
 
+    if prefix and prefix not in rebuildpython._extra_install_prefixes:
+        rebuildpython._extra_install_prefixes.append(prefix)
     rebuildpython.run_rebuild()
 
 

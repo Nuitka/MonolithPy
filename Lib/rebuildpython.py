@@ -85,6 +85,9 @@ def getPythonInitFunctions(compiler, filename):
     return initFunctions
 
 
+_extra_install_prefixes = []
+
+
 def get_lib_hash():
     hash_string = ""
     read_files = set()
@@ -95,14 +98,9 @@ def get_lib_hash():
     else:
         extra_scan_dirs.append(interpreter_prefix)
 
-    for path in sys.path:
-        if "pip-build-env-" in path:
-            idx = path.find("pip-build-env-")
-            if idx >= 0:
-                build_env_path = path[:idx + len("pip-build-env-") + 8]
-                overlay_path = os.path.join(build_env_path, "overlay")
-                if os.path.isdir(overlay_path) and overlay_path not in extra_scan_dirs:
-                    extra_scan_dirs.append(overlay_path)
+    for prefix in _extra_install_prefixes:
+        if os.path.isdir(prefix) and prefix not in extra_scan_dirs:
+            extra_scan_dirs.append(prefix)
 
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
@@ -211,6 +209,10 @@ def run_rebuild():
     if platform.system() == "Windows":
         extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
 
+    for prefix in _extra_install_prefixes:
+        if os.path.isdir(prefix) and prefix not in extra_scan_dirs:
+            extra_scan_dirs.append(prefix)
+
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
         # Ignore the working directory so we don't grab duplicate stuff. Also ignore the pip temp path that is
@@ -317,18 +319,9 @@ def run_rebuild():
     # Scrape all available libs that we can find. We will let the linker worry about filtering out extra symbols.
     lib_scan_roots = [sysconfig.get_config_var("prefix")]
 
-    # Also scan any pip build environment roots found in sys.path.
-    for path in sys.path:
-        if "pip-build-env-" in path:
-            # Extract the build env root (e.g., .../pip-build-env-XXXXXXXX/overlay)
-            # and scan from the site-packages level
-            idx = path.find("pip-build-env-")
-            if idx >= 0:
-                # Find the overlay directory
-                build_env_path = path[:idx + len("pip-build-env-") + 8]  # include the random suffix
-                overlay_path = os.path.join(build_env_path, "overlay")
-                if os.path.isdir(overlay_path) and overlay_path not in lib_scan_roots:
-                    lib_scan_roots.append(overlay_path)
+    for prefix in _extra_install_prefixes:
+        if os.path.isdir(prefix) and prefix not in lib_scan_roots:
+            lib_scan_roots.append(prefix)
 
     for scan_root in lib_scan_roots:
         for file in find_files(
