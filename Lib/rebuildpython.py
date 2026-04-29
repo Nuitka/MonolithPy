@@ -225,6 +225,8 @@ def run_rebuild():
             normalized_file = os.path.normpath(file)
             if normalized_file in checkedLibs:
                 continue
+            if "build_tools" in file:
+                continue
 
             filename_base = os.path.basename(file)
 
