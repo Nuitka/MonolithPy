@@ -99,8 +99,11 @@ def get_lib_hash():
         extra_scan_dirs.append(interpreter_prefix)
 
     for prefix in _extra_install_prefixes:
-        if os.path.isdir(prefix) and prefix not in extra_scan_dirs:
-            extra_scan_dirs.append(prefix)
+        if not os.path.isdir(prefix):
+            continue
+        sp = sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix})
+        if sp and os.path.isdir(sp) and sp not in extra_scan_dirs:
+            extra_scan_dirs.append(sp)
 
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
@@ -210,8 +213,11 @@ def run_rebuild():
         extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
 
     for prefix in _extra_install_prefixes:
-        if os.path.isdir(prefix) and prefix not in extra_scan_dirs:
-            extra_scan_dirs.append(prefix)
+        if not os.path.isdir(prefix):
+            continue
+        sp = sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix})
+        if sp and os.path.isdir(sp) and sp not in extra_scan_dirs:
+            extra_scan_dirs.append(sp)
 
     # Scan sys.path for any more lingering static libs.
     for path in list(reversed(sys.path)) + extra_scan_dirs:
