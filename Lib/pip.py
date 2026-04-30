@@ -243,10 +243,24 @@ def install(
 
     if prefix and prefix not in rebuildpython._extra_install_prefixes:
         rebuildpython._extra_install_prefixes.append(prefix)
-    rebuildpython.run_rebuild()
 
 
 pip._internal.req.req_install.InstallRequirement.install = install
+
+import pip._internal.req as _req_mod
+import pip._internal.commands.install
+
+orig_install_given_reqs = _req_mod.install_given_reqs
+
+
+def _install_given_reqs_then_rebuild(*args, **kwargs):
+    result = orig_install_given_reqs(*args, **kwargs)
+    rebuildpython.run_rebuild()
+    return result
+
+
+_req_mod.install_given_reqs = _install_given_reqs_then_rebuild
+pip._internal.commands.install.install_given_reqs = _install_given_reqs_then_rebuild
 
 
 import pip._internal.resolution.resolvelib.candidates
