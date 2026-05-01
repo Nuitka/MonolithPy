@@ -85,7 +85,21 @@ def getPythonInitFunctions(compiler, filename):
     return initFunctions
 
 
-_extra_install_prefixes = []
+_OVERLAYS_ENV = "MONOLITHPY_OVERLAY_PREFIXES"
+
+
+def _get_overlay_prefixes():
+    """Return all overlay prefixes from the environment."""
+    val = os.environ.get(_OVERLAYS_ENV, "")
+    return [p for p in val.split(os.pathsep) if p] if val else []
+
+
+def _register_overlay_prefix(prefix):
+    """Add an overlay prefix to the env var so subprocesses inherit it."""
+    prefixes = _get_overlay_prefixes()
+    if prefix not in prefixes:
+        prefixes.append(prefix)
+        os.environ[_OVERLAYS_ENV] = os.pathsep.join(prefixes)
 
 
 def get_lib_hash():
@@ -98,7 +112,7 @@ def get_lib_hash():
     else:
         extra_scan_dirs.append(interpreter_prefix)
 
-    for prefix in _extra_install_prefixes:
+    for prefix in _get_overlay_prefixes():
         if not os.path.isdir(prefix):
             continue
         sp = sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix})
@@ -212,7 +226,7 @@ def run_rebuild():
     if platform.system() == "Windows":
         extra_scan_dirs.append(os.path.join(sysconfig.get_config_var('base'), 'libs'))
 
-    for prefix in _extra_install_prefixes:
+    for prefix in _get_overlay_prefixes():
         if not os.path.isdir(prefix):
             continue
         sp = sysconfig.get_path("purelib", vars={"base": prefix, "platbase": prefix})
@@ -327,7 +341,7 @@ def run_rebuild():
     # Scrape all available libs that we can find. We will let the linker worry about filtering out extra symbols.
     lib_scan_roots = [sysconfig.get_config_var("prefix")]
 
-    for prefix in _extra_install_prefixes:
+    for prefix in _get_overlay_prefixes():
         if os.path.isdir(prefix) and prefix not in lib_scan_roots:
             lib_scan_roots.append(prefix)
 
