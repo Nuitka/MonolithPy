@@ -381,12 +381,22 @@ def run_rebuild():
         if os.path.isfile(final_path + ".link.json"):
             with open(final_path + ".link.json", "r") as f:
                 linkData = json.load(f)
+                link_json_dir = os.path.dirname(final_path)
                 library_dirs += [
-                    os.path.join(os.path.dirname(final_path), x)
+                    os.path.join(link_json_dir, x)
                     for x in linkData.get("library_dirs", [])
                 ]
-                link_libs += [resolve_library(x, curr_lib_dirs) for x in linkData.get("libraries", [])]
-                extra_link_args += linkData.get("extra_postargs", [])
+                updated_lib_dirs = library_dirs + [link_json_dir]
+                link_libs += [resolve_library(x, updated_lib_dirs) for x in linkData.get("libraries", [])]
+                for arg in linkData.get("extra_postargs", []):
+                    if arg.endswith(('.obj', '.o', '.a', '.lib')):
+                        resolved = os.path.join(link_json_dir, arg)
+                        if os.path.isfile(arg):
+                            extra_link_args.append(arg)
+                        elif os.path.isfile(resolved):
+                            extra_link_args.append(resolved)
+                    else:
+                        extra_link_args.append(arg)
         libIdx += 1
 
     link_libs = list(set(link_libs))
@@ -537,6 +547,7 @@ static inline void Py_InitStaticModules(void) {
             libraries=link_libs,
             library_dirs=library_dirs,
             extra_preargs=extra_preargs_,
+            extra_postargs=extra_link_args if extra_link_args else None,
         )
 
         import ctypes.wintypes

@@ -196,8 +196,10 @@ class PackageFinder(_PackageFinder):
         build_script = __mp__.packaging.find_build_script_for_package(project_name)
 
         if build_script:
-            # If we have a build script, filter out wheels.
-            base_candidates = [x for x in base_candidates if not x.link.is_wheel]
+            # If we have a build script, filter out remote wheels (they won't be
+            # compatible with MonolithPy).  Keep local wheels (from --find-links)
+            # so pre-built MonolithPy wheels are reused.
+            base_candidates = [x for x in base_candidates if not x.link.is_wheel or x.link.is_file]
 
         return __mp__.packaging.get_extra_sources_for_package(project_name) + base_candidates
 
