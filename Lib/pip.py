@@ -85,7 +85,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
         if os.path.isfile(_candidate):
             _mp_script_path = os.path.normpath(_candidate)
             break
-    if not req_name.startswith("file://") and _mp_script_path is not None:
+    if "file://" not in req_name and _mp_script_path is not None:
         with open(_mp_script_path, 'r') as f:
             data = json.load(f)
 
@@ -196,10 +196,9 @@ class PackageFinder(_PackageFinder):
         build_script = __mp__.packaging.find_build_script_for_package(project_name)
 
         if build_script:
-            # If we have a build script, filter out remote wheels (they won't be
-            # compatible with MonolithPy).  Keep local wheels (from --find-links)
-            # so pre-built MonolithPy wheels are reused.
-            base_candidates = [x for x in base_candidates if not x.link.is_wheel or x.link.is_file]
+            base_candidates = [x for x in base_candidates
+                               if not x.link.is_wheel
+                               or "files.pythonhosted.org" not in x.link.url]
 
         return __mp__.packaging.get_extra_sources_for_package(project_name) + base_candidates
 
