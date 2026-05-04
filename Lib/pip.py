@@ -256,8 +256,7 @@ orig_install_given_reqs = _req_mod.install_given_reqs
 
 def _install_given_reqs_then_rebuild(*args, **kwargs):
     result = orig_install_given_reqs(*args, **kwargs)
-    if "--prefix" not in sys.argv:
-        rebuildpython.run_rebuild()
+    rebuildpython.run_rebuild()
     return result
 
 
@@ -413,6 +412,29 @@ def main():
     # pkg-config uses absolute paths, which do not allow for
     if platform.system() != "Windows":
         os.environ["PKG_CONFIG"] = "/disabled"
+
+    # Propagate --find-links to nested pip subprocesses via env var. pip's
+    # build_env.py only passes --find-links to its direct subprocesses, so
+    # deeply-nested build envs lose the link and rebuild from source.
+    _find_links = []
+    _argv = sys.argv[1:]
+    _i = 0
+    while _i < len(_argv):
+        _a = _argv[_i]
+        if _a in ("-f", "--find-links") and _i + 1 < len(_argv):
+            _find_links.append(_argv[_i + 1])
+            _i += 2
+        elif _a.startswith("--find-links="):
+            _find_links.append(_a[len("--find-links="):])
+            _i += 1
+        else:
+            _i += 1
+    if _find_links:
+        existing = os.environ.get("PIP_FIND_LINKS", "").split()
+        for link in _find_links:
+            if link not in existing:
+                existing.append(link)
+        os.environ["PIP_FIND_LINKS"] = " ".join(existing)
 
     import site
 
