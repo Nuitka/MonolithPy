@@ -256,7 +256,8 @@ orig_install_given_reqs = _req_mod.install_given_reqs
 
 def _install_given_reqs_then_rebuild(*args, **kwargs):
     result = orig_install_given_reqs(*args, **kwargs)
-    rebuildpython.run_rebuild()
+    if "--prefix" not in sys.argv:
+        rebuildpython.run_rebuild()
     return result
 
 
