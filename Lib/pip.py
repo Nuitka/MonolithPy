@@ -89,7 +89,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
         with open(_mp_script_path, 'r') as f:
             data = json.load(f)
 
-        package_name = re.split(r'[><=! ]', req_name, maxsplit=1)[0]
+        package_name = re.split(r'[\[><=!~ ]', req_name, maxsplit=1)[0]
         if package_name in data:
             package_data = data[package_name]
 
@@ -102,7 +102,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
                 requires += [f"mpy-dep-{x}" for x in package_data['script_metadata']['dependencies']]
             if 'build_tools' in package_data['script_metadata']:
                 requires += [f"mpy-tool-{x}" for x in package_data['script_metadata']['build_tools']]
-            package_name_bare = re.split(r'[><=! ]', req_name, maxsplit=1)[0]
+            package_name_bare = re.split(r'[\[><=!~ ]', req_name, maxsplit=1)[0]
             if "mpy-tool-clang" not in requires and package_name_bare != "mpy-tool-clang":
                 requires.append("mpy-tool-clang")
             return pip._internal.pyproject.BuildSystemDetails(
@@ -112,7 +112,7 @@ def our_load_pyproject_toml(pyproject_toml, setup_py, req_name):
     if result is None:
         return None
     return pip._internal.pyproject.BuildSystemDetails(
-        [x for x in result.requires if re.split(r'[><=]', x, maxsplit=1)[0] not in builtin_packages] + list(builtin_packages.keys()),
+        [x for x in result.requires if re.split(r'[\[><=!~ ]', x, maxsplit=1)[0] not in builtin_packages] + list(builtin_packages.keys()),
         result.backend, result.check, sys.path + result.backend_path)
 
 
