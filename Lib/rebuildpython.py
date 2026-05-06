@@ -210,6 +210,13 @@ def run_rebuild():
             compiler_cxx=cxx_config_var,
         )
 
+    if platform.system() == "Windows":
+        # vcvarsall.bat prepends VC paths to %PATH% on every invocation,
+        # which accumulates across nested pip subprocesses and eventually
+        # blows past cmd.exe's 8191-char input limit.
+        import __mp__.windows as _mp_windows
+        _mp_windows._strip_vc_paths_from_env()
+
     try:
         compiler.initialize()
     except AttributeError:

@@ -8,49 +8,59 @@ def get_compiler_module():
     return sys.modules["setuptools._distutils._msvccompiler"]
 
 
-def get_vs_version():
+def _strip_vc_paths_from_env():
+    """vcvarsall.bat prepends VC/SDK paths to %PATH% every time it runs. In
+    deeply-nested pip subprocesses this accumulates across levels and
+    eventually trips cmd.exe's 8191-char input line limit. Strip the paths
+    vcvarsall adds so it can re-add them fresh."""
+    vc_markers = (
+        "microsoft visual studio",
+        "windows kits",
+        "microsoft sdks",
+        "microsoft.net",
+    )
+    new_path = [
+        p for p in os.environ.get("PATH", "").split(os.pathsep)
+        if p and not any(m in p.lower() for m in vc_markers)
+    ]
+    os.environ["PATH"] = os.pathsep.join(new_path)
+
+
+def _call_get_vc_env():
     compiler_module = get_compiler_module()
     from setuptools._distutils.util import get_host_platform, get_platform
     if hasattr(compiler_module, "PLAT_TO_VCVARS"):
         vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
+        vc_env_func = compiler_module._get_vc_env
     elif hasattr(compiler_module, "_get_vcvars_spec"):
         vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
+        vc_env_func = compiler_module._get_vc_env
     else:
         from setuptools._distutils.compilers.C import msvc
         vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-    vc_env = compiler_module._get_vc_env(vcargs)
+        vc_env_func = msvc._get_vc_env
+    _strip_vc_paths_from_env()
+    return vc_env_func(vcargs)
+
+
+def get_vs_version():
+    vc_env = _call_get_vc_env()
     return float(vc_env.get("visualstudioversion"))
 
 
 def find_compiler_exe(exe):
     compiler_module = get_compiler_module()
-    from setuptools._distutils.util import get_host_platform, get_platform
-    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
-        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
-    elif hasattr(compiler_module, "_get_vcvars_spec"):
-        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
-    else:
-        from setuptools._distutils.compilers.C import msvc
-        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-        vc_env = compiler_module._get_vc_env(vcargs)
-        paths = vc_env.get("path", "").split(os.pathsep)
-        return msvc._find_exe(exe, paths)
-    vc_env = compiler_module._get_vc_env(vcargs)
+    vc_env = _call_get_vc_env()
     paths = vc_env.get("path", "").split(os.pathsep)
-    return compiler_module._find_exe(exe, paths)
+    find_exe = getattr(compiler_module, "_find_exe", None)
+    if find_exe is None:
+        from setuptools._distutils.compilers.C import msvc
+        find_exe = msvc._find_exe
+    return find_exe(exe, paths)
 
 
 def setup_compiler_env():
-    compiler_module = get_compiler_module()
-    from setuptools._distutils.util import get_host_platform, get_platform
-    if hasattr(compiler_module, "PLAT_TO_VCVARS"):
-        vcargs = compiler_module.PLAT_TO_VCVARS[get_platform()]
-    elif hasattr(compiler_module, "_get_vcvars_spec"):
-        vcargs = compiler_module._get_vcvars_spec(get_host_platform(), get_platform())
-    else:
-        from setuptools._distutils.compilers.C import msvc
-        vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
-    vc_env = compiler_module._get_vc_env(vcargs)
+    vc_env = _call_get_vc_env()
     os.environ.update(vc_env)
 
 
