@@ -215,6 +215,21 @@ import pip._internal.build_env
 
 pip._internal.build_env.get_runnable_pip = get_runnable_pip
 
+# Each build-isolation subprocess pip runs in its own process with a fresh
+# MONOLITHPY_OVERLAY_PREFIXES env var. When pip creates a second build-env
+# (e.g. for backend deps after build-system requires), the new subprocess
+# doesn't inherit overlay prefixes registered by the previous subprocess.
+# Fix: register the prefix in the *parent* pip's env before spawning the
+# subprocess so it inherits via environment.
+_orig_install_requirements = pip._internal.build_env.BuildEnvironment.install_requirements
+
+def _install_requirements_with_overlay_tracking(self, requirements, prefix_as_string, *, kind, for_req=None):
+    prefix = self._prefixes[prefix_as_string]
+    rebuildpython._register_overlay_prefix(prefix.path)
+    return _orig_install_requirements(self, requirements, prefix_as_string, kind=kind, for_req=for_req)
+
+pip._internal.build_env.BuildEnvironment.install_requirements = _install_requirements_with_overlay_tracking
+
 import pip._internal.cli.req_command
 
 orig_get_requirements = pip._internal.cli.req_command.RequirementCommand.get_requirements
