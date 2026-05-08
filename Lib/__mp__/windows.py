@@ -39,8 +39,12 @@ def _call_get_vc_env():
         from setuptools._distutils.compilers.C import msvc
         vcargs = msvc._get_vcvars_spec(get_host_platform(), get_platform())
         vc_env_func = msvc._get_vc_env
+    original_path = os.environ.get("PATH", "")
     _strip_vc_paths_from_env()
-    return vc_env_func(vcargs)
+    try:
+        return vc_env_func(vcargs)
+    finally:
+        os.environ["PATH"] = original_path
 
 
 def get_vs_version():
