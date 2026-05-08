@@ -196,6 +196,12 @@
     <ProjectReference Include="_zoneinfo.vcxproj">
       <Project>{fcbe1ef2-e0f0-40b1-88b5-00a35d378742}</Project>
     </ProjectReference>
+    <ProjectReference Include="_zstd.vcxproj">
+      <Project>{07029b86-f3e9-443e-86fb-78aa6d47fed1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="_remote_debugging.vcxproj">
+      <Project>{4d7c112f-3083-4d9e-9754-9341c14d9b39}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

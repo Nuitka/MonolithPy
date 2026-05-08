@@ -201,6 +201,7 @@ _ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict
 #_gdbm _gdbmmodule.c -l:libgdbm.a
 _lzma _lzmamodule.c -l:liblzma.a
 _uuid _uuidmodule.c -l:libuuid.a
+_zstd _zstd/_zstdmodule.c _zstd/compressor.c _zstd/decompressor.c _zstd/zstddict.c -I$(srcdir)/Modules/_zstd -l:libzstd.a
 zlib  zlibmodule.c -l:libz.a
 
 # The readline module also supports libeditline (-leditline).

@@ -31,6 +31,8 @@ extern "C" {
     extern  PyObject* PyInit__sqlite3(void);
     extern  PyObject* PyInit__tkinter(void);
     extern  PyObject* PyInit__zoneinfo(void);
+    extern  PyObject* PyInit__zstd(void);
+    extern  PyObject* PyInit__remote_debugging(void);
 #endif
 
 #ifdef __cplusplus
@@ -59,6 +61,8 @@ static inline void Py_InitStaticModules(void) {
     PyImport_AppendInittab("_sqlite3", PyInit__sqlite3);
     PyImport_AppendInittab("_tkinter", PyInit__tkinter);
     PyImport_AppendInittab("_zoneinfo", PyInit__zoneinfo);
+    PyImport_AppendInittab("_zstd", PyInit__zstd);
+    PyImport_AppendInittab("_remote_debugging", PyInit__remote_debugging);
 #endif
 
 }

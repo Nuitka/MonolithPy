@@ -257,6 +257,7 @@ def build_package(package_name, version, script_metadata, wheel_directory):
         for dep in script_metadata["dependencies"]:
             extra_dependencies.append("mpy-dep-" + dep)
     __mp__.add_wheel_requirements(result, extra_dependencies)
+    __mp__.fix_wheel_metadata(result)
 
     return result
 

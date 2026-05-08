@@ -30,8 +30,8 @@ export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed ${LTO_OPTS}"
-export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -I${PYTHON_BASE}/Include"
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -70,7 +70,7 @@ cp Include/mp_embed.h ${PREFIX}/include/
 mkdir -p Embedded/embed_data/vfs/ssl
 curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
 python3 Lib/mkembeddata.py Embedded Embedded/embed_data
-$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
+$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
 $CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
 ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
 
@@ -342,7 +342,7 @@ $ELEVATE cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
 rm -f Embedded/mp_embed.o
-$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
+$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
 $ELEVATE cp -r "Embedded/mp_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
@@ -364,6 +364,7 @@ $ELEVATE ln -s base "$target/dependency_libs/sqlite"
 $ELEVATE ln -s base "$target/dependency_libs/tcltk"
 $ELEVATE ln -s base "$target/dependency_libs/xz"
 $ELEVATE ln -s base "$target/dependency_libs/zlib"
+$ELEVATE ln -s base "$target/dependency_libs/zstd"
 
 find "$target" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs $ELEVATE rm -rf
 
