@@ -372,6 +372,11 @@ def run_rebuild():
 
     library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(__mp__.getDependencyInstallDir(), "*")) if
                      os.path.isdir(os.path.join(x, "lib"))]
+    for prefix in _get_overlay_prefixes():
+        overlay_dep_dir = os.path.join(prefix, "dependency_libs")
+        if os.path.isdir(overlay_dep_dir):
+            library_dirs += [os.path.join(x, "lib") for x in glob.glob(os.path.join(overlay_dep_dir, "*"))
+                             if os.path.isdir(os.path.join(x, "lib"))]
 
     libIdx = 0
     while libIdx < len(link_libs):
