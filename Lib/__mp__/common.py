@@ -259,6 +259,7 @@ def _get_pip_overlay_script_dirs():
 
 def _setup_subprocess_env(env):
     env["PYTHONPATH"] = os.pathsep.join([x for x in sys.path if not x.endswith(os.path.sep + "site")])
+    env["PEP517_BACKEND_PATH"] = env["PYTHONPATH"]
     path_data = [x for x in env["PATH"].split(os.pathsep) if x != os.path.dirname(sys.executable)]
     overlay_dirs = _get_pip_overlay_script_dirs()
     env["PATH"] = os.pathsep.join([os.path.dirname(sys.executable)] + overlay_dirs + path_data)
@@ -1465,6 +1466,8 @@ def add_wheel_requirements(wheel_path, new_requirements):
     """
     Adds extra requirements to a wheel file, replacing it in-place.
     """
+    if not new_requirements:
+        return
 
     # Write to a temporary file next to the original, then replace it.
     # Must keep the .whl extension since WheelFile validates the filename.
