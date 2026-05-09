@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <zstd.h>
 
 #if _WIN32
 #define strcasecmp _stricmp
@@ -18,8 +19,10 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define unlikely(x)     __builtin_expect(!!(x), 0)
+#define likely(x)       __builtin_expect(!!(x), 1)
 #else
 #define unlikely(x)     (x)
+#define likely(x)       (x)
 #endif
 
 extern const char nuitka_embed_map;
@@ -36,6 +39,14 @@ typedef struct FDMAP_S FDMAP;
 
 FDMAP mp_fd2file[512] = {};
 bool mp_fd2file_initialized = false;
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <pthread.h>
+/* Protects mp_fd2file slot allocation/free. The std::ifstream
+ * threading torture (16 threads x 200 iters of open/read/close)
+ * otherwise races on slot reuse. */
+static pthread_mutex_t mp_fd2file_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 #ifdef _WIN32
 // A map to associate mapping HANDLEs with our virtual EFILE structs.
@@ -59,8 +70,8 @@ VIEWMAP mp_view2file[512] = {};
 
 // For FindFirst/NextFile functionality
 typedef struct VIRTUAL_FIND_HANDLE_DATA_S {
-    EMAP* map_ptr; // Current position in the embedded map iterator
-    char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
+    const EMAP* dir_map;        // The directory entry being iterated
+    uint32_t next_child;        // Index into dir_map->children of next entry to return
     char search_pattern[PATH_MAX]; // The file pattern (e.g., "*.txt")
 } VIRTUAL_FIND_HANDLE_DATA;
 
@@ -74,16 +85,315 @@ typedef struct FIND_HNDMAP_S FIND_HNDMAP;
 FIND_HNDMAP mp_findhandles[512] = {};
 #endif
 
-uint32_t hash(char * key) {   // Hash Function: MurmurOAAT64
-  uint32_t h = 3323198485ul;
-  for (;*key;++key) {
-    h ^= *key;
-    h *= 0x5bd1e995;
-    h ^= h >> 15;
+/* ============================================================
+ * FNV-1a 64 + CHD perfect hash + bloom
+ * ============================================================ */
+
+/* FNV-1a 64. Same as Python side. Path must already be lowercased. */
+ALWAYS_INLINE uint64_t mp_hash64(const char *s) {
+  uint64_t h = 0xcbf29ce484222325ULL;
+  while (*s) {
+    h ^= (uint8_t)*s++;
+    h *= 0x100000001b3ULL;
   }
   return h;
 }
 
+/* CHD secondary mix: combines hash with seed to produce slot.
+ * splitmix64 finalizer with a seed-derived salt mixed in. */
+ALWAYS_INLINE uint64_t mp_chd_mix(uint64_t h, uint32_t seed) {
+  uint64_t x = h ^ ((uint64_t)seed * 0x9E3779B97F4A7C15ULL);
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  x = x ^ (x >> 31);
+  return x;
+}
+
+/* Lazy-initialised pointers into the map blob. Valid after first
+ * mp_embed_init() call. Subsequent calls are noops. The blob is
+ * static const, so multiple threads racing here is benign (every
+ * thread computes the same pointer value). */
+static const mp_embed_header_t *mp_hdr        = NULL;
+static const uint64_t          *mp_bloom      = NULL;
+static const uint32_t          *mp_seeds      = NULL;
+static const uint32_t          *mp_child_slots = NULL;
+static const EMAP              *mp_entries    = NULL;
+static const char              *mp_paths      = NULL;
+
+ALWAYS_INLINE void mp_embed_init(void) {
+  if (likely(mp_hdr != NULL)) return;
+  if (nuitka_embed_map_len < (long)sizeof(mp_embed_header_t)) {
+    /* Empty / malformed blob - leave pointers NULL; lookups return miss. */
+    return;
+  }
+  const char *base = &nuitka_embed_map;
+  const mp_embed_header_t *h = (const mp_embed_header_t *)base;
+  if (h->num_entries == 0) {
+    /* No entries; treat as empty. Still set mp_hdr so we don't reinit. */
+    mp_hdr = h;
+    return;
+  }
+  mp_bloom       = (const uint64_t *)(base + h->bloom_offset);
+  mp_seeds       = (const uint32_t *)(base + h->seeds_offset);
+  mp_child_slots = (const uint32_t *)(base + h->child_slots_offset);
+  mp_entries     = (const EMAP     *)(base + h->entries_offset);
+  mp_paths       = (const char     *)(base + h->paths_offset);
+  mp_hdr         = h;  /* publish last so other threads see consistent state */
+}
+
+/* Bloom filter check. Returns true if path *might* be present. */
+ALWAYS_INLINE bool mp_bloom_check(uint64_t h) {
+  uint32_t k     = mp_hdr->bloom_num_hashes;
+  uint32_t bits  = mp_hdr->bloom_num_bits;
+  for (uint32_t i = 0; i < k; i++) {
+    uint64_t mixed = h * 0x9E3779B97F4A7C15ULL
+                   + (uint64_t)i * 0xbf58476d1ce4e5b9ULL;
+    uint32_t bit = (uint32_t)(mixed % bits);
+    if (!(mp_bloom[bit >> 6] & (1ULL << (bit & 63)))) return false;
+  }
+  return true;
+}
+
+/* Get path string for an entry. Points into nuitka_embed_map. */
+ALWAYS_INLINE const char *mp_path_of(const EMAP *e) {
+  return mp_paths + e->path_offset;
+}
+
+/* Public-but-undocumented entry point for tests (exposed via the
+ * non-inlined wrapper below). */
+const EMAP *mp_embed_lookup_for_test(const char *path);
+
+/* Core lookup. Path must be already lowercased & normalized.
+ * Returns NULL on miss. */
+ALWAYS_INLINE const EMAP *mp_embed_find(const char *path) {
+  mp_embed_init();
+  if (unlikely(mp_hdr == NULL || mp_hdr->num_entries == 0)) return NULL;
+
+  uint64_t h = mp_hash64(path);
+
+  /* Fast-reject via bloom. ~1% false positive at 12 bits/entry, k=7. */
+  if (!mp_bloom_check(h)) return NULL;
+
+  /* CHD lookup: bucket -> seed -> slot. */
+  uint32_t bucket = (uint32_t)(h % mp_hdr->num_buckets);
+  uint32_t seed   = mp_seeds[bucket];
+  uint32_t slot   = (uint32_t)(mp_chd_mix(h, seed) % mp_hdr->num_entries);
+  const EMAP *e   = &mp_entries[slot];
+
+  /* 64-bit hash equality is the verification. CHD guarantees the slot
+   * is correct iff the hash matches; collisions are vetted absent at
+   * gen time. */
+  if (likely(e->hash == h)) return e;
+  return NULL;
+}
+
+/* Backwards-compatible wrapper: existing code does
+ *   if (find_embedded_file(path, &map)) ...
+ * with `EMAP *map`. Cast away const since the callers don't write. */
+static bool find_embedded_file(char *search_path, EMAP **found_map) {
+  /* Lowercase the input path. (get_virtual_path already does this for
+   * paths derived from absolute paths, but some call sites pass other
+   * paths through.) */
+  for (char *p = search_path; *p; ++p) *p = (char)tolower((unsigned char)*p);
+  const char *dbg = getenv("MP_EMBED_DEBUG");
+  if (dbg && *dbg) {
+    fprintf(stderr, "[mp_embed] find: '%s'\n", search_path);
+  }
+  const EMAP *e = mp_embed_find(search_path);
+  if (dbg && *dbg) {
+    fprintf(stderr, "[mp_embed] -> %s\n", e ? "HIT" : "MISS");
+  }
+  if (!e) return false;
+  *found_map = (EMAP *)e;
+  return true;
+}
+
+/* Iterate children of a directory entry. start/count come from the
+ * entry; each child slot is in mp_child_slots[]. */
+ALWAYS_INLINE const EMAP *mp_embed_child_at(const EMAP *dir, uint32_t i) {
+  uint32_t slot = mp_child_slots[dir->children_start + i];
+  return &mp_entries[slot];
+}
+
+/* Externally-callable wrapper around mp_embed_find for tests. */
+const EMAP *mp_embed_lookup_for_test(const char *path) {
+  /* Caller is expected to pass a lowercased, normalised virtual path. */
+  return mp_embed_find(path);
+}
+
+/* Populate an EFILE for a virtual file. Initializes both the
+ * stream-position fields (pos/end/size) and (Windows only) the
+ * CRT-buffer-mirror fields (crt_base/crt_ptr/crt_cnt) that MSVC's
+ * basic_filebuf reads via _get_stream_buffer_pointers. */
+/* Free an EFILE wrapper. Releases the decompressed file buffer for
+ * virtual entries before freeing the wrapper itself. Safe to call on
+ * uninitialised EFILEs as long as they were calloc'd (owned_buf NULL). */
+ALWAYS_INLINE void mp_efile_destroy(EFILE *e) {
+  if (!e) return;
+  if (e->handle_type == EHANDLE_VIRTUAL && e->owned_buf) {
+    free(e->owned_buf);
+  }
+  free(e);
+}
+
+/* Look up the uncompressed size of a virtual file without decompressing
+ * it. Returns 0 for empty files and on error. Used by stat() / fstat()
+ * to report the user-visible file size while keeping the blob compressed. */
+static size_t mp_uncompressed_size(const EMAP *map) {
+  if (!map || map->data_size == 0) return 0;
+  const char *src = (const char*)&nuitka_embed_data + map->data_pos;
+  unsigned long long ucs = ZSTD_getFrameContentSize(src, map->data_size);
+  if (ucs == ZSTD_CONTENTSIZE_ERROR || ucs == ZSTD_CONTENTSIZE_UNKNOWN) return 0;
+  return (size_t)ucs;
+}
+
+/* Decompress the zstd frame for `map` into a freshly malloc'd buffer.
+ * Returns NULL on failure. *out_size receives the uncompressed size. */
+static char *mp_decompress_entry(const EMAP *map, size_t *out_size) {
+  if (map->data_size == 0) {
+    /* Empty file shortcut - mkembeddata stores no frame at all. */
+    *out_size = 0;
+    return NULL;
+  }
+  const char *src = (const char*)&nuitka_embed_data + map->data_pos;
+  unsigned long long ucs = ZSTD_getFrameContentSize(src, map->data_size);
+  if (ucs == ZSTD_CONTENTSIZE_ERROR || ucs == ZSTD_CONTENTSIZE_UNKNOWN) {
+    return NULL;
+  }
+  if (ucs == 0) {
+    *out_size = 0;
+    /* Allocate 1 byte so the EFILE has a valid (non-NULL) base pointer
+     * we can later free; pos==end means "EOF immediately". */
+    return (char*)malloc(1);
+  }
+  char *buf = (char*)malloc((size_t)ucs);
+  if (!buf) return NULL;
+  size_t n = ZSTD_decompress(buf, (size_t)ucs, src, map->data_size);
+  if (ZSTD_isError(n) || n != (size_t)ucs) {
+    free(buf);
+    return NULL;
+  }
+  *out_size = (size_t)ucs;
+  return buf;
+}
+
+ALWAYS_INLINE void mp_efile_init_virtual(EFILE *e, const EMAP *map) {
+  size_t ucs = 0;
+  char *base = mp_decompress_entry(map, &ucs);
+  e->handle_type = EHANDLE_VIRTUAL;
+  e->name        = mp_path_of(map);
+  e->pos         = base;
+  e->end         = base ? base + ucs : NULL;
+  e->size        = ucs;
+  e->err         = 0;
+  e->f           = NULL;
+  e->map         = (EMAP*)map;
+  e->owned_buf   = base;     /* free in fclose/close */
+#ifdef _WIN32
+  e->crt_base    = base;
+  e->crt_ptr     = base;
+  e->crt_cnt     = (int)ucs;
+#endif
+}
+
+#if defined(__linux__) || defined(__APPLE__)
+/* ============================================================
+ * POSIX: virtual files served as real FILE* over a fake-but-real fd.
+ *
+ * libstdc++.a (libstdc++/libc++) implements basic_filebuf on top of
+ * `__basic_file<char>`, which calls fopen() to get a FILE*, then
+ * fileno() to get the fd, then read()/lseek()/fstat()/close() at the
+ * fd layer - it does NOT use fread on the FILE*. So a fopencookie/
+ * funopen FILE* (which has fileno = -1) doesn't help: basic_filebuf
+ * would try read(-1) and fail with EBADF.
+ *
+ * Instead, mp_fopen for a virtual file:
+ *   1. allocates an EFILE wrapper around the embed entry,
+ *   2. opens a real fd (open("/dev/null") - cheap, gives a unique
+ *      small int),
+ *   3. registers fd -> EFILE in mp_fd2file,
+ *   4. fdopen()s that fd into a real FILE*, which it returns.
+ *
+ * The build links with `-Wl,--wrap=fopen --wrap=read --wrap=lseek
+ * --wrap=fstat --wrap=close` so libstdc++.a's calls go through our
+ * __wrap_* functions below. Each wrap looks the fd up in mp_fd2file:
+ *   - hit  -> serve from embed memory zero-copy
+ *   - miss -> __real_* (the un-wrapped libc symbol)
+ *
+ * Result: std::ifstream sees a real FILE* / real fd, but every byte
+ * it reads comes straight out of the .rodata embed blob with no
+ * intermediate copy and no temp file.
+ * ============================================================ */
+#endif /* __linux__ || __APPLE__ */
+
+#ifdef _WIN32
+/* Synchronisation between mp_X intercepts (which read e->pos) and
+ * MSVC basic_filebuf (which gets &e->crt_ptr / &e->crt_cnt from
+ * _get_stream_buffer_pointers and advances them itself as it reads
+ * via the streambuf cursor).
+ *
+ * mp_sync_in: pull the streambuf's view back into e->pos before our
+ * intercept reads e->pos.
+ * mp_sync_out: push e->pos back into the streambuf's view after our
+ * intercept updates the position. */
+ALWAYS_INLINE void mp_sync_in(EFILE *e) {
+  if (e->handle_type != EHANDLE_VIRTUAL) return;
+  e->pos = e->crt_ptr;
+}
+ALWAYS_INLINE void mp_sync_out(EFILE *e) {
+  if (e->handle_type != EHANDLE_VIRTUAL) return;
+  e->crt_ptr = (char*)e->pos;
+  e->crt_cnt = (int)((const char*)e->end - e->pos);
+}
+
+/* Implementation of the _get_stream_buffer_pointers intercept.
+ * For virtual files, return pointers to our crt_* mirror fields - this
+ * lets basic_filebuf treat our embedded blob as the CRT's read buffer
+ * and consume bytes via streambuf cursor advancement (zero-copy). */
+MP_DECL(int) mp__get_stream_buffer_pointers(void *e, char ***pBase, char ***pPointer, int **pCount) {
+  if (MP_FOREIGN_PTR) {
+    return _get_stream_buffer_pointers((FILE*)e, pBase, pPointer, pCount);
+  }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
+    return _get_stream_buffer_pointers(((EFILE*)e)->f, pBase, pPointer, pCount);
+  }
+  EFILE *ef = (EFILE*)e;
+  const char *dbg = getenv("MP_EMBED_DEBUG");
+  if (dbg && *dbg) {
+    fprintf(stderr, "[mp_embed] _get_stream_buffer_pointers: pos=%p crt_ptr=%p crt_cnt=%d\n",
+            (void*)ef->pos, (void*)ef->crt_ptr, ef->crt_cnt);
+  }
+  /* Pull the streambuf's view back into pos first - it may have advanced
+   * crt_ptr past pos via direct cursor reads. */
+  ef->pos = ef->crt_ptr;
+  ef->crt_cnt = (int)((const char*)ef->end - ef->pos);
+  if (pBase)    *pBase    = &ef->crt_base;
+  if (pPointer) *pPointer = &ef->crt_ptr;
+  if (pCount)   *pCount   = &ef->crt_cnt;
+  return 0;
+}
+#endif  /* _WIN32 */
+
+/* Expose the get_virtual_path pipeline for tests. */
+void mp_resolve_virtual_path_for_test(const char *input, char *out, size_t out_size);
+
+#if defined(__linux__) || defined(__APPLE__)
+static pthread_once_t mp_fd2file_init_once = PTHREAD_ONCE_INIT;
+static void mp_fd2file_init_impl(void) {
+    for (int i = 0; i < 512; ++i) {
+      mp_fd2file[i].fd = -1;
+      mp_fd2file[i].f = NULL;
+    }
+    mp_fd2file_initialized = true;
+}
+ALWAYS_INLINE void init_fd2file() {
+  /* pthread_once guarantees the init body runs exactly once across
+   * all threads. Without this, two concurrent first-callers would
+   * both run the loop and one's writes could clobber slot entries
+   * that the other already registered. */
+  pthread_once(&mp_fd2file_init_once, mp_fd2file_init_impl);
+}
+#else
 ALWAYS_INLINE void init_fd2file() {
   if (unlikely(!mp_fd2file_initialized)) {
     for (int i = 0; i < 512; ++i) {
@@ -95,6 +405,7 @@ ALWAYS_INLINE void init_fd2file() {
     mp_fd2file_initialized = true;
   }
 }
+#endif
 
 // Normalize path by resolving ".." and "."
 void mp_normalize_path(char *path) {
@@ -102,15 +413,28 @@ void mp_normalize_path(char *path) {
   char *tokens[PATH_MAX];  // Array to store path segments
   int depth = 0;
 
-  // Tokenize by "/"
-  char *token = strtok(path, "/");
+  /* Tokenize by "/". Use the reentrant variant (strtok_r on POSIX,
+   * strtok_s on Windows) - plain strtok keeps an internal static
+   * cursor and corrupts under concurrent calls from multiple threads,
+   * which manifests as fopen returning NULL for valid virtual paths. */
+#ifdef _WIN32
+  char *saveptr = NULL;
+  char *token = strtok_s(path, "/", &saveptr);
+#else
+  char *saveptr = NULL;
+  char *token = strtok_r(path, "/", &saveptr);
+#endif
   while (token) {
     if (strcmp(token, "..") == 0) {
       if (depth > 0) depth--;  // Go up a directory (if possible)
     } else if (strcmp(token, ".") != 0) {
       tokens[depth++] = token;  // Add to valid path segments
     }
-    token = strtok(NULL, "/");
+#ifdef _WIN32
+    token = strtok_s(NULL, "/", &saveptr);
+#else
+    token = strtok_r(NULL, "/", &saveptr);
+#endif
   }
 
   // Reconstruct the normalized path
@@ -306,7 +630,18 @@ void mp_get_absolute_path(const char *relative_path, char *absolute_path, size_t
 #endif
 }
 
-static bool get_executable_path(char *execfolder, char *executable) {
+/* Cache executable path - it doesn't change during process lifetime, but
+ * the legacy code re-derived it on every fopen/stat/etc. via GetModuleFileName
+ * or readlink("/proc/self/exe"). On miss-heavy workloads (most fopen calls
+ * aren't for embedded data) that syscall dominates the embed lookup.
+ *
+ * We populate the cache on first call. Race conditions are benign: every
+ * thread that loses the race writes the same content. */
+static char       mp_cached_execfolder[PATH_MAX] = {0};
+static char       mp_cached_executable[PATH_MAX] = {0};
+static int        mp_cached_exec_state           = 0;  /* 0=unset, 1=ok, -1=fail */
+
+static bool mp_resolve_exec_path_uncached(char *execfolder, char *executable) {
 #ifdef _WIN32
   if (GetModuleFileName(NULL, executable, PATH_MAX) == 0) return false;
   if (GetModuleFileName(NULL, execfolder, PATH_MAX) == 0) return false;
@@ -321,31 +656,35 @@ static bool get_executable_path(char *execfolder, char *executable) {
   strncpy(execfolder, dirname(resolved_path), PATH_MAX);
 #else
   char path[PATH_MAX];
-  size_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+  ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
   if (len == -1) return false;
   path[len] = '\0';
   strncpy(executable, path, PATH_MAX);
   strncpy(execfolder, dirname(path), PATH_MAX);
 #endif
-
   return true;
 }
 
-static bool find_embedded_file(char *search_path, EMAP **found_map) {
-  EMAP *map = (EMAP*)(&nuitka_embed_map);
-  const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-  for (char *p = search_path ; *p; ++p) *p = tolower(*p);
-  uint32_t key = hash(search_path);
-
-  while ((char*)map < end) {
-    if (map->hash == key && strcasecmp(&nuitka_embed_data + map->pathpos, search_path) == 0) {
-      *found_map = map;
-      return true;
-    }
-    map++;
+static bool get_executable_path(char *execfolder, char *executable) {
+  if (likely(mp_cached_exec_state == 1)) {
+    memcpy(execfolder, mp_cached_execfolder, PATH_MAX);
+    memcpy(executable, mp_cached_executable, PATH_MAX);
+    return true;
   }
-  return false;
+  if (mp_cached_exec_state == -1) return false;
+
+  /* First call - resolve and cache. */
+  if (!mp_resolve_exec_path_uncached(execfolder, executable)) {
+    mp_cached_exec_state = -1;
+    return false;
+  }
+  memcpy(mp_cached_execfolder, execfolder, PATH_MAX);
+  memcpy(mp_cached_executable, executable, PATH_MAX);
+  mp_cached_exec_state = 1;
+  return true;
 }
+
+/* find_embedded_file moved to top of file with v2 implementation. */
 
 static void get_virtual_path(char *search_path, const char *execfolder, const char *absolute_path) {
   size_t execfolder_len = strlen(execfolder);
@@ -376,37 +715,271 @@ static void get_virtual_path(char *search_path, const char *execfolder, const ch
   }
 }
 
+#if defined(__linux__) || defined(__APPLE__)
+/* Two link modes for POSIX:
+ *
+ *   MP_EMBED_USE_WRAP defined: build is linked with
+ *     -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,
+ *     --wrap=fstat,--wrap=close. The linker rewrites references to
+ *     those names to __wrap_* (defined further down) and resolves
+ *     __real_* to the original libc symbol. Full transparency for
+ *     std::ifstream etc.
+ *
+ *   MP_EMBED_USE_WRAP NOT defined: only mp_embed.h's macro intercepts
+ *     in user TUs are active; precompiled libstdc++.a/libc++.a calls
+ *     bypass us. __real_* are macroed to plain libc names so mp_fopen
+ *     and the wraps still build and work for direct user calls. */
+#  ifdef MP_EMBED_USE_WRAP
+extern FILE   *__real_fopen(const char *path, const char *mode);
+extern int     __real_fclose(FILE *f);
+extern ssize_t __real_read(int fd, void *buf, size_t n);
+extern off_t   __real_lseek(int fd, off_t offset, int whence);
+extern int     __real_fstat(int fd, struct stat *st);
+extern int     __real_close(int fd);
+#  else
+#    define __real_fopen   fopen
+#    define __real_fclose  fclose
+#    define __real_read    read
+#    define __real_lseek   lseek
+#    define __real_fstat   fstat
+#    define __real_close   close
+#  endif
+#endif
+
+/* Test helper: run the mp_get_absolute_path -> get_virtual_path pipeline
+ * and return the resulting search path. Useful for verifying path
+ * translation without going through fopen. */
+void mp_resolve_virtual_path_for_test(const char *input, char *out, size_t out_size) {
+  char absolute_path[PATH_MAX] = {0};
+  mp_get_absolute_path(input, absolute_path, PATH_MAX);
+  char execfolder[PATH_MAX] = {0}, executable[PATH_MAX] = {0};
+  if (!get_executable_path(execfolder, executable)) {
+    if (out_size > 0) out[0] = '\0';
+    return;
+  }
+  char search_path[PATH_MAX] = {0};
+  get_virtual_path(search_path, execfolder, absolute_path);
+  strncpy(out, search_path, out_size - 1);
+  out[out_size - 1] = '\0';
+}
+
 MP_DECL(EFILE*) mp_fopen(const char* file, const char* mode) {
+  const char *dbg = getenv("MP_EMBED_DEBUG");
+  if (dbg && *dbg) fprintf(stderr, "[mp_embed] mp_fopen: '%s'\n", file ? file : "(null)");
   char absolute_path[PATH_MAX] = {};
   mp_get_absolute_path(file, absolute_path, PATH_MAX);
   char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
   if (get_executable_path(execfolder, executable)) {
     char search_path[PATH_MAX] = {};
     get_virtual_path(search_path, execfolder, absolute_path);
+    if (dbg && *dbg) fprintf(stderr, "[mp_embed]   abs='%s' virt='%s'\n", absolute_path, search_path);
 
     EMAP *map;
     if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
-      EFILE *e = (EFILE *) malloc(sizeof *e);
-      e->handle_type = EHANDLE_VIRTUAL;
-      e->name = &nuitka_embed_data + map->pathpos;
-      e->pos = &nuitka_embed_data + map->pos;
-      e->end = &nuitka_embed_data + map->pos + map->size;
-      e->size = map->size;
-      e->map = map;
+      /* User-facing virtual fopen returns an EFILE wrapper - mp_fread/
+       * mp_fseek/etc check the EHANDLE_VIRTUAL magic and serve from
+       * embed memory directly. libstdc++.a, which doesn't go through
+       * our macros, takes the __wrap_fopen path further down instead. */
+      EFILE *e = (EFILE *) calloc(1, sizeof *e);
+      mp_efile_init_virtual(e, map);
       return e;
     }
   }
 
+#if defined(__linux__) || defined(__APPLE__)
+  /* Native (non-virtual) files: return a plain FILE* with no EFILE
+   * wrap. mp_fread etc detect the foreign pointer (no EFILE magic)
+   * and pass it through to libc. Use __real_fopen so that
+   * --wrap=fopen doesn't route us back into __wrap_fopen and recurse. */
+  FILE *f = __real_fopen(file, mode);
+  return (EFILE*)f;
+#else
   FILE* f = fopen(file, mode);
   if (f == NULL)
     return NULL;
 
-  EFILE* e = (EFILE*)malloc(sizeof *e);
+  EFILE* e = (EFILE*)calloc(1, sizeof *e);
   e->handle_type = EHANDLE_NATIVE;
   e->f = f;
 
   return e;
+#endif
 }
+
+#if defined(__linux__) || defined(__APPLE__)
+/* Linker hooks for the --wrap chain that makes std::ifstream see
+ * virtual files transparently on POSIX.
+ *
+ * Build with `-Wl,--wrap=fopen --wrap=read --wrap=lseek --wrap=fstat
+ * --wrap=close`. The linker rewrites every call to those names (in
+ * every object file, including the precompiled libstdc++.a /
+ * libc++.a) into __wrap_NAME, and exposes the original libc symbol
+ * as __real_NAME.
+ *
+ * Each wrap below looks the fd / path up: if it belongs to a virtual
+ * file, we serve from embed memory zero-copy; otherwise we delegate
+ * to __real_NAME so real files still work.
+ *
+ * The weak __real_NAME stubs below provide a fallback when --wrap
+ * isn't passed (e.g. an older link command): they just call the libc
+ * symbol directly. With --wrap, the linker provides a strong
+ * __real_NAME that wins and routes to the un-wrapped libc symbol -
+ * no recursion.
+ */
+/* __real_* are declared further up (see comment block at the top of
+ * the POSIX section), guarded by MP_EMBED_USE_WRAP. */
+
+/* Lookup helper. Returns NULL if fd isn't one of ours, else the
+ * EFILE bound to it. mp_fd2file is also used by the existing mp_open
+ * fakefd registry so this is shared state. */
+static EFILE *mp_lookup_virtual_fd(int fd) {
+    if (!mp_fd2file_initialized) return NULL;
+    for (int i = 0; i < 512; i++) {
+        if (mp_fd2file[i].fd == fd) {
+            EFILE *e = mp_fd2file[i].f;
+            return (e && e->handle_type == EHANDLE_VIRTUAL) ? e : NULL;
+        }
+    }
+    return NULL;
+}
+
+/* __wrap_fopen serves precompiled library callers (libstdc++.a's
+ * basic_file::sys_open, third-party static libs, etc.) that don't go
+ * through our header macros. They expect a real libc FILE* and will
+ * call fileno() on it to get an fd, then read()/lseek()/fstat() at
+ * the fd layer. So for virtual paths we create a real FILE* over a
+ * fakefd, registered in mp_fd2file - the __wrap_read/lseek/fstat
+ * functions look the fakefd up and serve from embed memory. */
+FILE *__wrap_fopen(const char *path, const char *mode) {
+    /* Path translation: same as mp_fopen, but we want our own EFILE
+     * + real FILE* rather than the user-facing EFILE wrapper. */
+    char absolute_path[PATH_MAX] = {0};
+    mp_get_absolute_path(path, absolute_path, PATH_MAX);
+    char execfolder[PATH_MAX] = {0}, executable[PATH_MAX] = {0};
+    if (!get_executable_path(execfolder, executable))
+        return __real_fopen(path, mode);
+    char search_path[PATH_MAX] = {0};
+    get_virtual_path(search_path, execfolder, absolute_path);
+
+    EMAP *map = NULL;
+    if (!find_embedded_file(search_path, &map) || map->type != ETYPE_FILE)
+        return __real_fopen(path, mode);
+
+    EFILE *e = (EFILE*)calloc(1, sizeof *e);
+    if (!e) return NULL;
+    mp_efile_init_virtual(e, map);
+    init_fd2file();
+    int fakefd = open("/dev/null", O_RDONLY);
+    if (fakefd < 0) { mp_efile_destroy(e); return NULL; }
+    bool registered = false;
+    pthread_mutex_lock(&mp_fd2file_mutex);
+    for (int i = 0; i < 512; i++) {
+        if (mp_fd2file[i].fd == -1) {
+            mp_fd2file[i].fd = fakefd;
+            mp_fd2file[i].f  = e;
+            registered = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&mp_fd2file_mutex);
+    if (!registered) { __real_close(fakefd); mp_efile_destroy(e); return NULL; }
+    FILE *f = fdopen(fakefd, "rb");
+    if (!f) {
+        pthread_mutex_lock(&mp_fd2file_mutex);
+        for (int i = 0; i < 512; i++) {
+            if (mp_fd2file[i].fd == fakefd) {
+                mp_fd2file[i].fd = -1; mp_fd2file[i].f = NULL; break;
+            }
+        }
+        pthread_mutex_unlock(&mp_fd2file_mutex);
+        __real_close(fakefd); mp_efile_destroy(e); return NULL;
+    }
+    return f;
+}
+
+ssize_t __wrap_read(int fd, void *buf, size_t n) {
+    EFILE *e = mp_lookup_virtual_fd(fd);
+    if (!e) return __real_read(fd, buf, n);
+    size_t avail = (size_t)(e->end - e->pos);
+    size_t to_read = (n < avail) ? n : avail;
+    if (to_read == 0) return 0;
+    memcpy(buf, e->pos, to_read);
+    e->pos = e->pos + to_read;
+    return (ssize_t)to_read;
+}
+
+off_t __wrap_lseek(int fd, off_t offset, int whence) {
+    EFILE *e = mp_lookup_virtual_fd(fd);
+    if (!e) return __real_lseek(fd, offset, whence);
+    const char *base = e->end - e->size;
+    const char *newp;
+    switch (whence) {
+        case SEEK_SET: newp = base + offset; break;
+        case SEEK_CUR: newp = e->pos + offset; break;
+        case SEEK_END: newp = e->end + offset; break;
+        default: errno = EINVAL; return (off_t)-1;
+    }
+    if (newp < base || newp > e->end) { errno = EINVAL; return (off_t)-1; }
+    e->pos = newp;
+    return (off_t)(newp - base);
+}
+
+int __wrap_fstat(int fd, struct stat *st) {
+    EFILE *e = mp_lookup_virtual_fd(fd);
+    if (!e) return __real_fstat(fd, st);
+    memset(st, 0, sizeof *st);
+    st->st_size = (off_t)e->size;
+    st->st_mode = S_IFREG | 0444;
+    st->st_nlink = 1;
+    return 0;
+}
+
+/* Helper: drop the registry entry for a given fakefd if it's one of
+ * ours. Returns the EFILE that should be freed (or NULL). The caller
+ * is responsible for the actual free outside the lock. */
+static EFILE *mp_unregister_fakefd(int fd) {
+    EFILE *to_free = NULL;
+    pthread_mutex_lock(&mp_fd2file_mutex);
+    if (mp_fd2file_initialized) {
+        for (int i = 0; i < 512; i++) {
+            if (mp_fd2file[i].fd == fd) {
+                EFILE *e = mp_fd2file[i].f;
+                if (e && e->handle_type == EHANDLE_VIRTUAL) {
+                    to_free = e;
+                    mp_fd2file[i].fd = -1;
+                    mp_fd2file[i].f  = NULL;
+                }
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&mp_fd2file_mutex);
+    return to_free;
+}
+
+int __wrap_close(int fd) {
+    /* Drop our registry entry BEFORE closing the kernel fd. Otherwise
+     * the kernel can recycle the fd into another thread's open() while
+     * our slot still points at the (now-freed) EFILE. */
+    EFILE *to_free = mp_unregister_fakefd(fd);
+    int r = __real_close(fd);
+    if (to_free) mp_efile_destroy(to_free);
+    return r;
+}
+
+/* basic_file::close calls fclose, which internally uses a libc-private
+ * __close that bypasses our --wrap=close. So we wrap fclose itself:
+ * snapshot the fd, drop our registry slot, then let real fclose close
+ * the underlying fd via libc internals. */
+int __wrap_fclose(FILE *f) {
+    int fd = -1;
+    if (f) fd = fileno(f);
+    EFILE *to_free = (fd >= 0) ? mp_unregister_fakefd(fd) : NULL;
+    int r = __real_fclose(f);
+    if (to_free) mp_efile_destroy(to_free);
+    return r;
+}
+#endif
 
 #ifdef _WIN32
 MP_DECL(int) mp_open(const char *file, int flags, int mode) {
@@ -425,13 +998,8 @@ MP_DECL(int) mp_open(const char *file, int flags, mode_t mode) {
 
   EMAP *map;
   if (find_embedded_file(search_path, &map)) {
-    EFILE *e = (EFILE*)malloc(sizeof *e);
-    e->handle_type = EHANDLE_VIRTUAL;
-    e->name = &nuitka_embed_data + map->pathpos;
-    e->pos = &nuitka_embed_data + map->pos;
-    e->end = &nuitka_embed_data + map->pos + map->size;
-    e->size = map->size;
-    e->map = map;
+    EFILE *e = (EFILE*)calloc(1, sizeof *e);
+    mp_efile_init_virtual(e, map);
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
       if (mp_fd2file[i].fd == -1) {
@@ -459,13 +1027,8 @@ MP_DECL(EFILE*) mp_wfopen(const wchar_t *wfile, const wchar_t *mode) {
 
     EMAP *map;
     if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
-      EFILE *e = (EFILE *) malloc(sizeof *e);
-      e->handle_type = EHANDLE_VIRTUAL;
-      e->name = &nuitka_embed_data + map->pathpos;
-      e->pos = &nuitka_embed_data + map->pos;
-      e->end = &nuitka_embed_data + map->pos + map->size;
-      e->size = map->size;
-      e->map = map;
+      EFILE *e = (EFILE *) calloc(1, sizeof *e);
+      mp_efile_init_virtual(e, map);
       return e;
     }
   }
@@ -474,11 +1037,58 @@ MP_DECL(EFILE*) mp_wfopen(const wchar_t *wfile, const wchar_t *mode) {
   if (f == NULL)
     return NULL;
 
-  EFILE* e = (EFILE*)malloc(sizeof *e);
+  EFILE* e = (EFILE*)calloc(1, sizeof *e);
   e->handle_type = EHANDLE_NATIVE;
   e->f = f;
 
   return e;
+}
+
+/* MSVC safer-CRT stdio: errno_t fopen_s(FILE**, ...) */
+MP_DECL(int) mp_fopen_s(EFILE **pf, const char *filename, const char *mode) {
+  if (pf == NULL || filename == NULL || mode == NULL) return EINVAL;
+  *pf = NULL;
+  EFILE *e = mp_fopen(filename, mode);
+  if (e == NULL) return errno ? errno : ENOENT;
+  *pf = e;
+  return 0;
+}
+
+MP_DECL(int) mp__wfopen_s(EFILE **pf, const wchar_t *filename, const wchar_t *mode) {
+  if (pf == NULL || filename == NULL || mode == NULL) return EINVAL;
+  *pf = NULL;
+  EFILE *e = mp_wfopen(filename, mode);
+  if (e == NULL) return errno ? errno : ENOENT;
+  *pf = e;
+  return 0;
+}
+
+/* Safer-CRT _sopen_s / _wsopen_s. We delegate to mp_open / mp_wopen which
+ * already does the embed lookup for the file descriptor case. shflag
+ * (sharing flag) is only meaningful for real OS files; virtual files
+ * are inherently shareable read-only. */
+MP_DECL(int) mp__sopen_s(int *pfh, const char *filename, int oflag, int shflag, int pmode) {
+  (void)shflag;
+  if (pfh == NULL || filename == NULL) return EINVAL;
+  int fd = mp_open(filename, oflag, pmode);
+  if (fd < 0) {
+    *pfh = -1;
+    return errno ? errno : ENOENT;
+  }
+  *pfh = fd;
+  return 0;
+}
+
+MP_DECL(int) mp__wsopen_s(int *pfh, const wchar_t *filename, int oflag, int shflag, int pmode) {
+  (void)shflag;
+  if (pfh == NULL || filename == NULL) return EINVAL;
+  int fd = mp_wopen(filename, oflag, pmode);
+  if (fd < 0) {
+    *pfh = -1;
+    return errno ? errno : ENOENT;
+  }
+  *pfh = fd;
+  return 0;
 }
 
 MP_DECL(int) mp_wopen(const wchar_t *wfile, int flags, int mode) {
@@ -497,13 +1107,8 @@ MP_DECL(int) mp_wopen(const wchar_t *wfile, int flags, int mode) {
 
   EMAP *map;
   if (find_embedded_file(search_path, &map)) {
-    EFILE* e = (EFILE*)malloc(sizeof *e);
-    e->handle_type = EHANDLE_VIRTUAL;
-    e->name = (&nuitka_embed_data + map->pathpos);
-    e->pos = (&nuitka_embed_data + map->pos);
-    e->end = (&nuitka_embed_data + map->pos + map->size);
-    e->size = map->size;
-    e->map = map;
+    EFILE* e = (EFILE*)calloc(1, sizeof *e);
+    mp_efile_init_virtual(e, map);
     int fakefd = open(executable, O_RDONLY);
     for (int i = 0; i < 512; i++) {
       if (mp_fd2file[i].fd == -1) {
@@ -577,18 +1182,13 @@ MP_DECL(int) mp_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
       return -1;
     }
 
-    EFILE *e = (EFILE*)malloc(sizeof *e);
-    e->handle_type = EHANDLE_VIRTUAL;
-    e->name = &nuitka_embed_data + map->pathpos;
-    e->pos = &nuitka_embed_data + map->pos;
-    e->end = &nuitka_embed_data + map->pos + map->size;
-    e->size = map->size;
-    e->map = map;
+    EFILE *e = (EFILE*)calloc(1, sizeof *e);
+    mp_efile_init_virtual(e, map);
 
     // Use the executable itself for the underlying native fd
     int fakefd = open(executable, O_RDONLY);
     if (fakefd == -1) {
-      free(e);
+      mp_efile_destroy(e);
       return -1; // errno will be set by open()
     }
 
@@ -601,7 +1201,7 @@ MP_DECL(int) mp_openat(int dirfd, const char *pathname, int flags, mode_t mode) 
     }
 
     // No more file descriptors available in our virtual table
-    free(e);
+    mp_efile_destroy(e);
     close(fakefd);
     errno = EMFILE;
     return -1;
@@ -631,8 +1231,7 @@ MP_DECL(int) mp_fclose(void* e) {
   if (efile->handle_type == EHANDLE_NATIVE) {
     // Call the real fclose on the underlying FILE stream.
     int result = fclose(efile->f);
-    // Free the EFILE wrapper struct.
-    free(efile);
+    mp_efile_destroy(efile);
     return result;
   }
 
@@ -649,8 +1248,7 @@ MP_DECL(int) mp_fclose(void* e) {
         mp_fd2file[i].fd = -1;
         mp_fd2file[i].f = NULL;
 
-        // Free the EFILE struct itself.
-        free(efile);
+        mp_efile_destroy(efile);
 
         // Finally, close the underlying native file descriptor.
         // The return value of the underlying close() is the result of this operation.
@@ -662,7 +1260,7 @@ MP_DECL(int) mp_fclose(void* e) {
   // Fallback for unrecognized handle types or for virtual files that
   // were somehow created without a map entry (which indicates a bug).
   // The best we can do is free the wrapper to prevent a memory leak.
-  free(efile);
+  mp_efile_destroy(efile);
   return 0;
 }
 
@@ -682,6 +1280,11 @@ MP_DECL(int) mp_close(int fd) {
   }
   if (e->handle_type != EHANDLE_VIRTUAL) {
     fclose(e->f);
+    if (fd_idx != -1) {
+      mp_fd2file[fd_idx].fd = -1;
+      mp_fd2file[fd_idx].f = NULL;
+    }
+    mp_efile_destroy(e);
     return 0;
   }
 
@@ -689,6 +1292,7 @@ MP_DECL(int) mp_close(int fd) {
     mp_fd2file[fd_idx].fd = -1;
     mp_fd2file[fd_idx].f = NULL;
   }
+  mp_efile_destroy(e);
 
   // Close the underlying file descriptor that was opened on the executable
   return close(fd);
@@ -696,13 +1300,13 @@ MP_DECL(int) mp_close(int fd) {
 
 MP_DECL(EFILE*) mp_freopen(const char *filename, const char *mode, void *e) {
   if (MP_FOREIGN_PTR) {
-    EFILE* e = (EFILE*)malloc(sizeof *e);
+    EFILE* e = (EFILE*)calloc(1, sizeof *e);
     e->handle_type = EHANDLE_NATIVE;
     e->f = freopen(filename, mode, (FILE*)e);
     return e;
   }
   if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
-    EFILE* e = (EFILE*)malloc(sizeof *e);
+    EFILE* e = (EFILE*)calloc(1, sizeof *e);
     e->handle_type = EHANDLE_NATIVE;
     e->f = freopen(filename, mode, ((EFILE*)e)->f);
     return e;
@@ -716,7 +1320,7 @@ MP_DECL(EFILE*) mp_tmpfile() {
   if (f == NULL)
     return NULL;
 
-  EFILE* e = (EFILE*)malloc(sizeof *e);
+  EFILE* e = (EFILE*)calloc(1, sizeof *e);
   e->handle_type = EHANDLE_NATIVE;
   e->f = f;
 
@@ -752,16 +1356,44 @@ MP_DECL(size_t) mp_fread(void* ptr, size_t size, size_t count, void* e) {
     return fread(ptr, size, count, ((EFILE*)e)->f);
   }
 
-  if(((EFILE*)e)->end - ((EFILE*)e)->pos < size*count){
-    size_t scount = ((EFILE*)e)->end - ((EFILE*)e)->pos;
-    memcpy(ptr, (void*)((EFILE*)e)->pos, scount);
-    ((EFILE*)e)->pos = ((EFILE*)e)->end;
-    return (scount/size);
+  /* C standard: if size==0 or count==0, fread returns 0 and the stream
+   * is left unchanged. */
+  if (size == 0 || count == 0) return 0;
+
+  const char *dbg = getenv("MP_EMBED_DEBUG");
+  if (dbg && *dbg) {
+    EFILE *ef = (EFILE*)e;
+#ifdef _WIN32
+    fprintf(stderr, "[mp_embed] mp_fread size=%zu count=%zu pos=%p crt_ptr=%p crt_cnt=%d\n",
+            size, count, (void*)ef->pos, (void*)ef->crt_ptr, ef->crt_cnt);
+#else
+    fprintf(stderr, "[mp_embed] mp_fread size=%zu count=%zu pos=%p\n",
+            size, count, (void*)ef->pos);
+#endif
   }
 
-  memcpy(ptr, (void*)((EFILE*)e)->pos, size*count);
-  ((EFILE*)e)->pos = (char*)((EFILE*)e)->pos + size*count;
-  return count;
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
+
+  size_t avail = (size_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
+  size_t want  = size * count;
+  size_t result;
+  if (avail < want) {
+    size_t scount = avail;
+    memcpy(ptr, (void*)((EFILE*)e)->pos, scount);
+    ((EFILE*)e)->pos = ((EFILE*)e)->end;
+    result = scount / size;
+  } else {
+    memcpy(ptr, (void*)((EFILE*)e)->pos, want);
+    ((EFILE*)e)->pos = (char*)((EFILE*)e)->pos + want;
+    result = count;
+  }
+
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
+  return result;
 }
 
 #ifdef _WIN32
@@ -942,9 +1574,20 @@ MP_DECL(int) mp_fgetc(void* e) {
     return fgetc(((EFILE*)e)->f);
   }
 
+#ifdef _WIN32
+  /* MSVC's basic_filebuf<char>::underflow calls fgetc(); the streambuf
+   * may have advanced crt_ptr past pos via direct cursor reads, so pull
+   * that view back into pos before reading. */
+  mp_sync_in((EFILE*)e);
+#endif
+
   if(mp_feof(e))
     return -1;
-  return (int)(unsigned char)(*(((EFILE*)e)->pos++));
+  int ch = (int)(unsigned char)(*(((EFILE*)e)->pos++));
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
+  return ch;
 }
 
 #ifndef _WIN32
@@ -999,18 +1642,30 @@ int mp_fseek_priv(void* e, int64_t offset, int origin) {
 #endif
   }
 
-  if(origin == SEEK_SET)
-    ((EFILE*)e)->pos = ((EFILE*)e)->end - ((EFILE*)e)->size + offset;
-  if(origin == SEEK_CUR)
-    ((EFILE*)e)->pos += offset;
-  if(origin == SEEK_END)
-    ((EFILE*)e)->pos = ((EFILE*)e)->end + offset;
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
 
-  if(((EFILE*)e)->end < ((EFILE*)e)->pos || mp_ftell(e) < 0) {
+  /* Compute the new position into a local first so we can validate
+   * before mutating - leaving pos in a half-updated state on failure
+   * (and then having a subsequent fread return garbage past the end)
+   * was a real bug. */
+  const char *base = ((EFILE*)e)->end - ((EFILE*)e)->size;
+  const char *new_pos = ((EFILE*)e)->pos;
+  if (origin == SEEK_SET)      new_pos = base + offset;
+  else if (origin == SEEK_CUR) new_pos = ((EFILE*)e)->pos + offset;
+  else if (origin == SEEK_END) new_pos = ((EFILE*)e)->end + offset;
+  else { errno = EINVAL; return -1; }
+
+  if (new_pos < base || new_pos > ((EFILE*)e)->end) {
     errno = EINVAL;
     return -1;
   }
 
+  ((EFILE*)e)->pos = new_pos;
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
   return 0;
 }
 
@@ -1283,8 +1938,75 @@ MP_DECL(int) mp_ungetc(int character, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return ungetc(character, ((EFILE*)e)->f);
   }
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
+  EFILE *ef = (EFILE*)e;
+  /* Move pos back one byte if possible. The C standard allows ungetting
+   * a different character than what was last read; we just store the
+   * caller's character at pos-1 if we can, but for our read-only blob
+   * we just rewind without storing - the next read will get the original
+   * bytes again, which is fine because callers normally unget the same
+   * character they just read. */
+  const char *base = ef->end - ef->size;
+  if (ef->pos > base) {
+    ef->pos--;
+  } else {
+    return -1;  // can't unget at start of file
+  }
+#ifdef _WIN32
+  mp_sync_out(ef);
+#endif
   return character;
 }
+
+/* Wide-char IO: needed because MSVC's STL filebuf calls fgetwc/fputwc/
+ * ungetwc on the FILE* it got back from fopen/_wfopen_s. Without these
+ * intercepts the type gets passed through but the underlying call goes
+ * to the real CRT which segfaults on our EFILE*. */
+#include <wchar.h>
+
+MP_DECL(wint_t) mp_fgetwc(void *e) {
+  if (MP_FOREIGN_PTR) return fgetwc((FILE*)e);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return fgetwc(((EFILE*)e)->f);
+  if (mp_feof(e)) return WEOF;
+  /* Virtual files are binary blobs. Returning one byte at a time gives
+   * MSVC's filebuf code conversion enough to do its work for ASCII /
+   * single-byte UTF-8 input. Multibyte conversion is left to upper
+   * layers. */
+  return (wint_t)(unsigned char)(*(((EFILE*)e)->pos++));
+}
+
+MP_DECL(wint_t) mp_fputwc(wchar_t c, void *e) {
+  if (MP_FOREIGN_PTR) return fputwc(c, (FILE*)e);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return fputwc(c, ((EFILE*)e)->f);
+  errno = EACCES;
+  return WEOF;
+}
+
+MP_DECL(wint_t) mp_ungetwc(wint_t c, void *e) {
+  if (MP_FOREIGN_PTR) return ungetwc(c, (FILE*)e);
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return ungetwc(c, ((EFILE*)e)->f);
+  if (((EFILE*)e)->pos > ((EFILE*)e)->end - ((EFILE*)e)->size) {
+    --((EFILE*)e)->pos;
+    return c;
+  }
+  return WEOF;
+}
+
+#ifdef _WIN32
+/* MSVC's STL filebuf does _lock_file/_unlock_file around stream ops. */
+MP_DECL(void) mp__lock_file(void *e) {
+  if (MP_FOREIGN_PTR) { _lock_file((FILE*)e); return; }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) { _lock_file(((EFILE*)e)->f); return; }
+  /* Virtual files don't need locking - they're read-only memory. */
+}
+
+MP_DECL(void) mp__unlock_file(void *e) {
+  if (MP_FOREIGN_PTR) { _unlock_file((FILE*)e); return; }
+  if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) { _unlock_file(((EFILE*)e)->f); return; }
+}
+#endif
 
 MP_DECL(EFILE*) mp_fdopen(int fd, const char *mode) {
   init_fd2file();
@@ -1295,7 +2017,7 @@ MP_DECL(EFILE*) mp_fdopen(int fd, const char *mode) {
   }
 
   // If this is not a virtual fd, fallback.
-  EFILE* e = (EFILE*)malloc(sizeof *e);
+  EFILE* e = (EFILE*)calloc(1, sizeof *e);
   e->handle_type = EHANDLE_NATIVE;
   e->f = fdopen(fd, mode);
   return e;
@@ -1354,7 +2076,7 @@ MP_DECL(int) mp__stat32(const char *file, struct _stat32 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1382,7 +2104,7 @@ MP_DECL(int) mp__wstat32(const wchar_t *file, struct _stat32 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1407,7 +2129,7 @@ MP_DECL(int) mp__stat64(const char *file, struct _stat64 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1435,7 +2157,7 @@ MP_DECL(int) mp__wstat64(const wchar_t *file, struct _stat64 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1460,7 +2182,7 @@ MP_DECL(int) mp__stat32i64(const char *file, struct _stat32i64 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1488,7 +2210,7 @@ MP_DECL(int) mp__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1513,7 +2235,7 @@ MP_DECL(int) mp__stat64i32(const char *file, struct _stat64i32 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1541,7 +2263,7 @@ MP_DECL(int) mp__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
                 case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
                 case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
             }
-            tmp.st_size = map->size;
+            tmp.st_size = mp_uncompressed_size(map);
             memcpy(buf, &tmp, sizeof(tmp));
             return 0;
         }
@@ -1616,7 +2338,7 @@ MP_STD(BOOL) mp_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS 
 
             // Populate file size
             ULARGE_INTEGER fileSize;
-            fileSize.QuadPart = map->size;
+            fileSize.QuadPart = mp_uncompressed_size(map);
             pData->nFileSizeHigh = fileSize.HighPart;
             pData->nFileSizeLow = fileSize.LowPart;
 
@@ -1754,24 +2476,19 @@ MP_STD(HANDLE) mp_CreateFileW(
         // We do intentionally allow to "open" a directory.
 
         // The file exists in our virtual file system.
-        EFILE* e = (EFILE*)malloc(sizeof *e);
+        EFILE* e = (EFILE*)calloc(1, sizeof *e);
         if (!e) {
             SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return INVALID_HANDLE_VALUE;
         }
 
-        e->handle_type = EHANDLE_VIRTUAL;
-        e->name = (&nuitka_embed_data + map->pathpos);
-        e->pos = (&nuitka_embed_data + map->pos);
-        e->end = (&nuitka_embed_data + map->pos + map->size);
-        e->size = map->size;
-        e->map = map; // Store map pointer for retrieving info later.
+        mp_efile_init_virtual(e, map);
 
         // Create a real, underlying handle by opening the executable itself.
         // This gives us a valid system handle to return to the caller.
         HANDLE hFake = CreateFileA(executable, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hFake == INVALID_HANDLE_VALUE) {
-            free(e);
+            mp_efile_destroy(e);
             return INVALID_HANDLE_VALUE; // Let caller get the error from CreateFileA.
         }
 
@@ -1785,7 +2502,7 @@ MP_STD(HANDLE) mp_CreateFileW(
         }
 
         // No free slots in our map.
-        free(e);
+        mp_efile_destroy(e);
         CloseHandle(hFake);
         SetLastError(ERROR_TOO_MANY_OPEN_FILES);
         return INVALID_HANDLE_VALUE;
@@ -1793,6 +2510,30 @@ MP_STD(HANDLE) mp_CreateFileW(
 
     // File not found in virtual FS, call the real API.
     return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+/* CreateFile2 - newer Windows SDK entry, used by MSVC <filesystem>. We
+ * delegate to mp_CreateFileW after unpacking the extended parameters. */
+MP_STD(HANDLE) mp_CreateFile2(
+        LPCWSTR lpFileName,
+        DWORD dwDesiredAccess,
+        DWORD dwShareMode,
+        DWORD dwCreationDisposition,
+        LPCREATEFILE2_EXTENDED_PARAMETERS pCreateExParams
+) {
+    DWORD dwFlagsAndAttributes = 0;
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes = NULL;
+    HANDLE hTemplateFile = NULL;
+    if (pCreateExParams) {
+        dwFlagsAndAttributes = pCreateExParams->dwFileAttributes
+                             | pCreateExParams->dwFileFlags
+                             | pCreateExParams->dwSecurityQosFlags;
+        lpSecurityAttributes = pCreateExParams->lpSecurityAttributes;
+        hTemplateFile = pCreateExParams->hTemplateFile;
+    }
+    return mp_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode,
+                          lpSecurityAttributes, dwCreationDisposition,
+                          dwFlagsAndAttributes, hTemplateFile);
 }
 
 MP_STD(BOOL) mp_DeleteFileA(LPCSTR lpFileName) {
@@ -2164,7 +2905,7 @@ static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
     memset(find_data, 0, sizeof(WIN32_FIND_DATAW));
 
     // Convert filename to wide char
-    const char* filename = PathFindFileNameA(&nuitka_embed_data + map->pathpos);
+    const char* filename = PathFindFileNameA(mp_path_of(map));
     mbstowcs(find_data->cFileName, filename, _countof(find_data->cFileName));
     // Ensure null-termination for safety
     find_data->cFileName[_countof(find_data->cFileName) - 1] = L'\0';
@@ -2177,7 +2918,7 @@ static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
 
     // Set file size
     ULARGE_INTEGER fileSize;
-    fileSize.QuadPart = map->size;
+    fileSize.QuadPart = mp_uncompressed_size(map);
     find_data->nFileSizeHigh = fileSize.HighPart;
     find_data->nFileSizeLow = fileSize.LowPart;
 }
@@ -2248,43 +2989,32 @@ MP_STD(HANDLE) mp_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFi
 
     EMAP *dir_map;
     if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
-        // Ensure virtual directory path ends with a slash for correct matching
-        if (strlen(virtual_dir_path) > 1 && virtual_dir_path[strlen(virtual_dir_path)-1] != '/') {
-            strcat(virtual_dir_path, "/");
-        }
+        /* Walk children directly via the precomputed children index. */
+        for (uint32_t ci = 0; ci < dir_map->children_count; ++ci) {
+            const EMAP* child = mp_embed_child_at(dir_map, ci);
+            const char* filename_part = PathFindFileNameA(mp_path_of(child));
+            if (PathMatchSpecA(filename_part, search_pattern)) {
+                VIRTUAL_FIND_HANDLE_DATA* find_handle_data = (VIRTUAL_FIND_HANDLE_DATA*)malloc(sizeof(VIRTUAL_FIND_HANDLE_DATA));
+                if (!find_handle_data) {
+                    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                    return INVALID_HANDLE_VALUE;
+                }
+                find_handle_data->dir_map = dir_map;
+                find_handle_data->next_child = ci + 1;
+                strcpy(find_handle_data->search_pattern, search_pattern);
 
-        EMAP *map = (EMAP*)(&nuitka_embed_map);
-        const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-
-        while ((char*)map < end) {
-            if (strncmp(&nuitka_embed_data + map->pathpos, virtual_dir_path, strlen(virtual_dir_path)) == 0) {
-                const char* filename_part = (&nuitka_embed_data + map->pathpos) + strlen(virtual_dir_path);
-                if (strchr(filename_part, '/') == NULL) {
-                    if (PathMatchSpecA(filename_part, search_pattern)) {
-                        VIRTUAL_FIND_HANDLE_DATA* find_handle_data = (VIRTUAL_FIND_HANDLE_DATA*)malloc(sizeof(VIRTUAL_FIND_HANDLE_DATA));
-                        if (!find_handle_data) {
-                            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-                            return INVALID_HANDLE_VALUE;
-                        }
-                        find_handle_data->map_ptr = map;
-                        strcpy(find_handle_data->search_pattern, search_pattern);
-                        strcpy(find_handle_data->virtual_dir_path, virtual_dir_path);
-
-                        for (int i = 0; i < 512; i++) {
-                            if (mp_findhandles[i].h == NULL) {
-                                mp_findhandles[i].h = (HANDLE)find_handle_data;
-                                mp_findhandles[i].data = find_handle_data;
-                                populate_find_data(map, lpFindFileData);
-                                return mp_findhandles[i].h;
-                            }
-                        }
-                        free(find_handle_data);
-                        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
-                        return INVALID_HANDLE_VALUE;
+                for (int i = 0; i < 512; i++) {
+                    if (mp_findhandles[i].h == NULL) {
+                        mp_findhandles[i].h = (HANDLE)find_handle_data;
+                        mp_findhandles[i].data = find_handle_data;
+                        populate_find_data((EMAP*)child, lpFindFileData);
+                        return mp_findhandles[i].h;
                     }
                 }
+                free(find_handle_data);
+                SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+                return INVALID_HANDLE_VALUE;
             }
-            map++;
         }
 
         SetLastError(ERROR_FILE_NOT_FOUND);
@@ -2311,21 +3041,14 @@ MP_STD(BOOL) mp_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileDat
         return FindNextFileW(hFindFile, lpFindFileData);
     }
 
-    EMAP *map = find_handle_data->map_ptr + 1;
-    const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-
-    while ((char*)map < end) {
-        if (strncmp(&nuitka_embed_data + map->pathpos, find_handle_data->virtual_dir_path, strlen(find_handle_data->virtual_dir_path)) == 0) {
-            const char* filename_part = (&nuitka_embed_data + map->pathpos) + strlen(find_handle_data->virtual_dir_path);
-            if (strchr(filename_part, '/') == NULL) {
-                if (PathMatchSpecA(filename_part, find_handle_data->search_pattern)) {
-                    find_handle_data->map_ptr = map;
-                    populate_find_data(map, lpFindFileData);
-                    return TRUE;
-                }
-            }
+    const EMAP *dir_map = find_handle_data->dir_map;
+    while (find_handle_data->next_child < dir_map->children_count) {
+        const EMAP* child = mp_embed_child_at(dir_map, find_handle_data->next_child++);
+        const char* filename_part = PathFindFileNameA(mp_path_of(child));
+        if (PathMatchSpecA(filename_part, find_handle_data->search_pattern)) {
+            populate_find_data((EMAP*)child, lpFindFileData);
+            return TRUE;
         }
-        map++;
     }
 
     SetLastError(ERROR_NO_MORE_FILES);
@@ -2598,7 +3321,7 @@ MP_DECL(int) mp_stat(const char *file, struct stat *buf) {
         case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
         case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
       }
-      tmp.st_size = map->size;
+      tmp.st_size = mp_uncompressed_size(map);
       memcpy(buf, &tmp, sizeof(tmp));
       return 0;
     }
@@ -2623,7 +3346,7 @@ MP_DECL(int) mp_lstat(const char *file, struct stat *buf) {
         case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
         case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
       }
-      tmp.st_size = map->size;
+      tmp.st_size = mp_uncompressed_size(map);
       memcpy(buf, &tmp, sizeof(tmp));
       return 0;
     }
@@ -2652,7 +3375,7 @@ MP_DECL(int) mp_fstat(int fd, struct stat *buf) {
           tmp.st_mode |= S_IFDIR; // Directory
           break;
       }
-      tmp.st_size = map->size; // Set the file size.
+      tmp.st_size = mp_uncompressed_size(map); // Set the file size.
       // Other fields like timestamps, user/group ID etc., remain 0.
 
       memcpy(buf, &tmp, sizeof(tmp));
@@ -2695,7 +3418,7 @@ MP_DECL(int) mp_fstatat(int dirfd, const char *pathname, struct stat *buf, int f
             case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
             case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
           }
-          tmp.st_size = map->size;
+          tmp.st_size = mp_uncompressed_size(map);
           memcpy(buf, &tmp, sizeof(tmp));
           return 0;
         } else {
@@ -2725,7 +3448,7 @@ MP_DECL(int) mp_fstatat(int dirfd, const char *pathname, struct stat *buf, int f
         case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
         case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
       }
-      tmp.st_size = map->size;
+      tmp.st_size = mp_uncompressed_size(map);
       memcpy(buf, &tmp, sizeof(tmp));
       return 0;
     }
@@ -2937,9 +3660,9 @@ MP_DECL(ssize_t) mp_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t 
 #endif
 
 typedef struct VDIR_S {
-  EMAP* map_ptr; // Current position in the embedded map iterator
-  char virtual_dir_path[PATH_MAX]; // The virtual path of the directory being searched
-  struct dirent entry; // The current entry to be returned
+  const EMAP* dir_map;       // The directory entry being iterated
+  uint32_t next_child;       // Index into dir_map->children of next entry to return
+  struct dirent entry;       // The current entry to be returned
 } VDIR;
 
 // A map to associate DIR* pointers with our VDIR structs
@@ -2964,12 +3687,8 @@ MP_DECL(DIR*) mp_opendir(const char* name) {
       errno = ENOMEM;
       return NULL;
     }
-    vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
-    strcpy(vdir->virtual_dir_path, virtual_dir_path);
-    // Ensure path ends with a slash for correct matching
-    if (strlen(vdir->virtual_dir_path) > 1 && vdir->virtual_dir_path[strlen(vdir->virtual_dir_path)-1] != '/') {
-      strcat(vdir->virtual_dir_path, "/");
-    }
+    vdir->dir_map = dir_map;
+    vdir->next_child = 0;
 
     for (int i = 0; i < 512; i++) {
       if (mp_open_vdirs[i] == NULL) {
@@ -3012,27 +3731,21 @@ MP_DECL(struct dirent*) mp_readdir(DIR *dirp) {
     return readdir(dirp);
   }
 
-  const char *end = &nuitka_embed_map + nuitka_embed_map_len;
-  while ((char*)vdir->map_ptr < end) {
-    EMAP* current_map = vdir->map_ptr;
-    vdir->map_ptr++; // Advance for next call
-
-    const char* current_path_str = &nuitka_embed_data + current_map->pathpos;
-
-    if (strncmp(current_path_str, vdir->virtual_dir_path, strlen(vdir->virtual_dir_path)) == 0) {
-      const char* filename_part = current_path_str + strlen(vdir->virtual_dir_path);
-      if (*filename_part != '\0' && strchr(filename_part, '/') == NULL) {
-        // It's a direct child.
-        strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
-        vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
-        // Fake inode number from map position
-        vdir->entry.d_ino = (ino_t)((char*)current_map - (const char*) &nuitka_embed_map);
-        vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
-        return &vdir->entry;
-      }
-    }
+  if (vdir->next_child >= vdir->dir_map->children_count) {
+    return NULL; // No more entries
   }
-  return NULL; // No more entries
+  const EMAP* current_map = mp_embed_child_at(vdir->dir_map, vdir->next_child++);
+  const char* full_path = mp_path_of(current_map);
+
+  // Extract just the filename component (last segment after final '/').
+  const char* filename_part = strrchr(full_path, '/');
+  filename_part = filename_part ? filename_part + 1 : full_path;
+
+  strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
+  vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
+  vdir->entry.d_ino = (ino_t)(uintptr_t)current_map; // unique-enough fake inode
+  vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
+  return &vdir->entry;
 }
 
 MP_DECL(int) mp_closedir(DIR *dirp) {
@@ -3055,7 +3768,7 @@ MP_DECL(void) mp_rewinddir(DIR *dirp) {
     }
   }
   if (vdir != NULL) {
-    vdir->map_ptr = (EMAP*)(&nuitka_embed_map);
+    vdir->next_child = 0;
   } else {
     rewinddir(dirp);
   }

@@ -30,8 +30,8 @@ export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
-export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -66,20 +66,7 @@ mkdir -p ${PREFIX}/include
 
 cp Include/mp_embed.h ${PREFIX}/include/
 
-# Preparing embedded resources
-mkdir -p Embedded/embed_data/vfs/ssl
-curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
-python3 Lib/mkembeddata.py Embedded Embedded/embed_data
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
-$CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
-ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
-
-if [ ! -h ${PREFIX}/lib64 ]; then
-  ln -s lib ${PREFIX}/lib64
-fi
-
 mkdir -p dep-build
-cd dep-build
 
 download_file() {
   local url="$1"
@@ -90,6 +77,35 @@ download_file() {
   echo "Failed to download '$url' to '$filename' after 5 retries."
   return 1
 }
+
+# zstd has to be built BEFORE mp_embed.c compiles - mp_embed.c includes
+# <zstd.h> and decompresses each virtual file's zstd frame on fopen. The
+# same archive is also linked by the _zstd Python C extension, so the
+# final binary only contains one copy of zstd's code.
+(
+  cd dep-build
+  if [ ! -d zstd-1.5.7 ]; then
+    download_file https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz zstd.tar.gz
+    tar -xf zstd.tar.gz
+  fi
+  make -C zstd-1.5.7/lib -j$(sysctl -n hw.ncpu) libzstd.a CC="$CC"
+  cp zstd-1.5.7/lib/libzstd.a ${PREFIX}/lib/
+  cp zstd-1.5.7/lib/zstd.h zstd-1.5.7/lib/zstd_errors.h ${PREFIX}/include/
+)
+
+# Preparing embedded resources
+mkdir -p Embedded/embed_data/vfs/ssl
+curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
+python3 Lib/mkembeddata.py Embedded Embedded/embed_data
+$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
+$CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
+ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
+
+if [ ! -h ${PREFIX}/lib64 ]; then
+  ln -s lib ${PREFIX}/lib64
+fi
+
+cd dep-build
 
 if [ ! -d ncurses-6.5 ]; then
 download_file https://invisible-mirror.net/archives/ncurses/ncurses-6.5.tar.gz ncurses.tar.gz
@@ -342,7 +358,7 @@ $ELEVATE cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
 rm -f Embedded/mp_embed.o
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude
+$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
 $ELEVATE cp -r "Embedded/mp_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 

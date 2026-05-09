@@ -36,6 +36,8 @@ jobs:
         ln -s lib MonolithPy-Deps/lib64 || exit 0
     - name: Uninstall homebrew
       run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
+    - name: Install zstandard for mkembeddata
+      run: python3 -m pip install --break-system-packages zstandard
     - name: Run Build
       run: arch -${{ matrix.architecture.arch }} bash build.mac.sh ${{ matrix.lto.lto_arg }} "${{ github.workspace }}/MonolithPy-Out"
     - name: Cleanup artifact
@@ -44,6 +46,59 @@ jobs:
       with:
         name: MonolithPy313_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
         path: ${{ github.workspace }}/MonolithPy-Out
+    - name: Run Python smoke tests
+      run: |
+        arch -${{ matrix.architecture.arch }} bash <<'EOF'
+        set -eux
+        long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
+        long_version=$(echo $long_version | sed -e 's#-.*##')
+        PYTHON_BIN="${{ github.workspace }}/MonolithPy-Out/bin/python${long_version}"
+        echo "Using Python: $PYTHON_BIN"
+        "$PYTHON_BIN" tests/python_smoke.py
+        EOF
+    - name: Run mp_embed tests
+      run: |
+        arch -${{ matrix.architecture.arch }} bash <<'EOF'
+        set -eux
+        long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
+        long_version=$(echo $long_version | sed -e 's#-.*##')
+        PYTHON_BIN="${{ github.workspace }}/MonolithPy-Out/bin/python${long_version}"
+        # Generate test data tree and embed blob
+        "$PYTHON_BIN" tests/mp_embed/build_test_tree.py
+        mkdir -p tests/mp_embed/gen
+        "$PYTHON_BIN" Lib/mkembeddata.py tests/mp_embed/gen tests/mp_embed/tree
+        # We don't recompile mp_embed.c here - we link the very same
+        # mp_embed.o that build.mac.sh produced and shipped in the artifact.
+        # The test's own mp_embed_data.c provides the embed blob symbols
+        # (nuitka_embed_*) that mp_embed.o references; libzstd comes from
+        # MonolithPy-Deps the same way the production build resolved it.
+        DEPS="${{ github.workspace }}/../MonolithPy-Deps"
+        ART="${{ github.workspace }}/MonolithPy-Out"
+        cc -O2 -c -o tests/mp_embed/mp_embed_data.o \
+            tests/mp_embed/gen/mp_embed_data.c
+        # Common link flags. mp_embed.o was built with MP_EMBED_USE_WRAP,
+        # so the __real_* references it carries need the linker --wrap
+        # machinery to resolve them, regardless of whether the test
+        # itself uses libstdc++.
+        WRAPS="-Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+        # C suite (includes threading) - cc inherits arch from the subshell.
+        cc -O2 -pthread $WRAPS -o tests/mp_embed/test_mp_embed \
+            tests/mp_embed/test_mp_embed.c \
+            tests/mp_embed/mp_embed_data.o \
+            "$ART/Embedded/mp_embed.o" \
+            -IInclude -IPC -L"$DEPS/lib" -lzstd
+        ./tests/mp_embed/test_mp_embed
+        # C++ suite. Link with --wrap so libc++.a's basic_file entry
+        # points (fopen/fclose/read/lseek/fstat/close) route to mp_embed.o's
+        # __wrap_* and serve from embed memory zero-copy.
+        c++ -std=c++17 -O2 -pthread $WRAPS \
+            -o tests/mp_embed/test_mp_embed_cpp \
+            tests/mp_embed/test_mp_embed.cpp \
+            tests/mp_embed/mp_embed_data.o \
+            "$ART/Embedded/mp_embed.o" \
+            -IInclude -IPC -L"$DEPS/lib" -lzstd
+        ./tests/mp_embed/test_mp_embed_cpp
+        EOF
     - name: Store cache
       env:
         CACHE_SAS: ${{ secrets.CACHE_SAS }}
@@ -74,6 +129,8 @@ jobs:
 #          unzip -q "$file_name" || exit 0
 #          rm ${file_name} || exit 0
 #          ln -s lib MonolithPy-Deps/lib64 || exit 0
+      - name: Install zstandard for mkembeddata
+        run: python3 -m pip install --break-system-packages zstandard
       - name: Run Build
         run: bash build.sh "${{ github.workspace }}/MonolithPy-Out"
       - name: Cleanup artifact
@@ -82,6 +139,53 @@ jobs:
         with:
           name: MonolithPy313_ubuntu
           path: ${{ github.workspace }}/MonolithPy-Out
+      - name: Run Python smoke tests
+        run: |
+          long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
+          long_version=$(echo $long_version | sed -e 's#-.*##')
+          PYTHON_BIN="${{ github.workspace }}/MonolithPy-Out/bin/python${long_version}"
+          echo "Using Python: $PYTHON_BIN"
+          "$PYTHON_BIN" tests/python_smoke.py
+      - name: Run mp_embed tests
+        run: |
+          long_version=$(git branch --show-current 2>/dev/null || git symbolic-ref --short HEAD)
+          long_version=$(echo $long_version | sed -e 's#-.*##')
+          PYTHON_BIN="${{ github.workspace }}/MonolithPy-Out/bin/python${long_version}"
+          # Generate test data tree and embed blob
+          "$PYTHON_BIN" tests/mp_embed/build_test_tree.py
+          mkdir -p tests/mp_embed/gen
+          "$PYTHON_BIN" Lib/mkembeddata.py tests/mp_embed/gen tests/mp_embed/tree
+          # We don't recompile mp_embed.c here - we link the very same
+          # mp_embed.o that build.sh produced and shipped in the artifact.
+          # The test's own mp_embed_data.c provides the embed blob symbols
+          # (nuitka_embed_*) that mp_embed.o references; libzstd comes
+          # from MonolithPy-Deps the same way the production build did.
+          DEPS="${{ github.workspace }}/../MonolithPy-Deps"
+          ART="${{ github.workspace }}/MonolithPy-Out"
+          cc -O2 -c -o tests/mp_embed/mp_embed_data.o \
+              tests/mp_embed/gen/mp_embed_data.c
+          # Common --wrap set. mp_embed.o was built with MP_EMBED_USE_WRAP,
+          # so the __real_* references it carries need the linker --wrap
+          # machinery to resolve them, regardless of whether the test
+          # itself uses libstdc++.
+          WRAPS="-Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
+          # C suite (includes threading)
+          cc -O2 -pthread $WRAPS -o tests/mp_embed/test_mp_embed \
+              tests/mp_embed/test_mp_embed.c \
+              tests/mp_embed/mp_embed_data.o \
+              "$ART/Embedded/mp_embed.o" \
+              -IInclude -IPC -L"$DEPS/lib" -lzstd
+          ./tests/mp_embed/test_mp_embed
+          # C++ suite. -static-libstdc++ + --wrap so libstdc++.a's
+          # basic_file entry points (fopen/fclose/read/lseek/fstat/close)
+          # route to mp_embed.o's __wrap_* and serve from embed memory.
+          c++ -std=c++17 -O2 -pthread -static-libstdc++ $WRAPS \
+              -o tests/mp_embed/test_mp_embed_cpp \
+              tests/mp_embed/test_mp_embed.cpp \
+              tests/mp_embed/mp_embed_data.o \
+              "$ART/Embedded/mp_embed.o" \
+              -IInclude -IPC -L"$DEPS/lib" -lzstd
+          ./tests/mp_embed/test_mp_embed_cpp
 #      - name: Store cache
 #        env:
 #          CACHE_SAS: ${{ secrets.CACHE_SAS }}
@@ -104,6 +208,9 @@ jobs:
     - uses: TheMrMilchmann/setup-msvc-dev@v3
       with:
         arch: x64
+    - name: Install zstandard for mkembeddata
+      shell: cmd
+      run: python -m pip install zstandard
     - name: Run Build
       shell: cmd
       run: build.bat
@@ -113,3 +220,32 @@ jobs:
       with:
         name: MonolithPy313_windows_x64
         path: output
+    - name: Run Python smoke tests
+      shell: cmd
+      run: |
+        output\python.exe tests\python_smoke.py
+    - name: Run mp_embed tests
+      shell: cmd
+      run: |
+        output\python.exe tests\mp_embed\build_test_tree.py
+        if not exist tests\mp_embed\gen mkdir tests\mp_embed\gen
+        output\python.exe Lib\mkembeddata.py tests\mp_embed\gen tests\mp_embed\tree
+        rem We don't recompile mp_embed.c here - link the very same
+        rem mp_embed.obj that build.bat produced and shipped in the
+        rem artifact. The test's own mp_embed_data.c provides the embed
+        rem blob symbols (nuitka_embed_*) that mp_embed.obj references.
+        rem mp_embed.cpp (std::_Fiopen override) is a per-TU file that
+        rem must be compiled into each C++ binary that uses std::ifstream
+        rem on virtual paths, so we still build it locally.
+        rem _zstd.lib already bundles zstd via PCbuild's StaticLibrary
+        rem build and is referenced by python.exe; reuse it.
+        set ART=output
+        set ZSTD_LIB=PCbuild\amd64\_zstd.lib
+        cl /MT /nologo /Fe:tests\mp_embed\test_mp_embed.exe /IInclude /IPC tests\mp_embed\test_mp_embed.c tests\mp_embed\gen\mp_embed_data.c %ART%\Embedded\mp_embed.obj /link Shlwapi.lib %ZSTD_LIB%
+        if errorlevel 1 exit /b 1
+        cl /MT /TP /std:c++17 /EHsc /nologo /Fe:tests\mp_embed\test_mp_embed_cpp.exe /IInclude /IPC tests\mp_embed\test_mp_embed.cpp tests\mp_embed\gen\mp_embed_data.c Embedded\mp_embed.cpp %ART%\Embedded\mp_embed.obj /link Shlwapi.lib %ZSTD_LIB%
+        if errorlevel 1 exit /b 1
+        tests\mp_embed\test_mp_embed.exe
+        if errorlevel 1 exit /b 1
+        tests\mp_embed\test_mp_embed_cpp.exe
+        if errorlevel 1 exit /b 1

@@ -39,9 +39,22 @@ if NOT DEFINED PYTHON (
 
 %PYTHON% Lib\mkembeddata.py Embedded Embedded\embed_data
 
-cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude
+rem mp_embed.c #includes <zstd.h>, so the externals tree (which holds
+rem the zstd source under externals\zstd-1.5.7) must be populated before
+rem we compile. PCBuild's nuget step further down also calls
+rem get_externals.bat, but we need it earlier so the cl below can find
+rem the header.
+call PCBuild\get_externals.bat
+if %errorlevel% neq 0 exit /b %errorlevel%
+
+cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude /Iexternals\zstd-1.5.7\lib
 cl /c /FoEmbedded\mp_embed_data.obj Embedded\mp_embed_data.c
 
+rem mp_embed.obj has unresolved zstd symbols (ZSTD_decompress etc.); they
+rem get bound when python.exe is linked - PCBuild's _zstd project (built
+rem by the nuget step below) is a StaticLibrary that bundles all of zstd
+rem and is already pulled in via the AdditionalDependencies on
+rem python.vcxproj.
 lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\mp_embed_data.obj
 
 

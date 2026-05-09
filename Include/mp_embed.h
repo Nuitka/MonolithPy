@@ -62,8 +62,9 @@ typedef SSIZE_T ssize_t;
 #define openat orig_openat
 #define fopen orig_fopen
 #define _fopen orig__fopen
-#define fdopen orig_fdopen
+#define fopen_s orig_fopen_s
 #define _fdopen orig__fdopen
+#define fdopen orig_fdopen
 #define freopen orig_freopen
 #define _freopen orig__freopen
 #define fclose orig_fclose
@@ -74,6 +75,12 @@ typedef SSIZE_T ssize_t;
 #define _wopen orig__wopen
 #define wfopen orig_wfopen
 #define _wfopen orig__wfopen
+#define _wfopen_s orig__wfopen_s
+#define _sopen orig__sopen
+#define _wsopen orig__wsopen
+#define _sopen_s orig__sopen_s
+#define _wsopen_s orig__wsopen_s
+#define CreateFile2 orig_CreateFile2
 #define tmpfile orig_tmpfile
 #define fgets orig_fgets
 #define _fgets orig__fgets
@@ -81,6 +88,12 @@ typedef SSIZE_T ssize_t;
 #define getc orig_getc
 #define fgetc orig_fgetc
 #define _fgetc orig__fgetc
+#define fgetwc orig_fgetwc
+#define fputwc orig_fputwc
+#define ungetwc orig_ungetwc
+#define _lock_file orig__lock_file
+#define _unlock_file orig__unlock_file
+#define _get_stream_buffer_pointers orig__get_stream_buffer_pointers
 #define fscanf orig_fscanf
 #define _fscanf orig__fscanf
 #define fread orig_fread
@@ -205,9 +218,9 @@ typedef SSIZE_T ssize_t;
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <wchar.h>      /* wint_t, wchar_t — needed by mp_fgetwc/mp_fputwc/mp_ungetwc prototypes */
 #ifdef _WIN32
 #define NOMINMAX
-#include <wchar.h>
 #include <basetsd.h>
 #if defined(_M_IX86)
 #define _X86_
@@ -242,6 +255,7 @@ typedef SSIZE_T ssize_t;
 #undef openat
 #undef fopen
 #undef _fopen
+#undef fopen_s
 #undef fdopen
 #undef _fdopen
 #undef freopen
@@ -254,6 +268,12 @@ typedef SSIZE_T ssize_t;
 #undef _wopen
 #undef wfopen
 #undef _wfopen
+#undef _wfopen_s
+#undef _sopen
+#undef _wsopen
+#undef _sopen_s
+#undef _wsopen_s
+#undef CreateFile2
 #undef tmpfile
 #undef fgets
 #undef _fgets
@@ -261,6 +281,12 @@ typedef SSIZE_T ssize_t;
 #undef getc
 #undef fgetc
 #undef _fgetc
+#undef fgetwc
+#undef fputwc
+#undef ungetwc
+#undef _lock_file
+#undef _unlock_file
+#undef _get_stream_buffer_pointers
 #undef fscanf
 #undef _fscanf
 #undef fread
@@ -388,14 +414,56 @@ typedef SSIZE_T ssize_t;
 #include <string.h>
 
 
-struct EMAP_S {     // Map Indexing Struct
-    uint32_t hash;
-    uint32_t parentidx;
-    uint32_t pathpos;
-    uint32_t pathsize;
-    uint8_t type;
-    uint32_t pos;
-    uint32_t size;
+/*
+ * mp_embed blob format (v2 - perfect hashing).
+ *
+ * The blob is hard-coupled to the runtime (mp_embed.lib + mp_embed_data.lib
+ * are always relinked together), so there's no version field.
+ *
+ * Lookup: fnv1a64(path) -> bloom-check -> CHD bucket -> seed -> slot ->
+ * entry. 64-bit hash equality is the verification (collisions verified
+ * absent at gen time).
+ *
+ * Memory layout of nuitka_embed_map:
+ *   [Header]            (64 bytes, exactly one cache line)
+ *   [Bloom filter]      (bloom_size_words * 8 bytes)
+ *   [Seeds]             (num_buckets * 4 bytes; CHD displacement)
+ *   [Child slots]       (num_child_slots * 4 bytes; for readdir)
+ *   [Entries]           (num_entries * 32 bytes; CHD slot-indexed)
+ *   [Paths]             (paths_size bytes; null-terminated, indexed by entry.path_offset)
+ *
+ * nuitka_embed_data is just concatenated file content, indexed by
+ * entry.data_pos / entry.data_size.
+ */
+
+typedef struct mp_embed_header_S {
+    uint32_t num_entries;
+    uint32_t num_buckets;
+    uint32_t bloom_size_words;   /* uint64_t words */
+    uint32_t bloom_num_hashes;
+    uint32_t bloom_num_bits;
+    uint32_t bloom_offset;
+    uint32_t seeds_offset;
+    uint32_t child_slots_offset;
+    uint32_t entries_offset;
+    uint32_t paths_offset;
+    uint32_t paths_size;
+    uint32_t num_child_slots;
+    uint32_t map_total_size;
+    uint8_t  pad[12];
+} mp_embed_header_t;
+
+struct EMAP_S {                  /* 32 bytes - 2 entries per cache line */
+    uint64_t hash;               /* full 64-bit FNV-1a hash for verification */
+    uint32_t data_pos;           /* offset into nuitka_embed_data */
+    uint32_t data_size;          /* file size (or 0 for dirs) */
+    uint32_t children_start;     /* index into child_slots[] (dirs only) */
+    uint32_t path_offset;        /* offset into paths blob within nuitka_embed_map */
+    uint16_t children_count;     /* number of children (dirs only) */
+    uint16_t path_len;           /* length of path string */
+    uint8_t  type;               /* ETYPE_FILE / ETYPE_DIRECTORY */
+    uint8_t  flags;              /* reserved */
+    uint16_t pad;
 };
 typedef struct EMAP_S EMAP;
 
@@ -408,6 +476,26 @@ struct EFILE_S {    // Virtual File Stream
     int err;
     FILE* f;
     EMAP* map;
+    /* Decompressed file buffer for virtual files. The blob stores zstd-
+     * compressed frames; mp_efile_init_virtual decompresses into this
+     * malloc'd buffer and points pos/end into it. NULL for native files
+     * and for the empty-file shortcut (size==0). Freed in mp_fclose /
+     * __wrap_close. */
+    void* owned_buf;
+#ifdef _WIN32
+    /* Mirror of the FILE-buffer interface for `_get_stream_buffer_pointers`.
+     * MSVC's basic_filebuf grabs (char**, char**, int*) into these fields and
+     * manipulates the streambuf directly via the buffer cursor. We expose
+     * crt_base/crt_ptr/crt_cnt so filebuf can scan our embed data in place,
+     * zero-copy, with no kernel involvement. They're synced with pos in
+     * mp_sync_in / mp_sync_out at the entry/exit of every intercept.
+     *
+     * Linux libstdc++ and macOS libc don't use this `_get_stream_buffer_pointers`
+     * protocol, so these fields are Windows-only. */
+    char* crt_base;
+    char* crt_ptr;
+    int   crt_cnt;
+#endif
 };
 typedef struct EFILE_S EFILE;
 
@@ -729,6 +817,11 @@ MP_DECL(EFILE*) mp_fopen(const char* file, const char* mode);
 MP_DECL(int) mp_open(const char *pathname, int flags, int mode);
 MP_DECL(EFILE*) mp_wfopen(const wchar_t *wfile, const wchar_t *mode);
 MP_DECL(int) mp_wopen(const wchar_t *pathname, int flags, int mode);
+/* MSVC C++ STL / safer-CRT entry points. errno_t is just int. */
+MP_DECL(int) mp_fopen_s(EFILE **pf, const char *filename, const char *mode);
+MP_DECL(int) mp__wfopen_s(EFILE **pf, const wchar_t *filename, const wchar_t *mode);
+MP_DECL(int) mp__sopen_s(int *pfh, const char *filename, int oflag, int shflag, int pmode);
+MP_DECL(int) mp__wsopen_s(int *pfh, const wchar_t *filename, int oflag, int shflag, int pmode);
 #else  /* _WIN32 */
 MP_DECL(int) mp_open(const char *pathname, int flags, mode_t mode);
 MP_DECL(int) mp_openat(int dirfd, const char* pathname, int flags, mode_t mode);
@@ -751,6 +844,17 @@ MP_DECL(EFILE*) mp_fdopen(int fd, const char *mode);
 
 /* File Input Functions */
 MP_DECL(int) mp_fgetc(void *stream);
+MP_DECL(wint_t) mp_fgetwc(void *stream);
+MP_DECL(wint_t) mp_fputwc(wchar_t c, void *stream);
+MP_DECL(wint_t) mp_ungetwc(wint_t c, void *stream);
+#ifdef _WIN32
+MP_DECL(void) mp__lock_file(void *stream);
+MP_DECL(void) mp__unlock_file(void *stream);
+MP_DECL(int) mp__get_stream_buffer_pointers(void *stream, char ***pBase, char ***pPointer, int **pCount);
+/* C++ STL filebuf entry point. Replacing this with our own version is what
+ * makes std::ifstream see virtual files on Windows. Implemented in
+ * Embedded/mp_embed.cpp because it's `extern "C++"` with overloads. */
+#endif
 MP_DECL(char*) mp_fgets(char *str, int n, void *stream);
 #ifndef _WIN32
 MP_DECL(ssize_t) mp_getline(char **lineptr, size_t *n, void *stream);
@@ -810,6 +914,7 @@ MP_DECL(DWORD) mp_GetFileAttributesW(LPCWSTR lpFileName);
 MP_STD(BOOL) mp_CloseHandle(HANDLE hObject);
 MP_STD(HANDLE) mp_CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
 MP_STD(HANDLE) mp_CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+MP_STD(HANDLE) mp_CreateFile2(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition, LPCREATEFILE2_EXTENDED_PARAMETERS pCreateExParams);
 MP_STD(BOOL) mp_DeleteFileA(LPCSTR lpFileName);
 MP_STD(BOOL) mp_DeleteFileW(LPCWSTR lpFileName);
 MP_STD(BOOL) mp_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORMATION lpFileInformation);
@@ -938,8 +1043,20 @@ MP_DECL(void) mp_rewinddir(DIR *dirp);
 #define MP_EMBED_NUM_ARGS(...) MP_EMBED_IF(MP_EMBED_DEC(MP_EMBED_NUM_ARGS0(__VA_ARGS__)))(MP_EMBED_NUM_ARGS0(__VA_ARGS__),MP_EMBED_IF(MP_EMBED_IS_PAREN(__VA_ARGS__ ()))(0,1))
 #endif  /* __GNUC__ && !__llvm__ && !__INTEL_COMPILER || __APPLE__ */
 
-// Preprocessor Translation
-#define FILE EFILE
+/* Note: we deliberately do NOT `#define FILE EFILE`.
+ *
+ * Doing so would propagate through the C++ STL (e.g. <__msvc_filebuf.hpp>)
+ * and rename FILE in template bodies that also reference UCRT internals
+ * declared earlier (when FILE was still its real typedef). The result is a
+ * cascade of compile errors.
+ *
+ * Instead, fopen() and friends return a *real* FILE* whose value is actually
+ * an EFILE* in disguise. mp_X intercepts cast back to EFILE* and recognise
+ * our handles via EFILE.handle_type magic. Real CRT FILE pointers passing
+ * through (MP_FOREIGN_PTR) fall through to the real CRT functions.
+ *
+ * For user code, this is transparent: `FILE *fp = fopen(path, "rb")` works
+ * exactly as before, and a subsequent fread/fclose hits our intercepts. */
 
 #ifdef __linux
 /* Standard streams.  */
@@ -949,12 +1066,27 @@ extern EFILE *stderr;		/* Standard error output stream.  */
 #endif  /* __linux */
 
 /* File Opening and Closing */
-ALWAYS_INLINE MP_DECL(EFILE*) fopen(const char* file, const char* mode) {
-  return mp_fopen(file, mode);
+ALWAYS_INLINE MP_DECL(FILE*) fopen(const char* file, const char* mode) {
+  return (FILE*)mp_fopen(file, mode);
 }
-ALWAYS_INLINE MP_DECL(EFILE*) _fopen(const char* file, const char* mode) {
-  return mp_fopen(file, mode);
+ALWAYS_INLINE MP_DECL(FILE*) _fopen(const char* file, const char* mode) {
+  return (FILE*)mp_fopen(file, mode);
 }
+#ifdef _WIN32
+/* MSVC safer-CRT and STL filebuf entry points. */
+ALWAYS_INLINE MP_DECL(int) fopen_s(FILE **pf, const char *filename, const char *mode) {
+  return mp_fopen_s((EFILE**)pf, filename, mode);
+}
+ALWAYS_INLINE MP_DECL(int) _wfopen_s(FILE **pf, const wchar_t *filename, const wchar_t *mode) {
+  return mp__wfopen_s((EFILE**)pf, filename, mode);
+}
+ALWAYS_INLINE MP_DECL(int) _sopen_s(int *pfh, const char *filename, int oflag, int shflag, int pmode) {
+  return mp__sopen_s(pfh, filename, oflag, shflag, pmode);
+}
+ALWAYS_INLINE MP_DECL(int) _wsopen_s(int *pfh, const wchar_t *filename, int oflag, int shflag, int pmode) {
+  return mp__wsopen_s(pfh, filename, oflag, shflag, pmode);
+}
+#endif
 
 #if (defined(__GNUC__) && !defined(__llvm__) && !defined(__INTEL_COMPILER)) || defined(__APPLE__)
 #ifdef __cplusplus
@@ -1045,18 +1177,18 @@ ALWAYS_INLINE MP_DECL(int) openat(int dirfd, const char *pathname, int flags, ..
 #endif  /* _WIN32 */
 #endif  /* __GNUC__ && !__llvm__ && !__INTEL_COMPILER || __APPLE__ */
 
-ALWAYS_INLINE MP_DECL(EFILE*) fdopen(int fd, const char *mode) {
-  return mp_fdopen(fd, mode);
+ALWAYS_INLINE MP_DECL(FILE*) fdopen(int fd, const char *mode) {
+  return (FILE*)mp_fdopen(fd, mode);
 }
-ALWAYS_INLINE MP_DECL(EFILE*) _fdopen(int fd, const char *mode) {
-  return mp_fdopen(fd, mode);
+ALWAYS_INLINE MP_DECL(FILE*) _fdopen(int fd, const char *mode) {
+  return (FILE*)mp_fdopen(fd, mode);
 }
 
-ALWAYS_INLINE MP_DECL(EFILE*) freopen(const char *filename, const char *mode, void *stream) {
-  return mp_freopen(filename, mode, stream);
+ALWAYS_INLINE MP_DECL(FILE*) freopen(const char *filename, const char *mode, void *stream) {
+  return (FILE*)mp_freopen(filename, mode, stream);
 }
-ALWAYS_INLINE MP_DECL(EFILE*) _freopen(const char *filename, const char *mode, void *stream) {
-  return mp_freopen(filename, mode, stream);
+ALWAYS_INLINE MP_DECL(FILE*) _freopen(const char *filename, const char *mode, void *stream) {
+  return (FILE*)mp_freopen(filename, mode, stream);
 }
 
 ALWAYS_INLINE MP_DECL(int) fclose(FILE* e) {
@@ -1095,16 +1227,16 @@ ALWAYS_INLINE MP_DECL(int) _wopen(const wchar_t *pathname, int flags, ... /* int
     return mp_wopen(pathname, flags, mode);
 }
 
-ALWAYS_INLINE MP_DECL(EFILE*) wfopen(const wchar_t* file, const wchar_t* mode) {
-    return mp_wfopen(file, mode);
+ALWAYS_INLINE MP_DECL(FILE*) wfopen(const wchar_t* file, const wchar_t* mode) {
+  return (FILE*)mp_wfopen(file, mode);
 }
-ALWAYS_INLINE MP_DECL(EFILE*) _wfopen(const wchar_t* file, const wchar_t* mode) {
-    return mp_wfopen(file, mode);
+ALWAYS_INLINE MP_DECL(FILE*) _wfopen(const wchar_t* file, const wchar_t* mode) {
+  return (FILE*)mp_wfopen(file, mode);
 }
 #endif  /* _WIN32 */
 
-ALWAYS_INLINE MP_DECL(EFILE*) tmpfile(void) {
-  return mp_tmpfile();
+ALWAYS_INLINE MP_DECL(FILE*) tmpfile(void) {
+  return (FILE*)mp_tmpfile();
 }
 
 /* File Input Functions */
@@ -1130,6 +1262,26 @@ ALWAYS_INLINE MP_DECL(int) fgetc(void *stream) {
 ALWAYS_INLINE MP_DECL(int) _fgetc(void *stream) {
     return mp_fgetc(stream);
 }
+ALWAYS_INLINE MP_DECL(wint_t) fgetwc(FILE *stream) {
+    return mp_fgetwc(stream);
+}
+ALWAYS_INLINE MP_DECL(wint_t) fputwc(wchar_t c, FILE *stream) {
+    return mp_fputwc(c, stream);
+}
+ALWAYS_INLINE MP_DECL(wint_t) ungetwc(wint_t c, FILE *stream) {
+    return mp_ungetwc(c, stream);
+}
+#ifdef _WIN32
+ALWAYS_INLINE MP_DECL(void) _lock_file(FILE *stream) {
+    mp__lock_file(stream);
+}
+ALWAYS_INLINE MP_DECL(void) _unlock_file(FILE *stream) {
+    mp__unlock_file(stream);
+}
+ALWAYS_INLINE MP_DECL(int) _get_stream_buffer_pointers(FILE *stream, char ***pBase, char ***pPointer, int **pCount) {
+    return mp__get_stream_buffer_pointers(stream, pBase, pPointer, pCount);
+}
+#endif
 
 // Need to use a macro for this one due to varargs.
 #define fscanf mp_fscanf
@@ -1347,6 +1499,7 @@ ALWAYS_INLINE MP_DECL(int) _stat64i32(const char *path, struct _stat64i32 *buffe
     return mp__stat64i32(path, buffer);
 }
 
+
 ALWAYS_INLINE MP_DECL(int) _wstat32(const wchar_t *path, struct __stat32 *buffer) {
     return mp__wstat32(path, buffer);
 }
@@ -1413,6 +1566,16 @@ ALWAYS_INLINE MP_STD(HANDLE) CreateFileW(
     _In_opt_ HANDLE hTemplateFile
 ) {
     return mp_CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+ALWAYS_INLINE MP_STD(HANDLE) CreateFile2(
+    _In_ LPCWSTR lpFileName,
+    _In_ DWORD dwDesiredAccess,
+    _In_ DWORD dwShareMode,
+    _In_ DWORD dwCreationDisposition,
+    _In_opt_ LPCREATEFILE2_EXTENDED_PARAMETERS pCreateExParams
+) {
+    return mp_CreateFile2(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, pCreateExParams);
 }
 
 ALWAYS_INLINE MP_STD(BOOL) DeleteFileA(
@@ -1813,5 +1976,37 @@ namespace std
 
 #endif  /* !MONOLITHPY_EMBED_BUILD && !MP_STDIO_ALREADY_LOADED */
 #endif  /* !__ASSEMBLER__ && !BYPASS_MP_EMBED */
+
+#if defined(_WIN32) && !defined(MONOLITHPY_EMBED_BUILD) && !defined(BYPASS_MP_EMBED)
+/* MSVC UCRT exports `stat` as a plain function and as a static inline.
+ * The `#define stat orig_stat` / `#undef stat` dance above stops
+ * intercepting once the user's TU exits mp_embed.h, but user code
+ * subsequently calling stat() resolves to UCRT's plain export which
+ * doesn't see embedded files. Re-establish the canonical MSVC mapping
+ * to our intercepted _stat64i32 inline. */
+#ifdef _USE_32BIT_TIME_T
+#  define stat   _stat32
+#  define _stat  _stat32
+#else
+#  define stat   _stat64i32
+#  define _stat  _stat64i32
+#endif
+
+/* MSVC C++ STL filebuf interception.
+ *
+ * basic_filebuf::open() (template, instantiated in user TU) calls
+ * std::_Fiopen() to do the actual open. _Fiopen is declared in
+ * <__msvc_filebuf.hpp> and defined in libcpmt.lib (precompiled).
+ *
+ * We can't change libcpmt's body, but we CAN redirect the user-TU's
+ * call site via macro. After this macro is in scope, every
+ * `_Fiopen(path, mode, prot)` in user-compiled C++ template bodies
+ * resolves to our `mp__Fiopen` overloads (defined in mp_embed.cpp).
+ *
+ * Defined as a function-style macro so the C++ overload set is preserved:
+ * the compiler picks mp__Fiopen(const char*, ...) or mp__Fiopen(const
+ * wchar_t*, ...) by argument type, just like it would for _Fiopen. */
+#define _Fiopen mp__Fiopen
+#endif
 
 #endif  /* MONOLITHPYEMBED */
