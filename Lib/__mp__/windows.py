@@ -228,39 +228,66 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
         import __mp__.tools.extract_ar
         __mp__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
         obj_list = []
+        obj_symbols_map = {}
         known_symbols = set()
         unmatched_symbols = set()
         keep_symbols = set()
-        for obj in os.listdir(tmpdir):
-            if obj.endswith(".obj"):
-                obj_abs = os.path.abspath(os.path.join(tmpdir, obj))
-                obj_list.append(obj_abs)
-                symbol_data = get_object_symbols(obj_abs)
-                if symbol_data is None:
-                    continue
-                obj_symbols = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if len(x) > 3]
-                obj_symbols = [x for x in obj_symbols if not x[0].startswith(".")]
-                for sym in obj_symbols:
-                    if any(re.fullmatch(x, sym[0]) for x in protected_symbols):
-                        keep_symbols.add(sym[0])
-                    if sym[0].startswith("PyInit_") or (not re.fullmatch(r"[a-zA-Z0-9_-]+", sym[0]) and "pybind" not in sym[0]):
-                        keep_symbols.add(sym[0])
-                    if ' u ' in sym[1].lower():
-                        unmatched_symbols.add(sym[0])
-                    else:
-                        known_symbols.add(sym[0])
+
+        # Ignore unreadable objs
+        objcopy_exe = find_build_tool_exe("clang", "llvm-objcopy.exe")
+        unprocessable_objs = set()
+        with tempfile.TemporaryDirectory() as probe_tmpdir:
+            empty_syms = os.path.join(probe_tmpdir, "empty.txt")
+            with open(empty_syms, "w") as f:
+                f.write("")
+            for obj in os.listdir(tmpdir):
+                if obj.endswith(".obj"):
+                    obj_abs = os.path.abspath(os.path.join(tmpdir, obj))
+                    obj_list.append(obj_abs)
+                    try:
+                        run_with_output(objcopy_exe, "--redefine-syms", empty_syms, obj_abs,
+                                        cwd=tmpdir, quiet=True)
+                    except subprocess.CalledProcessError:
+                        sys.stderr.write(f"[rename_symbols] objcopy cannot process {obj}, "
+                                         f"protecting its symbols\n")
+                        unprocessable_objs.add(obj_abs)
+
+        for obj_abs in obj_list:
+            symbol_data = get_object_symbols(obj_abs)
+            if symbol_data is None:
+                unprocessable_objs.add(obj_abs)
+                continue
+            obj_syms_parsed = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if len(x) > 3]
+            obj_syms_parsed = [x for x in obj_syms_parsed if not x[0].startswith(".")]
+            obj_symbols_map[obj_abs] = obj_syms_parsed
+            for sym in obj_syms_parsed:
+                if any(re.fullmatch(x, sym[0]) for x in protected_symbols):
+                    keep_symbols.add(sym[0])
+                if sym[0].startswith("PyInit_") or (not re.fullmatch(r"[a-zA-Z0-9_-]+", sym[0]) and "pybind" not in sym[0]):
+                    keep_symbols.add(sym[0])
+                if ' u ' in sym[1].lower():
+                    unmatched_symbols.add(sym[0])
+                else:
+                    known_symbols.add(sym[0])
+
+        for obj_abs in unprocessable_objs:
+            if obj_abs in obj_symbols_map:
+                for sym, line in obj_symbols_map[obj_abs]:
+                    if ' u ' not in line.lower():
+                        keep_symbols.add(sym)
 
         rename_args = []
         unmatched_symbols = unmatched_symbols - known_symbols
         for sym in known_symbols - unmatched_symbols - keep_symbols:
             rename_args.append(sym + " " + prefix + sym)
 
+        renamable_objs = [obj for obj in obj_list if obj not in unprocessable_objs]
         with tempfile.TemporaryDirectory() as rename_tmpdir:
             rename_arg_file = os.path.join(rename_tmpdir, "rename_args.txt")
             with open(rename_arg_file, "w") as f:
                 f.write('\n'.join(rename_args) + "\n")
 
-            for obj in obj_list:
+            for obj in renamable_objs:
                 run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file, obj, cwd=tmpdir)
 
         os.rename(target_lib, target_lib + ".orig")
