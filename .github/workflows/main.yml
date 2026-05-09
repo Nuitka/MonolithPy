@@ -231,19 +231,23 @@ jobs:
         if not exist tests\mp_embed\gen mkdir tests\mp_embed\gen
         output\python.exe Lib\mkembeddata.py tests\mp_embed\gen tests\mp_embed\tree
         rem We don't recompile mp_embed.c here - link the very same
-        rem mp_embed.obj that build.bat produced and shipped in the
-        rem artifact. The test's own mp_embed_data.c provides the embed
-        rem blob symbols (nuitka_embed_*) that mp_embed.obj references.
+        rem mp_embed.lib that build.bat produced and shipped in the
+        rem artifact. It bundles mp_embed.obj plus all of zstd's static
+        rem source, so ZSTD_decompress / ZSTD_isError / etc. resolve
+        rem without needing _zstd.lib on the link line. The test's own
+        rem mp_embed_data.obj defines nuitka_embed_* first, so the
+        rem archive's mp_embed_data.obj never gets pulled in (and the
+        rem production blob doesn't leak into the test executable).
         rem mp_embed.cpp (std::_Fiopen override) is a per-TU file that
         rem must be compiled into each C++ binary that uses std::ifstream
         rem on virtual paths, so we still build it locally.
-        rem _zstd.lib already bundles zstd via PCbuild's StaticLibrary
-        rem build and is referenced by python.exe; reuse it.
         set ART=output
-        set ZSTD_LIB=PCbuild\amd64\_zstd.lib
-        cl /MT /nologo /Fe:tests\mp_embed\test_mp_embed.exe /IInclude /IPC tests\mp_embed\test_mp_embed.c tests\mp_embed\gen\mp_embed_data.c %ART%\Embedded\mp_embed.obj /link Shlwapi.lib %ZSTD_LIB%
+        cl /MT /nologo /Fe:tests\mp_embed\test_mp_embed.exe /IInclude /IPC tests\mp_embed\test_mp_embed.c tests\mp_embed\gen\mp_embed_data.c /link Shlwapi.lib %ART%\libs\mp_embed.lib
         if errorlevel 1 exit /b 1
-        cl /MT /TP /std:c++17 /EHsc /nologo /Fe:tests\mp_embed\test_mp_embed_cpp.exe /IInclude /IPC tests\mp_embed\test_mp_embed.cpp tests\mp_embed\gen\mp_embed_data.c Embedded\mp_embed.cpp %ART%\Embedded\mp_embed.obj /link Shlwapi.lib %ZSTD_LIB%
+        rem No /TP - the linker needs mp_embed_data.c compiled as C (so the
+        rem nuitka_embed_* symbols match the C linkage in mp_embed.obj from
+        rem the lib). cl picks the right language per extension by default.
+        cl /MT /std:c++17 /EHsc /nologo /Fe:tests\mp_embed\test_mp_embed_cpp.exe /IInclude /IPC tests\mp_embed\test_mp_embed.cpp tests\mp_embed\gen\mp_embed_data.c Embedded\mp_embed.cpp /link Shlwapi.lib %ART%\libs\mp_embed.lib
         if errorlevel 1 exit /b 1
         tests\mp_embed\test_mp_embed.exe
         if errorlevel 1 exit /b 1

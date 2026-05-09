@@ -53,12 +53,37 @@ if not exist externals\zstd-1.5.7 (
 cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude /Iexternals\zstd-1.5.7\lib
 cl /c /FoEmbedded\mp_embed_data.obj Embedded\mp_embed_data.c
 
-rem mp_embed.obj has unresolved zstd symbols (ZSTD_decompress etc.); they
-rem get bound when python.exe is linked - PCBuild's _zstd project (built
-rem by the nuget step below) is a StaticLibrary that bundles all of zstd
-rem and is already pulled in via the AdditionalDependencies on
-rem python.vcxproj.
-lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\mp_embed_data.obj
+rem Bundle all of zstd's source into mp_embed.lib. Every project that uses
+rem pyproject.props links mp_embed.lib (via AdditionalDependencies), so
+rem this guarantees ZSTD_decompress / ZSTD_isError / etc. resolve for any
+rem binary that mp_embed.obj gets pulled into - notably _freeze_module,
+rem which is built before the Python C extension modules. We trim the
+rem matching <ClCompile> entries out of PCbuild\_zstd.vcxproj so python.exe
+rem doesn't end up with two copies of zstd at link time.
+if not exist Embedded\zstd_objs mkdir Embedded\zstd_objs
+cl /c /MT /Zi /nologo /DZSTD_MULTITHREAD=1 ^
+   /Iexternals\zstd-1.5.7\lib ^
+   /Iexternals\zstd-1.5.7\lib\common ^
+   /Iexternals\zstd-1.5.7\lib\compress ^
+   /Iexternals\zstd-1.5.7\lib\decompress ^
+   /Iexternals\zstd-1.5.7\lib\dictBuilder ^
+   /FoEmbedded\zstd_objs\ ^
+   externals\zstd-1.5.7\lib\common\*.c ^
+   externals\zstd-1.5.7\lib\compress\*.c ^
+   externals\zstd-1.5.7\lib\decompress\*.c ^
+   externals\zstd-1.5.7\lib\dictBuilder\*.c
+if errorlevel 1 exit /b 1
+
+rem mp_embed.lib carries only the implementation + zstd, *not* the
+rem embed data. We ship mp_embed_data.obj separately so test binaries
+rem can substitute their own (otherwise linking mp_embed.lib would
+rem also pull in the production blob's nuitka_embed_*).
+rem mp_embed_data.lib (just the production data wrapped) is what
+rem python.exe links via pyproject.props.
+lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\zstd_objs\*.obj
+if errorlevel 1 exit /b 1
+lib /OUT:Embedded\mp_embed_data.lib Embedded\mp_embed_data.obj
+if errorlevel 1 exit /b 1
 
 
 rem Build with nuget, it solves the directory structure for us.
@@ -74,7 +99,10 @@ rem Move the standalone build result to "output". TODO: Version number could be 
 rem from the Python binary built, or much rather we do not use one in the nuget build at all.
 
 set OUTPUT_DIR=output
-set SRC_TOOLS_DIR=nuget-result-%NUGET_PYTHON_PACKAGE_NAME%\%NUGET_PYTHON_PACKAGE_NAME%.3.13.9\tools
+rem PYTHON_NUSPEC_VERSION is determined by PCbuild's nuspec - it tracks the
+rem actual Python version (e.g. 3.14.4). Discover the directory dynamically
+rem so the 3.13->3.14->next port doesn't keep breaking this xcopy.
+for /d %%v in (nuget-result-%NUGET_PYTHON_PACKAGE_NAME%\%NUGET_PYTHON_PACKAGE_NAME%.*) do set SRC_TOOLS_DIR=%%v\tools
 set SRC_LIB_DIR=%%d\amd64
 if "%ARCH_OPT%" EQU "-x86" (
     set OUTPUT_DIR=output32
@@ -82,7 +110,8 @@ if "%ARCH_OPT%" EQU "-x86" (
 )
 
 move %SRC_TOOLS_DIR%\Lib\pip.py.bak %SRC_TOOLS_DIR%\Lib\pip.py
-copy %SRC_TOOLS_DIR%\python313.lib %SRC_TOOLS_DIR%\libs\python313.lib
+rem Match the actual built python<MAJOR><MINOR>.lib (e.g. python314.lib).
+for %%f in (%SRC_TOOLS_DIR%\python3*.lib) do copy "%%f" %SRC_TOOLS_DIR%\libs\%%~nxf
 
 xcopy /i /q /s /y %SRC_TOOLS_DIR% %OUTPUT_DIR%
 
@@ -98,6 +127,7 @@ mkdir %OUTPUT_DIR%\Embedded
 xcopy /i /q /s /y Embedded\embed_data %OUTPUT_DIR%\Embedded\embed_data
 copy Embedded\mp_embed.obj %OUTPUT_DIR%\Embedded\mp_embed.obj
 copy Embedded\mp_embed.lib %OUTPUT_DIR%\libs\mp_embed.lib
+copy Embedded\mp_embed_data.lib %OUTPUT_DIR%\libs\mp_embed_data.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython
 %OUTPUT_DIR%\python.exe -c "import __mp__.packaging; __mp__.packaging.install_build_tool('clang')"

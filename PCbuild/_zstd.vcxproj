@@ -107,36 +107,14 @@
     <ClCompile Include="..\Modules\_zstd\compressor.c" />
     <ClCompile Include="..\Modules\_zstd\decompressor.c" />
     <ClCompile Include="..\Modules\_zstd\zstddict.c" />
-    <ClCompile Include="$(zstdDir)lib\common\debug.c" />
-    <ClCompile Include="$(zstdDir)lib\common\entropy_common.c" />
-    <ClCompile Include="$(zstdDir)lib\common\error_private.c" />
-    <ClCompile Include="$(zstdDir)lib\common\fse_decompress.c" />
-    <ClCompile Include="$(zstdDir)lib\common\pool.c" />
-    <ClCompile Include="$(zstdDir)lib\common\threading.c" />
-    <ClCompile Include="$(zstdDir)lib\common\xxhash.c" />
-    <ClCompile Include="$(zstdDir)lib\common\zstd_common.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\fse_compress.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\hist.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\huf_compress.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_compress.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_compress_literals.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_compress_sequences.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_compress_superblock.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_double_fast.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_fast.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_lazy.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_ldm.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_opt.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstd_preSplit.c" />
-    <ClCompile Include="$(zstdDir)lib\compress\zstdmt_compress.c" />
-    <ClCompile Include="$(zstdDir)lib\decompress\huf_decompress.c" />
-    <ClCompile Include="$(zstdDir)lib\decompress\zstd_ddict.c" />
-    <ClCompile Include="$(zstdDir)lib\decompress\zstd_decompress.c" />
-    <ClCompile Include="$(zstdDir)lib\decompress\zstd_decompress_block.c" />
-    <ClCompile Include="$(zstdDir)lib\dictBuilder\cover.c" />
-    <ClCompile Include="$(zstdDir)lib\dictBuilder\divsufsort.c" />
-    <ClCompile Include="$(zstdDir)lib\dictBuilder\fastcover.c" />
-    <ClCompile Include="$(zstdDir)lib\dictBuilder\zdict.c" />
+    <!-- The zstd library .c sources used to live here, but they're now
+         compiled into mp_embed.lib by build.bat (see the cl /c .. .\zstd_objs
+         step). pyproject.props links every project against mp_embed.lib,
+         so all binaries (including _freeze_module, which is built before
+         the C extension modules and previously failed with unresolved
+         ZSTD_decompress) get the zstd implementation. Keeping them in this
+         file as well would create LNK4006 duplicate-symbol warnings and
+         then LNK1169 errors at the python.exe link. -->
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Modules\_zstd\_zstdmodule.h" />

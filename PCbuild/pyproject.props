@@ -103,7 +103,7 @@
       <TargetMachine Condition="'$(Platform)'=='ARM64'">MachineARM64</TargetMachine>
       <LinkTimeCodeGeneration Condition="$(Configuration) != 'Debug'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <AdditionalOptions>/NODEFAULTLIB:python3.lib</AdditionalOptions>
-      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;mp_embed.lib;shlwapi.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;mp_embed.lib;mp_embed_data.lib;shlwapi.lib;Bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions Condition="$(Configuration) != 'Debug'">/OPT:REF,NOICF %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(MSVCHasBrokenARM64Clamping) == 'true' and $(Platform) == 'ARM64'">-d2:-pattern-opt-disable:-932189325 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalOptions Condition="$(SupportPGO) and $(Configuration) == 'PGInstrument' and $(PlatformToolset) != 'ClangCL'">/GENPROFILE %(AdditionalOptions)</AdditionalOptions>
