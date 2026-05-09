@@ -30,8 +30,11 @@ export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
-export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+# See build.sh for the rationale on the -u flags. Apple ld decorates C
+# symbols with a leading underscore in Mach-O, so the linker symbol for
+# the C function `__wrap_fopen` is `___wrap_fopen` (three underscores).
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -Wl,-u,___wrap_fopen,-u,___wrap_fclose,-u,___wrap_read,-u,___wrap_lseek,-u,___wrap_fstat,-u,___wrap_close -lmp_embed -lzstd ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -Wl,-u,___wrap_fopen,-u,___wrap_fclose,-u,___wrap_read,-u,___wrap_lseek,-u,___wrap_fstat,-u,___wrap_close -lmp_embed -lzstd -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable

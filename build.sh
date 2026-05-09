@@ -32,8 +32,16 @@ export "PYTHON_BASE=$(pwd)"
 export "CFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CXXFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC -flto -fuse-linker-plugin -fno-fat-lto-objects"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-export "LDFLAGS=-L${PREFIX}/lib -lmp_embed -l:libzstd.a -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
-export "CCexe_LDFLAGS=-L${PREFIX}/lib -lmp_embed -l:libzstd.a -I${PYTHON_BASE}/Include -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
+# --wrap rewrites references to fopen/fclose/etc into __wrap_NAME, but
+# ld only PULLS mp_embed.o from libmp_embed.a if some symbol it defines
+# is already unresolved when the archive is scanned. Configure-style test
+# programs put their .c source AFTER LDFLAGS, so when ld scans the archive
+# nothing references __wrap_* yet and mp_embed.o is dropped; later the
+# .c file gets linked and its fopen calls (now renamed to __wrap_fopen)
+# are unresolved and the test fails with "cannot run C compiled programs".
+# Force the wrap symbols to be considered as referenced via -u.
+export "LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
+export "CCexe_LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -I${PYTHON_BASE}/Include -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
 

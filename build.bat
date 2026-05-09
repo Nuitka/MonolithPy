@@ -39,13 +39,16 @@ if NOT DEFINED PYTHON (
 
 %PYTHON% Lib\mkembeddata.py Embedded Embedded\embed_data
 
-rem mp_embed.c #includes <zstd.h>, so the externals tree (which holds
-rem the zstd source under externals\zstd-1.5.7) must be populated before
-rem we compile. PCBuild's nuget step further down also calls
-rem get_externals.bat, but we need it earlier so the cl below can find
-rem the header.
-call PCBuild\get_externals.bat
-if %errorlevel% neq 0 exit /b %errorlevel%
+rem mp_embed.c #includes <zstd.h>, so we need zstd's headers before the
+rem cl below. Calling PCBuild\get_externals.bat would also work, but it
+rem also tries to fetch llvm (which 404s on MonolithPy-bin-deps). Just
+rem download the zstd source directly - the same source PCBuild's nuget
+rem step pulls down and references via $(zstdDir).
+if not exist externals\zstd-1.5.7 (
+    if not exist externals mkdir externals
+    curl -L -o externals\zstd-1.5.7.tar.gz https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz || exit /b 1
+    tar -xf externals\zstd-1.5.7.tar.gz -C externals || exit /b 1
+)
 
 cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude /Iexternals\zstd-1.5.7\lib
 cl /c /FoEmbedded\mp_embed_data.obj Embedded\mp_embed_data.c
