@@ -1,6 +1,7 @@
 # macOS is mostly the same as linux.
 import os.path
 from .linux import *
+from .linux import _parse_rename_arg_file
 
 import hashlib
 
