@@ -94,7 +94,8 @@ download_file() {
   fi
   make -C zstd-1.5.7/lib -j$(nproc --all) libzstd.a CC="$CC"
   cp zstd-1.5.7/lib/libzstd.a ${PREFIX}/lib/
-  cp zstd-1.5.7/lib/zstd.h zstd-1.5.7/lib/zstd_errors.h ${PREFIX}/include/
+  # _zstd CPython module uses <zstd.h>, <zdict.h>, <zstd_errors.h>; copy all.
+  cp zstd-1.5.7/lib/zstd.h zstd-1.5.7/lib/zstd_errors.h zstd-1.5.7/lib/zdict.h ${PREFIX}/include/
 )
 
 # Preparing embedded resources
@@ -533,7 +534,12 @@ make -j $(nproc --all) \
 
 # Delayed deletion of old installation, to avoid having it not there for testing purposes
 # while compiling, which is slow due to PGO beign applied.
-$ELEVATE rm -rf "$target" && $ELEVATE make libinstall install
+# ENSUREPIP=no because make install's built-in ensurepip runs ./python.exe (not
+# yet installed); ./python.exe -m ensurepip imports Lib/pip.py (our wrapper)
+# which imports __mp__ → wheel, and wheel isn't present yet. We run ensurepip
+# ourselves a few lines below against the INSTALLED interpreter with pip.py
+# temporarily renamed, which sidesteps the import cycle.
+$ELEVATE rm -rf "$target" && $ELEVATE make libinstall install ENSUREPIP=no
 
 rm pybuilddir.txt
 
@@ -551,6 +557,8 @@ $ELEVATE mv "$target/lib/python${long_version}/pip.py" "$target/lib/python${long
 $ELEVATE mv ${PREFIX}/lib/libmp_embed.a "$target/lib/libmp_embed.a"
 
 $ELEVATE cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
+$ELEVATE cp -v Modules/_hacl/libHacl_Hash_BLAKE2.a "$target/lib/"
+$ELEVATE cp -v Modules/_hacl/libHacl_HMAC.a "$target/lib/"
 
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.

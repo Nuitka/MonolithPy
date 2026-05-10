@@ -133,7 +133,9 @@ PYTHONPATH=$(COREPYTHONPATH)
 
 _asyncio _asynciomodule.c
 _bisect _bisectmodule.c
-_contextvars _contextvarsmodule.c
+# _contextvars is now a core built-in compiled from Python/_contextvars.c
+# (upstream d687900f981) and registered via Modules/config.c.in, so it no
+# longer needs a Setup entry.
 _csv _csv.c
 _datetime _datetimemodule.c
 _decimal _decimal/_decimal.c
@@ -165,12 +167,18 @@ _sysconfig _sysconfig.c
 _elementtree _elementtree.c
 pyexpat pyexpat.c
 
-# hashing builtins
-_blake2 _blake2/blake2module.c _blake2/blake2b_impl.c _blake2/blake2s_impl.c
+# hashing builtins - HACL*-backed. Upstream moved blake2 to use the
+# same libHacl_Hash_*.a pattern as sha2 (commit 325e9b8ef40).
+_blake2 blake2module.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_Hash_BLAKE2.a
 _md5 md5module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_MD5.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
 _sha1 sha1module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA1.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
 _sha2 sha2module.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_Hash_SHA2.a
 _sha3 sha3module.c -I$(srcdir)/Modules/_hacl/include _hacl/Hacl_Hash_SHA3.c -D_BSD_SOURCE -D_DEFAULT_SOURCE
+_hmac hmacmodule.c -I$(srcdir)/Modules/_hacl/include Modules/_hacl/libHacl_HMAC.a
+
+# New in 3.14: remote-process debugging support (reads another process's
+# memory to reconstruct stack/asyncio state).
+_remote_debugging _remote_debugging_module.c
 
 # text encodings and unicode
 _codecs_cn cjkcodecs/_codecs_cn.c
@@ -200,11 +208,19 @@ _ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict
 #_dbm _dbmmodule.c -l:libgdbm_compat.a -DUSE_GDBM_COMPAT
 #_gdbm _gdbmmodule.c -lgdbm
 _lzma _lzmamodule.c -llzma
-#_uuid _uuidmodule.c -luuid
+_sqlite3 -I$(srcdir)/Modules/_sqlite _sqlite/blob.c _sqlite/connection.c _sqlite/cursor.c _sqlite/microprotocols.c _sqlite/module.c _sqlite/prepare_protocol.c _sqlite/row.c _sqlite/statement.c _sqlite/util.c -lsqlite3 -DMODULE_NAME='"sqlite3"' -DSQLITE_ENABLE_COLUMN_METADATA
+# macOS SDK ships <uuid/uuid.h> and libSystem provides uuid_generate*, so we
+# don't need libuuid (util-linux) here. The -DHAVE_UUID_UUID_H picks the
+# right header branch in _uuidmodule.c without having to regen pyconfig.h.
+_uuid _uuidmodule.c -DHAVE_UUID_UUID_H
 zlib  zlibmodule.c -lz
+# zstd - libzstd.a is built by build.mac.sh and is also what mp_embed
+# decompresses its embedded blob with. Wiring _zstd here also guarantees
+# libzstd is on the final link line so mp_embed's ZSTD_* references resolve.
+_zstd _zstd/_zstdmodule.c _zstd/compressor.c _zstd/decompressor.c _zstd/zstddict.c -I$(srcdir)/Modules/_zstd -lzstd
 
-# The readline module also supports libeditline (-leditline).
-# Some systems may require -ltermcap or -ltermlib.
+# build.mac.sh passes --without-readline to configure, so the readline
+# module is intentionally not built (matches Linux/Setup).
 #readline readline.c -leditline -DWITH_EDITLINE
 
 # OpenSSL bindings
@@ -229,9 +245,11 @@ _hashlib _hashopenssl.c $(OPENSSL_INCLUDES) $(OPENSSL_LDFLAGS) -lcrypto
 # *** Always uncomment this (leave the leading underscore in!):
 _tkinter _tkinter.c tkappinit.c -DWITH_APPINIT $(TCLTK_INCLUDES) $(TCLTK_LIBS) -ltk8.6 -ltcl8.6 -framework Cocoa -framework Carbon -framework IOKit -framework QuartzCore -framework CoreServices -framework CoreFoundation -framework ApplicationServices -framework UniformTypeIdentifiers
 
-# Some system have -lcurses
-_curses -lncursesw _cursesmodule.c
-_curses_panel -lpanelw -lncursesw _curses_panel.c
+# ncursesw wide-char support. _XOPEN_SOURCE_EXTENDED=1 is what exposes
+# wget_wch/mvwget_wch/wins_wstr/etc. that _cursesmodule.c uses
+# (upstream adds it via CURSES_CFLAGS in configure.ac).
+_curses _cursesmodule.c -D_XOPEN_SOURCE_EXTENDED=1 -lncursesw
+_curses_panel _curses_panel.c -D_XOPEN_SOURCE_EXTENDED=1 -lpanelw -lncursesw
 
 # macOS specific module, needs SystemConfiguration and CoreFoundation framework
 _scproxy _scproxy.c
@@ -283,12 +301,10 @@ xxlimited
 -lssl
 -ltk8.6
 -lz
-_sqlite3
 _testclinic
 _testclinic_limited
 _testinternalcapi
 _testlimitedcapi
-_uuid
 xxlimited_35
 xxsubtype
 _gdbm

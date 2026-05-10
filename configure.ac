@@ -8061,7 +8061,11 @@ AC_SUBST([LIBHACL_BLAKE2_SIMD256_OBJS])
 # HACL*-based cryptographic primitives
 
 AC_MSG_CHECKING([for HACL* library linking type])
-if test "$ac_sys_system" = "WASI"; then
+# WASI has always been static; --disable-shared (MonolithPy's model) also
+# needs static - the shared .so flavor doesn't produce a .a that other
+# link steps can pull the HACL symbols from, so MODULE__*_LDEPS prereqs
+# won't cause the archive to be built in time.
+if test "$ac_sys_system" = "WASI" || test "$PY_ENABLE_SHARED" = "0"; then
   LIBHACL_LDEPS_LIBTYPE=STATIC
   AC_MSG_RESULT([static])
 else

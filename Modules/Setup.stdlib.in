@@ -1,0 +1,6 @@
+# -*- makefile -*-
+# Empty stub. The real module list comes from Modules/Setup.macos
+# (copied to Modules/Setup by build.mac.sh) or Modules/Setup.linux.
+# This file exists only so configure's AC_CONFIG_FILES for
+# Modules/Setup.stdlib can find a template; it's not used afterwards.
+*@MODULE_BUILDTYPE@*
