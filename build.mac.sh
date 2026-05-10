@@ -30,11 +30,19 @@ export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 export "CFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.9 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
-# See build.sh for the rationale on the -u flags. Apple ld decorates C
-# symbols with a leading underscore in Mach-O, so the linker symbol for
-# the C function `__wrap_fopen` is `___wrap_fopen` (three underscores).
-export "LDFLAGS=-arch $arch -L${PREFIX}/lib -Wl,-u,___wrap_fopen,-u,___wrap_fclose,-u,___wrap_read,-u,___wrap_lseek,-u,___wrap_fstat,-u,___wrap_close -lmp_embed -lzstd ${LTO_OPTS} -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
-export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -Wl,-u,___wrap_fopen,-u,___wrap_fclose,-u,___wrap_read,-u,___wrap_lseek,-u,___wrap_fstat,-u,___wrap_close -lmp_embed -lzstd -I${PYTHON_BASE}/Include -Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+# Apple ld does not implement --wrap (any syntax: -wrap, -Wl,-wrap,
+# -Wl,--wrap=, including -ld_classic and -ld_prime all fail with
+# "unknown options: -wrap"). So on macOS we rely entirely on the
+# header-macro interception in mp_embed.h: every TU that prepends
+# mp_embed.h has its fopen/fread/etc. calls routed to mp_* inline
+# wrappers at compile time, including libc++'s basic_filebuf::open
+# template body (which is defined in the libc++ header and gets
+# instantiated per-TU, calling std::fopen internally). The
+# __wrap_* machinery stays #ifdef'd out at compile time: mp_embed.c
+# is built without -DMP_EMBED_USE_WRAP, so __real_* are macroed to
+# plain libc names and no linker rewriting is needed.
+export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd ${LTO_OPTS}"
+export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd -I${PYTHON_BASE}/Include"
 export "MACOSX_DEPLOYMENT_TARGET=10.9"
 
 # Allow to overload the compiler used via CC environment variable
@@ -100,7 +108,8 @@ download_file() {
 mkdir -p Embedded/embed_data/vfs/ssl
 curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
 python3 Lib/mkembeddata.py Embedded Embedded/embed_data
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
+# No -DMP_EMBED_USE_WRAP on macOS - see the LDFLAGS comment above.
+$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
 $CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
 ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
 
@@ -361,7 +370,7 @@ $ELEVATE cp -v Modules/_hacl/libHacl_Hash_SHA2.a "$target/lib/"
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
 rm -f Embedded/mp_embed.o
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
+$CC -c -g -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
 $ELEVATE cp -r "Embedded/mp_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 

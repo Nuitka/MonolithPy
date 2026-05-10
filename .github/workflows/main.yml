@@ -76,22 +76,19 @@ jobs:
         ART="${{ github.workspace }}/MonolithPy-Out"
         cc -O2 -c -o tests/mp_embed/mp_embed_data.o \
             tests/mp_embed/gen/mp_embed_data.c
-        # Common link flags. mp_embed.o was built with MP_EMBED_USE_WRAP,
-        # so the __real_* references it carries need the linker --wrap
-        # machinery to resolve them, regardless of whether the test
-        # itself uses libstdc++.
-        WRAPS="-Wl,-wrap,fopen,-wrap,fclose,-wrap,read,-wrap,lseek,-wrap,fstat,-wrap,close"
+        # No --wrap on macOS: Apple ld rejects it outright. Interception
+        # happens entirely via mp_embed.h's macros in each user TU, which
+        # also covers libc++'s basic_filebuf<T>::open template body (it's
+        # defined in the libc++ header and instantiated per-TU).
         # C suite (includes threading) - cc inherits arch from the subshell.
-        cc -O2 -pthread $WRAPS -o tests/mp_embed/test_mp_embed \
+        cc -O2 -pthread -o tests/mp_embed/test_mp_embed \
             tests/mp_embed/test_mp_embed.c \
             tests/mp_embed/mp_embed_data.o \
             "$ART/Embedded/mp_embed.o" \
             -IInclude -IPC -L"$DEPS/lib" -lzstd
         ./tests/mp_embed/test_mp_embed
-        # C++ suite. Link with --wrap so libc++.a's basic_file entry
-        # points (fopen/fclose/read/lseek/fstat/close) route to mp_embed.o's
-        # __wrap_* and serve from embed memory zero-copy.
-        c++ -std=c++17 -O2 -pthread $WRAPS \
+        # C++ suite - header-macro interception is enough on macOS.
+        c++ -std=c++17 -O2 -pthread \
             -o tests/mp_embed/test_mp_embed_cpp \
             tests/mp_embed/test_mp_embed.cpp \
             tests/mp_embed/mp_embed_data.o \
