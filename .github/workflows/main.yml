@@ -77,18 +77,29 @@ jobs:
         cc -O2 -c -o tests/mp_embed/mp_embed_data.o \
             tests/mp_embed/gen/mp_embed_data.c
         # No --wrap on macOS: Apple ld rejects it outright. Interception
-        # happens entirely via mp_embed.h's macros in each user TU, which
-        # also covers libc++'s basic_filebuf<T>::open template body (it's
-        # defined in the libc++ header and instantiated per-TU).
+        # happens via mp_embed.h's macros in each user TU - which catches
+        # libc++'s basic_filebuf<T>::open template body only if that body
+        # is actually instantiated in the user TU. libc++'s <fstream>
+        # contains an `extern template class basic_filebuf<char>` gated
+        # on _LIBCPP_AVAILABILITY_HAS_ADDITIONAL_IOSTREAM_EXPLICIT_INSTANTIATIONS_1,
+        # which reduces to _LIBCPP_INTRODUCED_IN_LLVM_12 and is TRUE when
+        # the deployment target is >= 12.3. If true, basic_filebuf::open
+        # resolves to libc++.dylib's copy at runtime - bypassing our
+        # header macros - and the ifstream tests fail. Pass an explicit
+        # min version that's (a) < 12.3 so the extern template flips off
+        # and templates instantiate per-TU, and (b) >= 10.15 so
+        # std::filesystem::path is available (the test_cpp_headers_compile
+        # case touches it). 10.15 threads that needle.
+        MACOSMIN="-mmacosx-version-min=10.15"
         # C suite (includes threading) - cc inherits arch from the subshell.
-        cc -O2 -pthread -o tests/mp_embed/test_mp_embed \
+        cc -O2 -pthread $MACOSMIN -o tests/mp_embed/test_mp_embed \
             tests/mp_embed/test_mp_embed.c \
             tests/mp_embed/mp_embed_data.o \
             "$ART/Embedded/mp_embed.o" \
             -IInclude -IPC -L"$DEPS/lib" -lzstd
         ./tests/mp_embed/test_mp_embed
-        # C++ suite - header-macro interception is enough on macOS.
-        c++ -std=c++17 -O2 -pthread \
+        # C++ suite - see MACOSMIN comment above.
+        c++ -std=c++17 -O2 -pthread $MACOSMIN \
             -o tests/mp_embed/test_mp_embed_cpp \
             tests/mp_embed/test_mp_embed.cpp \
             tests/mp_embed/mp_embed_data.o \
