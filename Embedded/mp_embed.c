@@ -979,6 +979,25 @@ int __wrap_fclose(FILE *f) {
     if (to_free) mp_efile_destroy(to_free);
     return r;
 }
+
+#if defined(__linux__)
+/* gcc 13's libstdc++.a basic_file.o calls fopen64 / lseek64 / fstat64
+ * (the LFS variants) directly. On glibc x86-64 these are functionally
+ * identical to the unsuffixed versions - off_t is already 64-bit and
+ * struct stat == struct stat64 - so aliasing the symbols at link time
+ * routes the calls through our wrappers without any data conversion.
+ * gcc 15+ switched to plain fopen/lseek/fstat but ubuntu-24.04 runners
+ * still ship gcc 13.3, so both code paths must work. The corresponding
+ * --wrap=fopen64 / --wrap=lseek64 / --wrap=fstat64 flags are passed
+ * via build.sh's LDFLAGS and the test step's WRAPS variable. */
+FILE *__wrap_fopen64(const char *path, const char *mode)
+    __attribute__((alias("__wrap_fopen")));
+off_t __wrap_lseek64(int fd, off_t offset, int whence)
+    __attribute__((alias("__wrap_lseek")));
+int __wrap_fstat64(int fd, struct stat *st)
+    __attribute__((alias("__wrap_fstat")));
+#endif
+
 #endif
 
 #ifdef _WIN32

@@ -40,8 +40,8 @@ export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
 # .c file gets linked and its fopen calls (now renamed to __wrap_fopen)
 # are unresolved and the test fails with "cannot run C compiled programs".
 # Force the wrap symbols to be considered as referenced via -u.
-export "LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
-export "CCexe_LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -I${PYTHON_BASE}/Include -Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
+export "LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -lm -flto=auto -fuse-linker-plugin -fno-fat-lto-objects -Wl,--wrap=fopen,--wrap=fopen64,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=lseek64,--wrap=fstat,--wrap=fstat64,--wrap=close"
+export "CCexe_LDFLAGS=-L${PREFIX}/lib -Wl,-u,__wrap_fopen,-u,__wrap_fclose,-u,__wrap_read,-u,__wrap_lseek,-u,__wrap_fstat,-u,__wrap_close -lmp_embed -l:libzstd.a -I${PYTHON_BASE}/Include -Wl,--wrap=fopen,--wrap=fopen64,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=lseek64,--wrap=fstat,--wrap=fstat64,--wrap=close"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
 
 

@@ -46,7 +46,7 @@ ls "$WORK/gen"
 cc -O2 -DMP_EMBED_USE_WRAP -c -o "$WORK/mp_embed.o" "$SRC/Embedded/mp_embed.c" -I"$SRC/Include" -I"$SRC/PC" -I"$ZSTD_INC"
 cc -O2 -c -o "$WORK/mp_embed_data.o" "$WORK/gen/mp_embed_data.c"
 
-WRAPS="-Wl,--wrap=fopen,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=fstat,--wrap=close"
+WRAPS="-Wl,--wrap=fopen,--wrap=fopen64,--wrap=fclose,--wrap=read,--wrap=lseek,--wrap=lseek64,--wrap=fstat,--wrap=fstat64,--wrap=close"
 
 # C suite.
 cc -O2 -pthread $WRAPS -o "$WORK/test_mp_embed" \
