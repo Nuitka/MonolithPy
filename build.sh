@@ -102,8 +102,13 @@ download_file() {
 mkdir -p Embedded/embed_data/vfs/ssl
 curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
 python3 Lib/mkembeddata.py Embedded Embedded/embed_data
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
-$CC -c -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
+# -fPIC is required so that the resulting libmp_embed.a can be linked
+# into shared objects (e.g. tcl's itcl4.3.0.so picks up our LDFLAGS's
+# -lmp_embed even though we don't need interception there). Without
+# -fPIC, GCC emits PC32 relocations against glibc symbols like stderr
+# that can't be used in shared objects, and the dep builds fail.
+$CC -c -g -DMP_EMBED_USE_WRAP -fPIC -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
+$CC -c -fPIC -o Embedded/mp_embed_data.o Embedded/mp_embed_data.c
 ar rcs ${PREFIX}/lib/libmp_embed.a Embedded/mp_embed.o Embedded/mp_embed_data.o
 
 if [ ! -h ${PREFIX}/lib64 ]; then
@@ -563,7 +568,7 @@ $ELEVATE cp -v Modules/_hacl/libHacl_HMAC.a "$target/lib/"
 $ELEVATE mkdir -p "$target/Embedded"
 # The object file usually gets deleted during the build, so make sure to recompile here just in case.
 rm -f Embedded/mp_embed.o
-$CC -c -g -DMP_EMBED_USE_WRAP -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
+$CC -c -g -DMP_EMBED_USE_WRAP -fPIC -o Embedded/mp_embed.o Embedded/mp_embed.c -IInclude -I${PREFIX}/include
 $ELEVATE cp -r "Embedded/mp_embed.o" "$target/Embedded/"
 $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 
