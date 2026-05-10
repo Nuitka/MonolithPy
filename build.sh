@@ -74,8 +74,42 @@ mkdir -p dep-build
 download_file() {
   local url="$1"
   local filename="$2"
-  for i in {1..5}; do
-    curl -L "$url" -o "$filename" && return 0 || sleep 5
+  # --fail turns HTTP 4xx/5xx into a non-zero exit (otherwise curl happily
+  # writes an HTML error body and returns 0, which later makes tar barf
+  # with "not in gzip format"). --retry handles transient connection
+  # resets / TLS handshake glitches during the request itself. The outer
+  # loop adds retries for the case where the request "succeeded" but the
+  # response isn't actually a usable archive - e.g. freedesktop.org's CDN
+  # intermittently returns a 200 with an error page, or a partial file
+  # that hasn't finished uploading yet.
+  local i
+  for i in 1 2 3 4 5; do
+    rm -f "$filename"
+    if curl -fL --retry 3 --retry-delay 2 --retry-connrefused \
+            --connect-timeout 20 --max-time 300 \
+            "$url" -o "$filename"; then
+      # Validate the payload: for tarballs, peek the first file. tar
+      # recognises .tar/.tar.gz/.tar.xz/.tar.bz2 by magic and exits
+      # non-zero if the file isn't a valid archive. For anything else
+      # just check the file is non-empty.
+      case "$filename" in
+        *.tar.*|*.tgz|*.tbz2|*.txz)
+          if tar -tf "$filename" >/dev/null 2>&1; then
+            return 0
+          fi
+          echo "download_file: '$filename' downloaded from '$url' is not a valid tar archive (attempt $i/5), retrying."
+          ;;
+        *)
+          if [ -s "$filename" ]; then
+            return 0
+          fi
+          echo "download_file: '$filename' downloaded from '$url' is empty (attempt $i/5), retrying."
+          ;;
+      esac
+    else
+      echo "download_file: curl failed for '$url' (attempt $i/5), retrying."
+    fi
+    sleep 5
   done
   echo "Failed to download '$url' to '$filename' after 5 retries."
   return 1
@@ -100,7 +134,7 @@ download_file() {
 
 # Preparing embedded resources
 mkdir -p Embedded/embed_data/vfs/ssl
-curl -L https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
+curl -fL --retry 3 --retry-delay 2 --retry-connrefused --connect-timeout 20 --max-time 120 https://mkcert.org/generate/ | python3 -c "import sys; [sys.stdout.buffer.write(line.decode('utf-8').encode('ascii', errors='backslashreplace')) for line in sys.stdin.buffer]" > Embedded/embed_data/vfs/ssl/cert.pem
 python3 Lib/mkembeddata.py Embedded Embedded/embed_data
 # -fPIC is required so that the resulting libmp_embed.a can be linked
 # into shared objects (e.g. tcl's itcl4.3.0.so picks up our LDFLAGS's
@@ -459,7 +493,7 @@ cd ../..
 fi
 
 if [ ! -d expat-2.5.0 ]; then
-curl -L https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.gz -o expat.tar.gz
+download_file https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.gz expat.tar.gz
 tar -xf expat.tar.gz
 cd expat-2.5.0
 ./configure --prefix=${PREFIX} --disable-shared
