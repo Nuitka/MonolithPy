@@ -152,9 +152,15 @@ def auto_patch_build(folder):
 
 
 def get_object_symbols(obj):
+    """Return llvm-nm-style ' <type> <name>' lines for `obj`.
+
+    Implemented on top of pyobjtools so we don't need a separately-installed
+    clang/llvm toolchain. Output is shaped like nm's so the existing parsers
+    in this module keep working unchanged."""
     try:
-        return run_build_tool_exe("clang", "llvm-nm.exe", obj, quiet=True).split("\n")
-    except subprocess.CalledProcessError:
+        from .tools.pyobjtools import nm as _pyobj_nm
+        return [s.format() for s in _pyobj_nm.nm(obj)]
+    except Exception:
         return None
 
 
@@ -168,28 +174,23 @@ def is_undefined_symbol(symbol_line):
     return ' u ' in symbol_line.lower() or symbol_line.lower().startswith('u ')
 
 
+def _parse_rename_arg_file(rename_arg_file):
+    """Read a `--redefine-syms` style rename file into a dict."""
+    mapping = {}
+    with open(rename_arg_file, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                mapping[parts[0]] = parts[1]
+    return mapping
+
+
 def extract_archive_subprocess(lib_path, output_dir):
-    """
-    Extract a static library archive to a directory using subprocess.
-
-    Args:
-        lib_path: Path to the library file to extract
-        output_dir: Directory to extract to
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Extract a static library archive via the vendored pyobjtools.ar."""
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "__mp__.tools.extract_ar", lib_path, output_dir],
-            capture_output=True,
-            text=True,
-            check=True
-        )
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(lib_path, output_dir)
         return True
-    except subprocess.CalledProcessError as e:
-        my_print(f"Failed to extract {lib_path}: {e.stderr}", style="red")
-        return False
     except Exception as e:
         my_print(f"Failed to extract {lib_path}: {e}", style="red")
         return False
@@ -204,7 +205,11 @@ def rename_symbols_in_object(obj_path, rename_arg_file, cwd):
         rename_arg_file: Path to the file containing rename arguments
         cwd: Working directory for the operation
     """
-    run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file, obj_path, cwd=cwd, quiet=True)
+    from .tools.pyobjtools import objcopy as _pyobj_objcopy
+    full_path = obj_path if os.path.isabs(obj_path) else os.path.join(cwd, obj_path)
+    rename_map = _parse_rename_arg_file(rename_arg_file)
+    if rename_map:
+        _pyobj_objcopy.rename_obj(full_path, rename_map)
 
 
 def repack_library(lib_path, obj_list):
@@ -221,12 +226,10 @@ def repack_library(lib_path, obj_list):
 def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
     if protected_symbols is None:
         protected_symbols = []
-    import __mp__.packaging
-    __mp__.packaging.install_build_tool("clang")
     target_lib_abs = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib_abs, tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
@@ -250,26 +253,19 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
                     else:
                         known_symbols.add(sym[0])
 
-        rename_args = []
         unmatched_symbols = unmatched_symbols - known_symbols
-        for sym in known_symbols - unmatched_symbols - keep_symbols:
-            rename_args.append(sym + " " + prefix + sym)
+        rename_map = {sym: prefix + sym for sym in (known_symbols - unmatched_symbols - keep_symbols)}
 
-        with tempfile.TemporaryDirectory() as rename_tmpdir:
-            rename_arg_file = os.path.join(rename_tmpdir, "rename_args.txt")
-            with open(rename_arg_file, "w") as f:
-                f.write('\n'.join(rename_args) + "\n")
-
+        if rename_map:
+            from .tools.pyobjtools import objcopy as _pyobj_objcopy
             for obj in obj_list:
-                run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file, obj, cwd=tmpdir)
+                _pyobj_objcopy.rename_obj(obj, rename_map)
 
         os.rename(target_lib, target_lib + ".orig")
         run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + target_lib, *obj_list)
 
 
 def rename_init_symbol_in_file(target_lib):
-    import __mp__.packaging
-    __mp__.packaging.install_build_tool("clang")
     target_lib_abs = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
         hasher = hashlib.md5()
@@ -278,11 +274,13 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib_abs, tmpdir)
 
         obj_paths_in_tmpdir = []
         modified_any_obj = False
+
+        from .tools.pyobjtools import objcopy as _pyobj_objcopy
 
         for item_name in os.listdir(tmpdir):
             if item_name.lower().endswith(".obj"):
@@ -315,14 +313,9 @@ def rename_init_symbol_in_file(target_lib):
                     continue
 
                 modified_any_obj = True
-                with tempfile.TemporaryDirectory() as rename_tmpdir_init:  # Unique temp dir name
-                    rename_arg_file_path = os.path.join(rename_tmpdir_init, "rename_init_args.txt")
-                    with open(rename_arg_file_path, "w") as f_rename:
-                        for old_sym, new_sym in symbols_to_rename_map.items():
-                            print(f"Renaming {old_sym} to {new_sym} in {item_name}")
-                            f_rename.write(f"{old_sym} {new_sym}\n")
-
-                    run_build_tool_exe("clang", "llvm-objcopy.exe", "--redefine-syms", rename_arg_file_path, obj_full_path, cwd=tmpdir)
+                for old_sym, new_sym in symbols_to_rename_map.items():
+                    print(f"Renaming {old_sym} to {new_sym} in {item_name}")
+                _pyobj_objcopy.rename_obj(obj_full_path, symbols_to_rename_map)
 
         if not modified_any_obj:
             print(f"No PyInit_ symbols found or requiring rename in {target_lib}")
@@ -337,21 +330,23 @@ def rename_init_symbol_in_file(target_lib):
 
 
 def remove_symbols_in_file(target_lib, object_file, symbols):
+    """Hide a set of symbols in `object_file` (inside `target_lib`) by
+    renaming them to a unique unused name. pyobjtools doesn't expose a
+    direct "strip these symbols" primitive, but a rename to a never-
+    referenced name is functionally equivalent for our use case (which
+    is to make a duplicate symbol disappear from the link)."""
     target_lib_abs = os.path.abspath(target_lib)
-    import __mp__.packaging
-    __mp__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib_abs, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib_abs, tmpdir)
 
         obj_list = [os.path.join(tmpdir, x) for x in os.listdir(tmpdir) if x.endswith(".obj")]
 
-        with tempfile.TemporaryDirectory() as rename_tmpdir:
-            remove_arg_file = os.path.join(rename_tmpdir, "remove_args.txt")
-            with open(remove_arg_file, "w") as f:
-                f.write('\n'.join(symbols) + "\n")
-
-            run_build_tool_exe("clang", "llvm-objcopy.exe", "--strip-symbols", remove_arg_file, os.path.join(tmpdir, object_file), cwd=tmpdir)
+        target_obj_path = os.path.join(tmpdir, object_file)
+        if symbols and os.path.exists(target_obj_path):
+            from .tools.pyobjtools import objcopy as _pyobj_objcopy
+            rename_map = {sym: f"__mp_stripped_{hashlib.md5(sym.encode()).hexdigest()}" for sym in symbols}
+            _pyobj_objcopy.rename_obj(target_obj_path, rename_map)
 
         os.rename(target_lib, target_lib + ".orig")
         subprocess.run(["lib", "/OUT:" + target_lib] + obj_list)

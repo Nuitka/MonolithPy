@@ -45,11 +45,27 @@ def auto_patch_build(folder):
 
 
 def get_object_symbols(obj):
-    """Get symbols from an object file using nm."""
+    """Return llvm-nm-style ' <type> <name>' lines for `obj`.
+
+    Implemented via pyobjtools so we don't shell out to /usr/bin/nm — that
+    keeps the symbol parser working uniformly across plain ELF objects and
+    the GCC-LTO slim objects produced by `-flto -fno-fat-lto-objects`."""
     try:
-        return run_with_output("nm", obj).split("\n")
+        from .tools.pyobjtools import nm as _pyobj_nm
+        return [s.format() for s in _pyobj_nm.nm(obj)]
     except Exception:
         return None
+
+
+def _parse_rename_arg_file(rename_arg_file):
+    """Read a `--redefine-syms` style rename file into a dict."""
+    mapping = {}
+    with open(rename_arg_file, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                mapping[parts[0]] = parts[1]
+    return mapping
 
 
 def is_object_file(filename):
@@ -89,19 +105,10 @@ def is_local_symbol(symbol_line):
 
 
 def extract_archive_subprocess(lib_path, output_dir):
-    """
-    Extract a static library archive to a directory using subprocess.
-
-    Args:
-        lib_path: Path to the library file to extract
-        output_dir: Directory to extract to
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Extract a static library archive via the vendored pyobjtools.ar."""
     try:
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(lib_path, output_dir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(lib_path, output_dir)
         return True
     except Exception as e:
         my_print(f"Failed to extract {lib_path}: {e}", style="red")
@@ -111,22 +118,16 @@ def extract_archive_subprocess(lib_path, output_dir):
 def rename_symbols_in_object(obj_path, rename_arg_file, cwd):
     """
     Rename symbols in an object file using a rename arguments file.
-    Handles LLVM bitcode files by converting them first.
 
-    Args:
-        obj_path: Path to the object file
-        rename_arg_file: Path to the file containing rename arguments
-        cwd: Working directory for the operation
+    Routes through pyobjtools, which detects ELF, GCC-LTO slim, Clang LTO
+    bitcode, etc. transparently — so the previous explicit
+    "if LLVM bitcode then clang -c" pre-step (and the LLVM toolchain it
+    needed) is no longer required.
     """
-    # Check if it's LLVM bitcode and convert if needed
-    file_type_output = run_with_output("file", obj_path)
-    if "LLVM bitcode" in file_type_output:
-        bc_path = obj_path + ".bc"
-        os.rename(obj_path, bc_path)
-        run("clang", "-c", bc_path, "-o", obj_path)
-
-    # Use objcopy to rename symbols (matching existing rename_symbols_in_file pattern)
-    run("objcopy", f"--redefine-syms={rename_arg_file}", obj_path)
+    from .tools.pyobjtools import objcopy as _pyobj_objcopy
+    rename_map = _parse_rename_arg_file(rename_arg_file)
+    if rename_map:
+        _pyobj_objcopy.rename_obj(obj_path, rename_map)
 
 
 def repack_library(lib_path, obj_list):
@@ -150,11 +151,9 @@ def repack_library(lib_path, obj_list):
 
 def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
     target_lib = os.path.abspath(target_lib)
-    import __mp__.packaging
-    __mp__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib, tmpdir)
         obj_list = []
         known_symbols = set()
         unmatched_symbols = set()
@@ -164,8 +163,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
             if obj_filename.endswith(".o"):
                 obj_path = os.path.join(tmpdir, obj_filename)
                 obj_list.append(obj_path)
-                # run_with_output returns string, universal_newlines=True handles text decoding
-                symbol_data = run_with_output("nm", obj_path, cwd=tmpdir).split("\n")
+                symbol_data = get_object_symbols(obj_path) or []
                 obj_symbols = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if ' ' in x and len(x) > 3]
                 obj_symbols = [s for s in obj_symbols if not s[0].startswith(".")]
                 for sym_name, full_line in obj_symbols:
@@ -178,25 +176,15 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
                     else:
                         known_symbols.add(sym_name)
 
-        rename_args_list = []
-        symbols_to_rename = known_symbols - unmatched_symbols - keep_symbols
-        for sym in symbols_to_rename:
-            rename_args_list.append(f"{sym} {prefix}{sym}")
+        rename_map = {
+            sym: prefix + sym
+            for sym in (known_symbols - unmatched_symbols - keep_symbols)
+        }
 
-        if rename_args_list:
-            with tempfile.TemporaryDirectory() as rename_tmpdir:
-                rename_arg_file = os.path.join(rename_tmpdir, "rename_args.txt")
-                with open(rename_arg_file, "w") as f:
-                    f.write('\n'.join(rename_args_list) + "\n")
-
-                for obj_p in obj_list:
-                    file_type_output = run_with_output("file", obj_p)
-                    if "LLVM bitcode" in file_type_output:
-                        bc_path = obj_p + ".bc"
-                        os.rename(obj_p, bc_path)
-                        run("clang", "-c", bc_path, "-o", obj_p)
-
-                    run("objcopy", f"--redefine-syms={rename_arg_file}", obj_p)
+        if rename_map:
+            from .tools.pyobjtools import objcopy as _pyobj_objcopy
+            for obj_p in obj_list:
+                _pyobj_objcopy.rename_obj(obj_p, rename_map)
 
         os.rename(target_lib, target_lib + ".orig")
         # Use argument unpacking for the list of object files
@@ -205,8 +193,6 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
 
 def rename_init_symbol_in_file(target_lib):
     target_lib = os.path.abspath(target_lib)
-    import __mp__.packaging
-    __mp__.packaging.install_build_tool("clang")
     with tempfile.TemporaryDirectory() as tmpdir:
         hasher = hashlib.md5()
         with open(target_lib, "rb") as f:
@@ -214,10 +200,12 @@ def rename_init_symbol_in_file(target_lib):
                 hasher.update(chunk)
         file_hash = hasher.hexdigest()
 
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib, tmpdir)
         obj_list_paths = []
         obj_filenames = []
+
+        from .tools.pyobjtools import objcopy as _pyobj_objcopy
 
         for obj_filename in os.listdir(tmpdir):
             if obj_filename.endswith(".o"):
@@ -227,7 +215,7 @@ def rename_init_symbol_in_file(target_lib):
 
                 symbols_to_rename_map = {}
 
-                symbol_data = run_with_output("nm", obj_path, cwd=tmpdir).split("\n")
+                symbol_data = get_object_symbols(obj_path) or []
                 obj_symbols = [(x[x.rindex(' ') + 1:], x) for x in symbol_data if ' ' in x and len(x) > 3]
                 obj_symbols = [s for s in obj_symbols if not s[0].startswith(".")]
 
@@ -242,29 +230,22 @@ def rename_init_symbol_in_file(target_lib):
                 if not symbols_to_rename_map:
                     continue
 
-                with tempfile.TemporaryDirectory() as rename_tmpdir:
-                    rename_arg_file = os.path.join(rename_tmpdir, "rename_args.txt")
-                    with open(rename_arg_file, "w") as f:
-                        for old_sym, new_sym in symbols_to_rename_map.items():
-                            print(f"Renaming {old_sym} to {new_sym}")
-                            f.write(f"{old_sym} {new_sym}\n")
-
-                    file_type_output = run_with_output("file", obj_path)
-                    if "LLVM bitcode" in file_type_output:
-                        bc_path = obj_path + ".bc"
-                        os.rename(obj_path, bc_path)
-                        run("clang", "-c", bc_path, "-o", obj_path)
-
-                    run("objcopy", f"--redefine-syms={rename_arg_file}", obj_path)
+                for old_sym, new_sym in symbols_to_rename_map.items():
+                    print(f"Renaming {old_sym} to {new_sym}")
+                _pyobj_objcopy.rename_obj(obj_path, symbols_to_rename_map)
 
         os.rename(target_lib, target_lib + ".orig")
         run("ar", "rcs", target_lib, *obj_filenames, cwd=tmpdir)
 
 
 def remove_symbols_in_file(target_lib, object_file_to_modify, symbols_to_remove):
+    """Hide a set of symbols in `object_file_to_modify` by renaming them to
+    a unique unused name. pyobjtools doesn't expose an explicit strip
+    primitive, but a rename to a never-referenced name is functionally
+    equivalent for our use case."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        import __mp__.tools.extract_ar
-        __mp__.tools.extract_ar.extract_archive(target_lib, tmpdir)
+        from .tools.pyobjtools import ar as _ar
+        _ar.extract_archive(target_lib, tmpdir)
 
         all_obj_filenames = [fn for fn in os.listdir(tmpdir) if fn.endswith(".o")]
         target_obj_path = os.path.join(tmpdir, object_file_to_modify)
@@ -273,12 +254,9 @@ def remove_symbols_in_file(target_lib, object_file_to_modify, symbols_to_remove)
             raise FileNotFoundError(f"Object file {object_file_to_modify} not found in {target_lib}")
 
         if symbols_to_remove:
-            with tempfile.TemporaryDirectory() as strip_tmpdir:
-                remove_arg_file = os.path.join(strip_tmpdir, "remove_args.txt")
-                with open(remove_arg_file, "w") as f:
-                    f.write('\n'.join(symbols_to_remove) + "\n")
-
-                run("objcopy", f"--strip-symbols={remove_arg_file}", target_obj_path)
+            from .tools.pyobjtools import objcopy as _pyobj_objcopy
+            rename_map = {sym: f"__mp_stripped_{hashlib.md5(sym.encode()).hexdigest()}" for sym in symbols_to_remove}
+            _pyobj_objcopy.rename_obj(target_obj_path, rename_map)
 
         os.rename(target_lib, target_lib + ".orig")
         run("ar", "rcs", target_lib, *all_obj_filenames, cwd=tmpdir)

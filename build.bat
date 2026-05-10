@@ -130,7 +130,6 @@ copy Embedded\mp_embed.lib %OUTPUT_DIR%\libs\mp_embed.lib
 copy Embedded\mp_embed_data.lib %OUTPUT_DIR%\libs\mp_embed_data.lib
 
 %OUTPUT_DIR%\python.exe -m rebuildpython
-%OUTPUT_DIR%\python.exe -c "import __mp__.packaging; __mp__.packaging.install_build_tool('clang')"
 
 echo "Ok, MonolithPy now lives in %OUTPUT_DIR% folder"
 
