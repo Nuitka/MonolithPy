@@ -207,6 +207,7 @@ _ctypes _ctypes/_ctypes.c _ctypes/callbacks.c _ctypes/callproc.c _ctypes/stgdict
 #_dbm _dbmmodule.c -l:libgdbm_compat.a -DUSE_GDBM_COMPAT
 #_gdbm _gdbmmodule.c -l:libgdbm.a
 _lzma _lzmamodule.c -l:liblzma.a
+_sqlite3 -I$(srcdir)/Modules/_sqlite _sqlite/blob.c _sqlite/connection.c _sqlite/cursor.c _sqlite/microprotocols.c _sqlite/module.c _sqlite/prepare_protocol.c _sqlite/row.c _sqlite/statement.c _sqlite/util.c -l:libsqlite3.a -DMODULE_NAME='"sqlite3"' -DSQLITE_ENABLE_COLUMN_METADATA
 _uuid _uuidmodule.c -l:libuuid.a
 _zstd _zstd/_zstdmodule.c _zstd/compressor.c _zstd/decompressor.c _zstd/zstddict.c -I$(srcdir)/Modules/_zstd -l:libzstd.a
 zlib  zlibmodule.c -l:libz.a
@@ -290,7 +291,6 @@ xxlimited
 -lssl
 -ltk8.6
 -lz
-_sqlite3
 _testclinic
 _testclinic_limited
 _testinternalcapi
