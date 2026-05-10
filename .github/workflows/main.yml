@@ -142,7 +142,9 @@ jobs:
       - name: Run Build
         run: bash build.sh "${{ github.workspace }}/MonolithPy-Out"
       - name: Cleanup artifact
-        run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.o' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
+        # Do NOT delete *.o: the mp_embed tests below link against
+        # MonolithPy-Out/Embedded/mp_embed.o. Match the macOS cleanup set.
+        run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
       - uses: actions/upload-artifact@v4
         with:
           name: MonolithPy313_ubuntu
