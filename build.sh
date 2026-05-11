@@ -152,7 +152,7 @@ fi
 cd dep-build
 
 if [ ! -d ncurses-6.5 ]; then
-download_file https://ftp.gnu.org/gnu/ncurses/ncurses-6.5.tar.gz ncurses.tar.gz
+download_file https://mirrors.kernel.org/gnu/ncurses/ncurses-6.5.tar.gz ncurses.tar.gz
 tar -xf ncurses.tar.gz
 cd ncurses-6.5
 ./configure --prefix=${PREFIX} --disable-shared --enable-termcap --enable-widec --enable-getcap --without-cxx-binding
