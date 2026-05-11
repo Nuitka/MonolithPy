@@ -513,6 +513,9 @@
     <None Include="..\Lib\importlib\_bootstrap_external.py">
       <Filter>Python Files</Filter>
     </None>
+    <None Include="..\Lib\io.py">
+      <Filter>Python Files</Filter>
+    </None>
     <!-- END frozen modules -->
   </ItemGroup>
 </Project>

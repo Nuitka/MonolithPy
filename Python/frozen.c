@@ -43,6 +43,7 @@
 /* Includes for frozen modules: */
 #include "frozen_modules/importlib._bootstrap.h"
 #include "frozen_modules/importlib._bootstrap_external.h"
+#include "frozen_modules/io.h"
 #include "frozen_modules/frozen_only.h"
 /* End includes */
 
@@ -52,6 +53,7 @@ static const struct _frozen bootstrap_modules[] = {
     {0, 0, 0} /* bootstrap sentinel */
 };
 static const struct _frozen stdlib_modules[] = {
+    {"io", _Py_M__io, (int)sizeof(_Py_M__io), false},
     {0, 0, 0} /* stdlib sentinel */
 };
 static const struct _frozen test_modules[] = {

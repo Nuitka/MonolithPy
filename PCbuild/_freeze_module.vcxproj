@@ -312,6 +312,11 @@
       <IntFile>$(IntDir)frozen_only.g.h</IntFile>
       <OutFile>$(GeneratedFrozenModulesDir)Python\frozen_modules\frozen_only.h</OutFile>
     </None>
+    <None Include="..\Lib\io.py">
+      <ModName>io</ModName>
+      <IntFile>$(IntDir)io.g.h</IntFile>
+      <OutFile>$(GeneratedFrozenModulesDir)Python\frozen_modules\io.h</OutFile>
+    </None>
     <!-- END frozen modules -->
   </ItemGroup>
   <ItemGroup>
@@ -327,6 +332,7 @@
     <FrozenModule Include="$(GeneratedFrozenModulesDir)Python\frozen_modules\importlib._bootstrap.h" FrozenId="importlib._bootstrap" />
     <FrozenModule Include="$(GeneratedFrozenModulesDir)Python\frozen_modules\importlib._bootstrap_external.h" FrozenId="importlib._bootstrap_external" />
     <FrozenModule Include="$(GeneratedFrozenModulesDir)Python\frozen_modules\frozen_only.h" FrozenId="frozen_only" />
+    <FrozenModule Include="$(GeneratedFrozenModulesDir)Python\frozen_modules\io.h" FrozenId="io" />
     <!-- END freeze mappings -->
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
