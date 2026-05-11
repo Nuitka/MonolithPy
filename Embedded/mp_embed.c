@@ -5,6 +5,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
+/* Pull in <io.h> so the fallthrough _lseeki64 / _lseek / _open / _close
+ * calls below see the real CRT prototypes - returning __int64 in the
+ * _lseeki64 case. Without this, MSVC implicitly declares _lseeki64 as
+ * int-returning and silently truncates positions past 2 GB, breaking
+ * ZipFile.tell() during large wheel writes (e.g. mpy-tool-flang). */
+#include <io.h>
 #endif
 #include <ctype.h>
 #include <stdarg.h>
