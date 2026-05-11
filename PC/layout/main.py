@@ -281,7 +281,7 @@ def get_layout(ns):
                 continue
             if src in TCLTK_PYDS_ONLY and not ns.include_tcltk:
                 continue
-            if src in FileNameSet('python3.lib', 'python.lib', 'pythonw.lib') and src not in FileNameSet('python313.lib'):
+            if src in FileNameSet('python3.lib', 'python.lib', 'pythonw.lib') and src not in FileNameSet('python314.lib'):
                 continue
             yield "libs/{}".format(dest), src
 

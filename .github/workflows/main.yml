@@ -44,7 +44,7 @@ jobs:
       run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
     - uses: actions/upload-artifact@v4
       with:
-        name: MonolithPy313_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
+        name: MonolithPy314_mac_${{ matrix.architecture.arch }}${{ matrix.lto.artifact_tag }}
         path: ${{ github.workspace }}/MonolithPy-Out
     - name: Run Python smoke tests
       run: |
@@ -147,7 +147,7 @@ jobs:
         run: find "${{ github.workspace }}/MonolithPy-Out" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs rm -rf
       - uses: actions/upload-artifact@v4
         with:
-          name: MonolithPy313_ubuntu
+          name: MonolithPy314_ubuntu
           path: ${{ github.workspace }}/MonolithPy-Out
       - name: Run Python smoke tests
         run: |
@@ -231,7 +231,7 @@ jobs:
       run: Get-ChildItem -Path $(Get-Location) -File -Include *.old_interp -Recurse | Remove-Item -Force -Verbose
     - uses: actions/upload-artifact@v4
       with:
-        name: MonolithPy313_windows_x64
+        name: MonolithPy314_windows_x64
         path: output
     - name: Run Python smoke tests
       shell: cmd
