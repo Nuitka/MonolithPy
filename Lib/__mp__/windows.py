@@ -100,6 +100,7 @@ def auto_patch_build_file(fpath):
             s2 = s.replace("/MD", "/MT")
             s2 = s2.replace("-MD", "-MT")
             escaped_embed_path = os.path.join(sysconfig.get_config_var('base'), 'libs', 'mp_embed.lib').replace("\\", "/")
+            escaped_embed_data_path = os.path.join(sysconfig.get_config_var('base'), 'libs', 'mp_embed_data.lib').replace("\\", "/")
             escaped_include = sysconfig.get_config_var("INCLUDEPY").replace("\\", "/")
             s2 = re.sub(
                 r"cmake_minimum_required *\( *VERSION [0-9\.]+ *\)",
@@ -115,7 +116,7 @@ foreach(flag_var
         endif()
     endforeach(flag_var)
 
-add_link_options({escaped_embed_path} Shlwapi.lib)
+add_link_options({escaped_embed_path} {escaped_embed_data_path} Shlwapi.lib)
 include_directories({escaped_include})
 """,
                 s2,
