@@ -121,9 +121,14 @@ def bloom_bit_for(h: int, i: int, num_bits: int) -> int:
 
 
 def mkfspath(file_path: str) -> str:
+    """Returns the case-preserved virtual path. Lookups are case-insensitive
+    (mp_embed.c uses strcasecmp + lowercased FNV hash), so we do NOT
+    lowercase here - storing the original case keeps os.listdir() returning
+    correctly-cased filenames, which Python's import system needs for
+    case-sensitive `from . import moduleTNC`-style imports."""
     if file_path == base_path:
         return "/"
-    rel = os.path.relpath(file_path, base_path).replace('\\', '/').lower()
+    rel = os.path.relpath(file_path, base_path).replace('\\', '/')
     path = "/" + rel
     if path.startswith("/__relative__"):
         path = "~" + path[len("/__relative__"):]
@@ -160,7 +165,11 @@ class Entry:
 
     def __init__(self, vpath: str, type_: int, fs_path: str = None):
         self.vpath = vpath
-        self.hash = fnv1a_64(vpath.encode('utf-8'))
+        # Hash on the lowercased path so runtime case-insensitive lookups
+        # (mp_embed.c lowercases the search path before hashing) hit our entry
+        # regardless of the case used in the Python-level open() call. The
+        # stored vpath stays case-preserved for listdir() display.
+        self.hash = fnv1a_64(vpath.lower().encode('utf-8'))
         self.type = type_
         self.data_pos = 0
         self.data_size = 0
@@ -187,19 +196,27 @@ def collect_entries() -> list:
         if vdir in ("/", "~"):
             # Skip the root - it's implicit.
             continue
-        if vdir in seen:
+        # `seen` keeps lowercased keys to detect case-insensitive collisions
+        # (the runtime VFS is case-insensitive, so foo.PY and foo.py would
+        # both hash to the same slot - reject at gen time).
+        vdir_key = vdir.lower()
+        if vdir_key in seen:
             raise RuntimeError(f"duplicate directory: {vdir}")
-        seen.add(vdir)
+        seen.add(vdir_key)
 
         e = Entry(vdir, ETYPE_DIRECTORY, dirpath)
         e.parent_vpath = mkfspath(os.path.dirname(dirpath))
         entries.append(e)
 
         for fname in fnames:
-            vfile = vdir + "/" + fname.lower()
-            if vfile in seen:
+            # Preserve filename case (Python's import for `from . import X`
+            # is case-sensitive; os.listdir must return correctly cased names
+            # for that to work on a case-insensitive VFS).
+            vfile = vdir + "/" + fname
+            vfile_key = vfile.lower()
+            if vfile_key in seen:
                 raise RuntimeError(f"duplicate file: {vfile}")
-            seen.add(vfile)
+            seen.add(vfile_key)
             ef = Entry(vfile, ETYPE_FILE, os.path.join(dirpath, fname))
             ef.parent_vpath = vdir
             entries.append(ef)
@@ -363,22 +380,39 @@ def main():
     # without storing the uncompressed length separately. Empty files
     # are stored as a zero-size empty frame is wasteful, so we treat
     # them as size 0 / pos 0 explicitly and the runtime short-circuits.
-    data_blob = bytearray()
+    #
+    # Compress in parallel: zstd releases the GIL during compress, so a
+    # ThreadPoolExecutor across files gives near-linear speedup on
+    # the typical workload (thousands of small Python source files).
+    # We then concatenate the results sequentially in entry order so
+    # data_pos values are deterministic.
+    from concurrent.futures import ThreadPoolExecutor
+    file_entries = [e for e in entries if e.type == ETYPE_FILE]
+
+    def _read_and_compress(e):
+        with open(e.fs_path, 'rb') as fh:
+            content = fh.read()
+        if not content:
+            return e, b'', 0
+        return e, zstd_compress(content, ZSTD_LEVEL), len(content)
+
+    n_workers = max(1, (os.cpu_count() or 1))
+    with ThreadPoolExecutor(max_workers=n_workers) as ex:
+        results = list(ex.map(_read_and_compress, file_entries))
+
     raw_total = 0
-    for e in entries:
-        if e.type == ETYPE_FILE:
-            with open(e.fs_path, 'rb') as fh:
-                content = fh.read()
-            raw_total += len(content)
-            if len(content) == 0:
-                e.data_pos = 0
-                e.data_size = 0
-            else:
-                compressed = zstd_compress(content, ZSTD_LEVEL)
-                e.data_pos = len(data_blob)
-                e.data_size = len(compressed)
-                data_blob.extend(compressed)
+    data_blob = bytearray()
+    for e, compressed, raw_len in results:
+        raw_total += raw_len
+        if raw_len == 0:
+            e.data_pos = 0
+            e.data_size = 0
         else:
+            e.data_pos = len(data_blob)
+            e.data_size = len(compressed)
+            data_blob.extend(compressed)
+    for e in entries:
+        if e.type != ETYPE_FILE:
             e.data_pos = 0
             e.data_size = 0
     if raw_total > 0:

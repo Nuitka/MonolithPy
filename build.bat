@@ -51,6 +51,7 @@ if not exist externals\zstd-1.5.7 (
 )
 
 cl /c /Zi /FoEmbedded\mp_embed.obj Embedded\mp_embed.c /IInclude /Iexternals\zstd-1.5.7\lib
+cl /c /Zi /EHsc /FoEmbedded\mp_embed_cpp.obj Embedded\mp_embed.cpp /IInclude
 cl /c /FoEmbedded\mp_embed_data.obj Embedded\mp_embed_data.c
 
 rem Bundle all of zstd's source into mp_embed.lib. Every project that uses
@@ -80,7 +81,7 @@ rem can substitute their own (otherwise linking mp_embed.lib would
 rem also pull in the production blob's nuitka_embed_*).
 rem mp_embed_data.lib (just the production data wrapped) is what
 rem python.exe links via pyproject.props.
-lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\zstd_objs\*.obj
+lib /OUT:Embedded\mp_embed.lib Embedded\mp_embed.obj Embedded\mp_embed_cpp.obj Embedded\zstd_objs\*.obj
 if errorlevel 1 exit /b 1
 lib /OUT:Embedded\mp_embed_data.lib Embedded\mp_embed_data.obj
 if errorlevel 1 exit /b 1
