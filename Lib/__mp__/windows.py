@@ -66,6 +66,9 @@ def find_compiler_exe(exe):
 def setup_compiler_env():
     vc_env = _call_get_vc_env()
     os.environ.update(vc_env)
+    # Force /GL off for every cl.exe invocation in this build.
+    existing = os.environ.get("_CL_", "").strip()
+    os.environ["_CL_"] = (existing + " /GL-").strip()
 
 
 def filter_paths_containing(exe_name):
