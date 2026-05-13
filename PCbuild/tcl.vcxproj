@@ -63,6 +63,7 @@
     <NMakeBuildCommandLine>setlocal
 set VCINSTALLDIR=$(VCInstallDir)
 cd /D "$(tclDir)win"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$$t = Get-Content rules.vc -Raw; $$t = $$t -replace '(?ms)# Link time optimization\. Note that this option \(potentially\) makes\r?\n# generated libraries only usable by the specific VC\+\+ version that\r?\n# created it\. Requires /LTCG linker option\r?\n!if \[nmakehlp -c -GL\]\r?\nOPTIMIZATIONS  = \$$\(OPTIMIZATIONS\) -GL\r?\nCC_GL_OPT_ENABLED = 1\r?\n!else\r?\n# In newer compilers -GL and -YX are incompatible\.\r?\n!if \[nmakehlp -c -YX\]\r?\nOPTIMIZATIONS  = \$$\(OPTIMIZATIONS\) -YX\r?\n!endif\r?\n!endif # \[nmakehlp -c -GL\]\r?\n', '# LTO disabled to keep bin-dep portable across cl micro-versions.\r\n!if [nmakehlp -c -YX]\r\nOPTIMIZATIONS  = $$(OPTIMIZATIONS) -YX\r\n!endif\r\n'; Set-Content rules.vc -Value $$t -NoNewline -Encoding ASCII"
 nmake -f makefile.vc MACHINE=$(TclMachine) OPTS=$(TclOpts) $(TclDirs) $(DebugFlags) $(WarningsFlags) TCLSH_NATIVE="$(tclWin32Exe)" core shell dlls
 nmake -f makefile.vc MACHINE=$(TclMachine) OPTS=$(TclOpts) $(TclDirs) $(DebugFlags) $(WarningsFlags) TCLSH_NATIVE="$(tclWin32Exe)" install-binaries install-libraries
 copy /Y ..\license.terms "$(OutDir)\tcllicense.terms"
