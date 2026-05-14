@@ -63,16 +63,9 @@ def find_compiler_exe(exe):
     return find_exe(exe, paths)
 
 
-def setup_compiler_env(disable_msvc_lto=True):
+def setup_compiler_env():
     vc_env = _call_get_vc_env()
     os.environ.update(vc_env)
-    # Force /GL off for every cl.exe invocation in this build.
-    # clang-cl reads the same _CL_ env var but does not recognize
-    # /GL- and errors out treating it as a file path, so callers that
-    # drive a clang-cl/flang build must pass disable_msvc_lto=False.
-    if disable_msvc_lto:
-        existing = os.environ.get("_CL_", "").strip()
-        os.environ["_CL_"] = (existing + " /GL-").strip()
 
 
 def filter_paths_containing(exe_name):
