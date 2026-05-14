@@ -662,22 +662,45 @@ def nm_gcc_lto(path):
                 return raw
         return raw
 
+    # Each entry in .gnu.lto_.symtab.<hash> is:
+    #   <name>\x00 + 15-byte fixed record
+    # Record layout (matches enum gcc_plugin_symbol_kind from gcc/lto-streamer.h):
+    #   byte 0: padding (0x00)
+    #   byte 1: kind  — 0=DEF, 1=WEAKDEF, 2=UNDEF, 3=WEAKUNDEF, 4=COMMON
+    #   bytes 2-14: visibility/size/etc. (ignored)
+    # We map kind to GNU nm's type letters so callers like rebuildpython.py
+    # that filter on " u " (undefined) get the same defined/undefined split
+    # they got from /usr/bin/nm with the binutils LTO plugin loaded.
+    _LTO_KIND_TO_TYPE = {
+        0: 'T',  # DEF
+        1: 'W',  # WEAKDEF
+        2: 'U',  # UNDEF
+        3: 'w',  # WEAKUNDEF
+        4: 'C',  # COMMON
+    }
+    _LTO_RECORD_SIZE = 15
+
     symbols = []
     for i in range(e_shnum):
         name = sec_name(i)
-        if ".symtab" in name and "lto" in name and "ext" not in name:
+        if name.startswith(".gnu.lto_.symtab."):
             sec = sections[i]
             sec_data = _try_decompress(data[sec["sh_offset"]:sec["sh_offset"] + sec["sh_size"]])
             pos = 0
             while pos < len(sec_data):
                 end = sec_data.find(b'\x00', pos)
-                if end == -1:
+                if end == -1 or end == pos:
                     break
-                if end > pos:
-                    sym_name = sec_data[pos:end].decode("ascii", errors="replace")
-                    if sym_name.isprintable() and not sym_name.startswith('\x00'):
-                        symbols.append(Symbol(sym_name, None, 'T'))
-                pos = end + 1
+                sym_name = sec_data[pos:end].decode("ascii", errors="replace")
+                rec_start = end + 1
+                if rec_start + _LTO_RECORD_SIZE > len(sec_data):
+                    break
+                kind = sec_data[rec_start + 1]
+                pos = rec_start + _LTO_RECORD_SIZE
+                if not sym_name.isprintable():
+                    continue
+                type_char = _LTO_KIND_TO_TYPE.get(kind, 'T')
+                symbols.append(Symbol(sym_name, None, type_char))
 
     return symbols
 
