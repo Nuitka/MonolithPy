@@ -780,17 +780,48 @@ def nm_msvc_lto(path):
 # =============================================================================
 
 def nm_ar(path):
-    """List symbols from every object member of a Unix ar archive (.a, .lib)."""
+    """List symbols from a Unix ar archive (.a, .lib).
+
+    Combines two sources:
+
+    1. The archive's own symbol-directory member (the leading "/" or
+       "__.SYMDEF" entry that every linker-friendly archive carries). This
+       enumerates every name that SOME member defines, regardless of the
+       individual member's object format. It is the only way to surface
+       symbols from members in MSVC LTCG IR (ANON_OBJECT) form, which the
+       per-member parser cannot decode.
+
+    2. Per-member nm output for the formats we understand. Adds undefined
+       symbols (which the archive directory does not list) that callers
+       like rebuildpython.py's dep-order algorithm need.
+
+    Defined symbols seen by both sources are deduplicated.
+    """
     from . import ar as _ar
+
+    # Step 1: archive's defined-symbol directory.
+    seen_defined = set()
     symbols = []
+    for name in _ar.read_symbol_directory(path):
+        if not name or name in seen_defined:
+            continue
+        seen_defined.add(name)
+        symbols.append(Symbol(name, None, 'T'))
+
+    # Step 2: per-member symbols. Skip members we can't parse — for those,
+    # the directory above is the best we have.
     with tempfile.TemporaryDirectory() as tmpdir:
         for member_path in _ar.extract_archive(path, tmpdir):
             try:
-                symbols.extend(nm(member_path))
+                member_syms = nm(member_path)
             except ValueError:
-                # Skip members that aren't recognized object files (e.g.
-                # __.SYMDEF index entries or BSD-style metadata members).
                 continue
+            for s in member_syms:
+                if s.type_char in ('U', 'w'):
+                    symbols.append(s)
+                elif s.name not in seen_defined:
+                    seen_defined.add(s.name)
+                    symbols.append(s)
     return symbols
 
 

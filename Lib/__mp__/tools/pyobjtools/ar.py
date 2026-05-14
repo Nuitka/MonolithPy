@@ -11,12 +11,79 @@ Extracts member objects from Unix ar archives (.a) and Windows static
 libraries (.lib). Handles BSD-style and GNU/SysV-style long filenames.
 """
 import os
+import struct
 import sys
 
 AR_MAGIC = b'!<arch>\n'
 FAT_MAGIC_BE = b'\xca\xfe\xba\xbe'
 FAT_MAGIC_LE = b'\xbe\xba\xfe\xca'
 _MEMBER_HEADER_SIZE = 60
+
+
+def read_symbol_directory(archive_path):
+    """Return the list of symbol names from the archive's symbol-table member.
+
+    Both GNU/SysV ar and Microsoft COFF archives put a "/" member at the
+    front whose body is:
+
+        u32 big-endian      number of symbols N
+        u32 big-endian * N  member offsets (ignored here)
+        char * ...          null-terminated symbol names
+
+    BSD ar archives use "__.SYMDEF" / "__.SYMDEF SORTED" with a different
+    layout (ranlib table + string table, little-endian). Both are handled.
+
+    All names returned represent SYMBOLS THAT SOME MEMBER DEFINES — i.e.
+    "T" in nm-speak. Returns [] if no recognizable directory member.
+    """
+    with open(archive_path, 'rb') as f:
+        magic = f.read(8)
+        if magic != AR_MAGIC:
+            return []
+
+        header_bytes = f.read(_MEMBER_HEADER_SIZE)
+        if len(header_bytes) < _MEMBER_HEADER_SIZE:
+            return []
+
+        try:
+            header = _parse_member_header(header_bytes)
+        except ValueError:
+            return []
+        raw_name = header["raw_name"].rstrip(b' ').decode('ascii', 'ignore')
+        size = header["size"]
+        body = f.read(size)
+
+        # BSD ar: name is encoded as "#1/<len>" then the real name follows the body
+        if raw_name.startswith('#1/'):
+            try:
+                name_len = int(raw_name[3:])
+            except ValueError:
+                return []
+            real_name = body[:name_len].rstrip(b'\x00').decode('ascii', 'ignore')
+            body = body[name_len:]
+            raw_name = real_name
+
+        if raw_name in ('/', '/0') or raw_name.startswith('/ '):
+            # GNU/SysV or COFF: big-endian count + offsets + null-terminated names
+            if len(body) < 4:
+                return []
+            count = struct.unpack('>I', body[:4])[0]
+            names_blob = body[4 + count * 4:]
+            return [n.decode('ascii', 'replace') for n in names_blob.split(b'\x00') if n]
+
+        if raw_name.startswith('__.SYMDEF'):
+            # BSD: little-endian ranlib table + string table
+            if len(body) < 4:
+                return []
+            ranlib_size = struct.unpack('<I', body[:4])[0]
+            str_off = 4 + ranlib_size
+            if str_off + 4 > len(body):
+                return []
+            str_size = struct.unpack('<I', body[str_off:str_off+4])[0]
+            names_blob = body[str_off + 4:str_off + 4 + str_size]
+            return [n.decode('ascii', 'replace') for n in names_blob.split(b'\x00') if n]
+
+        return []
 
 
 def _make_unique_filename(base_path):
