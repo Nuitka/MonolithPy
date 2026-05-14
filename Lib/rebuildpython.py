@@ -62,7 +62,7 @@ def getPythonInitFunctions(compiler, filename):
     ]
 
     initFunctions = [
-        y for y in initFunctions if "$" not in y and "@" not in y and "?" not in y
+        y for y in initFunctions if "." not in y and "$" not in y and "@" not in y and "?" not in y
     ]
 
     return initFunctions
