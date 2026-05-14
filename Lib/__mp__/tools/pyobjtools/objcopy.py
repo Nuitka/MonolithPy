@@ -20,10 +20,13 @@ For regular objects, rebuilds string tables with new names.
 
 Use rename_obj() for auto-detection, or call format-specific functions directly.
 """
-import struct
-import subprocess
+import glob
 import os
 import re
+import shutil
+import struct
+import subprocess
+import sys
 import tempfile
 
 def _zstd_decompress(compressed):
@@ -960,6 +963,143 @@ def _clang_lto_rename_same_length(data, strtab_start, strtab_end, rename_map):
     return data, renamed
 
 
+# Pattern matching the Apple clang build-version stamp Apple's libLTO
+# uses to gate "Invalid bitcode version (Producer: 'X' Reader: 'Y')".
+# Apple's clang stamps the same string into !llvm.ident metadata that
+# `clang --version` prints in the trailing `(clang-XXXX.XX.XX.XX)`
+# parenthetical, so we can match it on both sides.
+_APPLE_BUILD_RE = re.compile(rb'clang-(\d+(?:\.\d+){2,4})')
+# Fallback: open-source clang version string. Both clang's ident metadata
+# in the bitcode and `clang --version` output start with this prefix.
+_CLANG_VERSION_RE = re.compile(rb'clang version (\d+(?:\.\d+)+)')
+
+
+def _extract_clang_lto_version(data):
+    """Return the producer-version stamp embedded in raw clang LTO bitcode.
+
+    Prefers the Apple-style `clang-MMmm.PP.RR.BB` build identifier when
+    present (that's exactly what Apple's libLTO compares against); falls
+    back to the upstream-style `X.Y.Z` semantic version. Returns None if
+    neither is present in the input.
+    """
+    m = _APPLE_BUILD_RE.search(data)
+    if m:
+        return ("apple", m.group(1).decode("ascii"))
+    m = _CLANG_VERSION_RE.search(data)
+    if m:
+        return ("upstream", m.group(1).decode("ascii"))
+    return None
+
+
+def _clang_build_version(clang_path):
+    """Return what build-version stamp `clang_path` emits into bitcode.
+
+    Matches the format produced by _extract_clang_lto_version so the two
+    can be compared for equality. Returns None on failure.
+    """
+    try:
+        out = subprocess.check_output(
+            [clang_path, "--version"],
+            stderr=subprocess.STDOUT, timeout=20)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    m = _APPLE_BUILD_RE.search(out)
+    if m:
+        return ("apple", m.group(1).decode("ascii"))
+    m = _CLANG_VERSION_RE.search(out)
+    if m:
+        return ("upstream", m.group(1).decode("ascii"))
+    return None
+
+
+def _enumerate_clang_candidates():
+    """List installed clang binaries to consider for an LTO round-trip.
+
+    Probes (in priority order): PATH, /usr/bin/clang, the Command Line
+    Tools toolchain, every installed Xcode default toolchain, the
+    importable mpy_tool_clang package, and Homebrew llvm@X kegs. Dedupes
+    by realpath.
+    """
+    paths = []
+    on_path = shutil.which("clang")
+    if on_path:
+        paths.append(on_path)
+    paths.append("/usr/bin/clang")
+    paths.append("/Library/Developer/CommandLineTools/usr/bin/clang")
+    paths.extend(glob.glob(
+        "/Applications/Xcode*.app/Contents/Developer/Toolchains/"
+        "XcodeDefault.xctoolchain/usr/bin/clang"))
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("mpy_tool_clang")
+        if spec and spec.origin:
+            pkg_dir = os.path.dirname(spec.origin)
+            for sub in ("bin/clang", "clang", "bin/clang.exe", "clang.exe"):
+                paths.append(os.path.join(pkg_dir, sub))
+    except Exception:
+        pass
+    paths.extend(glob.glob("/opt/homebrew/opt/llvm*/bin/clang"))
+    paths.extend(glob.glob("/usr/local/opt/llvm*/bin/clang"))
+
+    seen = set()
+    unique = []
+    for p in paths:
+        if not p or not os.path.isfile(p):
+            continue
+        try:
+            real = os.path.realpath(p)
+        except OSError:
+            continue
+        if real in seen:
+            continue
+        seen.add(real)
+        unique.append(p)
+    return unique
+
+
+def _find_compatible_clang(bitcode_data):
+    """Pick a clang that emits bitcode with the same producer stamp as
+    `bitcode_data`.
+
+    Apple's libLTO refuses to read bitcode whose Producer is newer than
+    its Reader, so to round-trip the rename without bumping the stamp we
+    need a clang whose own --version stamp equals the input's. Raises
+    RuntimeError listing the probed candidates when no match is found.
+    """
+    target = _extract_clang_lto_version(bitcode_data)
+    candidates = _enumerate_clang_candidates()
+    if target is None:
+        for c in candidates:
+            if _clang_build_version(c) is not None:
+                return c
+        raise RuntimeError(
+            "Clang LTO rename needs a clang to round-trip through, but "
+            "no usable clang was found on PATH or in known toolchain "
+            "locations.")
+
+    seen_versions = []
+    for c in candidates:
+        v = _clang_build_version(c)
+        if v is None:
+            continue
+        seen_versions.append((c, v))
+        if v == target:
+            return c
+
+    versions_text = (
+        "\n".join(f"  - {p}  ->  {v[0]} {v[1]}" for p, v in seen_versions)
+        or "  (no clang candidates found)")
+    target_kind, target_ver = target
+    raise RuntimeError(
+        f"Clang LTO rename requires a clang that stamps bitcode as "
+        f"{target_kind} {target_ver!r} (matching the input .o's "
+        f"producer), but none of the installed clangs match.\n"
+        f"Installed candidates:\n{versions_text}\n"
+        f"Install the matching toolchain, or rebuild the wheel with a "
+        f"clang whose version aligns with the final-link libLTO so the "
+        f"rename round-trip preserves the bitcode format.")
+
+
 def _clang_lto_rename_variable_length(data, rename_map, clang="clang"):
     """Variable-length rename of Clang LTO bitcode by round-tripping through
     textual IR.
@@ -1042,12 +1182,15 @@ def _rewrap_bitcode(inner_data, wrapper_header):
     return bytearray(wrapper_header) + inner_data
 
 
-def rename_clang_lto(obj_path, rename_map, output_path=None, clang="clang"):
+def rename_clang_lto(obj_path, rename_map, output_path=None, clang=None):
     """Rename symbols in a Clang LTO bitcode object file.
 
     Same-length renames use fast in-place STRTAB overwrite.
-    Variable-length renames round-trip through textual IR using the clang
-    binary, keeping us decoupled from bitcode format details.
+    Variable-length renames round-trip through textual IR using a clang
+    binary. If `clang` is None (the default), one is chosen automatically
+    via _find_compatible_clang() to match the input bitcode's producer
+    stamp so the rename does not bump the bitcode format version; pass an
+    explicit path to skip that detection.
     """
     if output_path is None:
         output_path = obj_path
@@ -1058,6 +1201,8 @@ def rename_clang_lto(obj_path, rename_map, output_path=None, clang="clang"):
     data, wrapper = _unwrap_bitcode(raw_data)
 
     if not _all_same_length(rename_map):
+        if clang is None:
+            clang = _find_compatible_clang(bytes(data))
         new_data, renamed = _clang_lto_rename_variable_length(data, rename_map, clang)
         with open(output_path, "wb") as f:
             f.write(_rewrap_bitcode(new_data, wrapper))
@@ -1228,10 +1373,13 @@ def rename_msvc_lto(obj_path, rename_map, output_path=None):
 # Public API
 # =============================================================================
 
-def rename_obj(obj_path, rename_map, output_path=None, gcc="gcc", clang="clang"):
+def rename_obj(obj_path, rename_map, output_path=None, gcc="gcc", clang=None):
     """Auto-detect object format and rename symbols.
 
     Handles both LTO and regular object files across all platforms.
+    For clang LTO, `clang=None` (the default) lets rename_clang_lto pick
+    a clang whose build version matches the input bitcode's stamp so the
+    round-trip preserves the producer; pass an explicit path to override.
     Returns number of symbols renamed.
     """
     fmt = detect_obj_format(obj_path)
