@@ -37,46 +37,29 @@ def find_files(directory, pattern):
 
 
 def getPythonInitFunctions(compiler, filename):
-    if platform.system() == "Windows":
-        initFunctions = [
-            x.decode("ascii").split(" ")[-1]
-            for x in subprocess.check_output(
-                [compiler.dumpbin, "/linkermember", filename]
-            ).split(b"\r\n")
-            if (b"init" if str is bytes else b"PyInit_") in x
-        ]
-        # MSVC adds an underscore to the beginning of all symbols for x32.
-        # We must ignore this underscore.
-        if platform.system() == "Windows" and "32" in platform.architecture()[0]:
-            initFunctions = [x[1:] if x.startswith("_") else x for x in initFunctions]
-    else:
-        nm_lines = [
-            x.decode("ascii")
-            for x in subprocess.check_output(["nm", filename]).split(
-                os.linesep.encode("ascii")
-            )
-        ]
-        functions = [
-            x.split(" ")[-1]
-            for x in nm_lines
-        ]
-        undefined = set([
-            x.split(" ")[-1]
-            for x in nm_lines
-            if " u " in x.lower()
-        ])
-        defined = set([
-            x.split(" ")[-1]
-            for x in nm_lines
-            if " u " not in x.lower()
-        ])
-        all_defined_symbols.update(defined)
-        library2defined_symbols[filename] = defined
-        library2undefined_symbols[filename] = undefined - defined
-        functions = [x[1:] if x.startswith("_") else x for x in functions]
-        initFunctions = [
-            x for x in functions if x.startswith("init" if str is bytes else "PyInit_")
-        ]
+    from __mp__.tools.pyobjtools import nm as _pyobj_nm
+    nm_lines = [s.format() for s in _pyobj_nm.nm(filename)]
+    functions = [
+        x.split(" ")[-1]
+        for x in nm_lines
+    ]
+    undefined = set([
+        x.split(" ")[-1]
+        for x in nm_lines
+        if " u " in x.lower()
+    ])
+    defined = set([
+        x.split(" ")[-1]
+        for x in nm_lines
+        if " u " not in x.lower()
+    ])
+    all_defined_symbols.update(defined)
+    library2defined_symbols[filename] = defined
+    library2undefined_symbols[filename] = undefined - defined
+    functions = [x[1:] if x.startswith("_") else x for x in functions]
+    initFunctions = [
+        x for x in functions if x.startswith("init" if str is bytes else "PyInit_")
+    ]
 
     initFunctions = [
         y for y in initFunctions if "$" not in y and "@" not in y and "?" not in y

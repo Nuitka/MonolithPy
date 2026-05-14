@@ -14,11 +14,14 @@ Supports:
 - Clang LTO bitcode (BC\xc0\xde)
 - GCC LTO slim objects (ELF with .gnu.lto_*)
 - MSVC LTCG objects (ANON_OBJECT / CIL)
+- Unix ar archives (.a, .lib) — symbols from all object members
 
 Output format matches nm: <address> <type> <name>
 """
+import os
 import struct
 import sys
+import tempfile
 
 
 class Symbol:
@@ -47,6 +50,9 @@ def detect_format(path):
 
     if len(header) < 4:
         return None
+
+    if header[:8] == b'!<arch>\n':
+        return 'ar'
 
     if header[:4] == b'\xde\xc0\x17\x0b':
         return 'clang-lto'
@@ -750,8 +756,23 @@ def nm_msvc_lto(path):
 # Public API
 # =============================================================================
 
+def nm_ar(path):
+    """List symbols from every object member of a Unix ar archive (.a, .lib)."""
+    from . import ar as _ar
+    symbols = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for member_path in _ar.extract_archive(path, tmpdir):
+            try:
+                symbols.extend(nm(member_path))
+            except ValueError:
+                # Skip members that aren't recognized object files (e.g.
+                # __.SYMDEF index entries or BSD-style metadata members).
+                continue
+    return symbols
+
+
 def nm(path):
-    """List symbols from an object file. Returns list of Symbol objects."""
+    """List symbols from an object file or ar archive. Returns list of Symbol objects."""
     fmt = detect_format(path)
     if fmt == 'elf' or fmt == 'gcc-lto':
         if fmt == 'gcc-lto':
@@ -765,6 +786,8 @@ def nm(path):
         return nm_clang_lto(path)
     elif fmt == 'msvc-lto':
         return nm_msvc_lto(path)
+    elif fmt == 'ar':
+        return nm_ar(path)
     else:
         raise ValueError(f"{path}: unrecognized object file format")
 
