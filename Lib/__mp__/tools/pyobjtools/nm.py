@@ -375,6 +375,17 @@ _IMAGE_SYM_CLASS_STATIC = 3
 _IMAGE_SYM_CLASS_LABEL = 6
 _IMAGE_SYM_CLASS_FILE = 103
 _IMAGE_SYM_CLASS_SECTION = 104
+_IMAGE_SYM_CLASS_WEAK_EXTERNAL = 105
+
+# Storage classes whose symbols the linker resolves; everything else is
+# debug / compiler-internal metadata that real nm hides. Match llvm-nm so
+# downstream renamers don't see entries like $LN* labels and try to rewrite
+# them.
+_NM_VISIBLE_STORAGE_CLASSES = frozenset((
+    _IMAGE_SYM_CLASS_EXTERNAL,
+    _IMAGE_SYM_CLASS_STATIC,
+    _IMAGE_SYM_CLASS_WEAK_EXTERNAL,
+))
 
 _IMAGE_SYM_UNDEFINED = 0
 
@@ -432,17 +443,18 @@ def nm_coff(path):
 
         i += 1 + num_aux
 
-        if storage_class == _IMAGE_SYM_CLASS_FILE:
-            continue
-        if storage_class == _IMAGE_SYM_CLASS_SECTION:
+        if storage_class not in _NM_VISIBLE_STORAGE_CLASSES:
             continue
         if not name or name.startswith('.'):
             continue
 
         is_external = (storage_class == _IMAGE_SYM_CLASS_EXTERNAL)
+        is_weak = (storage_class == _IMAGE_SYM_CLASS_WEAK_EXTERNAL)
 
         if sect_num == _IMAGE_SYM_UNDEFINED:
-            if value == 0:
+            if is_weak:
+                tc = 'w'
+            elif value == 0:
                 tc = 'U'
             else:
                 tc = 'C' if is_external else 'c'
@@ -463,7 +475,9 @@ def nm_coff(path):
                 tc = 'r'
             else:
                 tc = 'n'
-            if is_external:
+            if is_weak:
+                tc = 'W'
+            elif is_external:
                 tc = tc.upper()
         elif sect_num == -1:
             tc = 'A' if is_external else 'a'
@@ -758,17 +772,21 @@ def nm_msvc_lto(path):
 
         i += 1 + num_aux
 
-        if storage_class == _IMAGE_SYM_CLASS_FILE:
+        if storage_class not in _NM_VISIBLE_STORAGE_CLASSES:
             continue
         if not name or name.startswith('.'):
             continue
 
         is_external = (storage_class == _IMAGE_SYM_CLASS_EXTERNAL)
+        is_weak = (storage_class == _IMAGE_SYM_CLASS_WEAK_EXTERNAL)
 
         if sect_num == 0:
-            tc = 'U'
+            tc = 'w' if is_weak else 'U'
         else:
-            tc = 'T' if is_external else 't'
+            if is_weak:
+                tc = 'W'
+            else:
+                tc = 'T' if is_external else 't'
 
         symbols.append(Symbol(name, None, tc))
 
