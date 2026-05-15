@@ -149,7 +149,7 @@ def repack_library(lib_path, obj_list):
         run("ar", "rcs", lib_path)
 
 
-def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
+def rename_symbols_in_file(target_lib, suffix, protected_symbols=[]):
     target_lib = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
         from .tools.pyobjtools import ar as _ar
@@ -177,7 +177,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
                         known_symbols.add(sym_name)
 
         rename_map = {
-            sym: prefix + sym
+            sym: sym + suffix
             for sym in (known_symbols - unmatched_symbols - keep_symbols)
         }
 
@@ -262,13 +262,13 @@ def remove_symbols_in_file(target_lib, object_file_to_modify, symbols_to_remove)
         run("ar", "rcs", target_lib, *all_obj_filenames, cwd=tmpdir)
 
 
-def rename_symbols_in_wheel_file(wheel, filename, prefix, protected_symbols = []):
+def rename_symbols_in_wheel_file(wheel, filename, suffix, protected_symbols = []):
     from wheel.wheelfile import WheelFile
     with TemporaryDirectory() as tmpdir:
         with WheelFile(wheel) as wf:
             wf.extract(filename, tmpdir)
         from __mp__ import rename_symbols_in_file
-        rename_symbols_in_file(os.path.join(tmpdir, filename), prefix, protected_symbols)
+        rename_symbols_in_file(os.path.join(tmpdir, filename), suffix, protected_symbols)
         with WheelFile(wheel, 'a') as wf:
             wf.write(os.path.join(tmpdir, filename), filename)
 

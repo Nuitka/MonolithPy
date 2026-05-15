@@ -224,7 +224,7 @@ def repack_library(lib_path, obj_list):
     run_with_output(find_compiler_exe("lib.exe"), "/OUT:" + lib_path, *obj_list, quiet=True)
 
 
-def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
+def rename_symbols_in_file(target_lib, suffix, protected_symbols=None):
     if protected_symbols is None:
         protected_symbols = []
     target_lib_abs = os.path.abspath(target_lib)
@@ -255,7 +255,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=None):
                         known_symbols.add(sym[0])
 
         unmatched_symbols = unmatched_symbols - known_symbols
-        rename_map = {sym: prefix + sym for sym in (known_symbols - unmatched_symbols - keep_symbols)}
+        rename_map = {sym: sym + suffix for sym in (known_symbols - unmatched_symbols - keep_symbols)}
 
         if rename_map:
             from .tools.pyobjtools import objcopy as _pyobj_objcopy
@@ -353,12 +353,12 @@ def remove_symbols_in_file(target_lib, object_file, symbols):
         subprocess.run(["lib", "/OUT:" + target_lib] + obj_list)
 
 
-def rename_symbols_in_wheel_file(wheel, filename, prefix, protected_symbols = []):
+def rename_symbols_in_wheel_file(wheel, filename, suffix, protected_symbols = []):
     from wheel.wheelfile import WheelFile
     with TemporaryDirectory() as tmpdir:
         with WheelFile(wheel) as wf:
             wf.extract(filename, tmpdir)
-        rename_symbols_in_file(os.path.join(tmpdir, filename), prefix, protected_symbols)
+        rename_symbols_in_file(os.path.join(tmpdir, filename), suffix, protected_symbols)
         with WheelFile(wheel, 'a') as wf:
             wf.write(os.path.join(tmpdir, filename), filename)
 

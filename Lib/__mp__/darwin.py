@@ -33,7 +33,7 @@ def repack_library(lib_path, obj_list):
     subprocess.run(["libtool", "-static", "-o", lib_path] + obj_list, check=True)
 
 
-def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
+def rename_symbols_in_file(target_lib, suffix, protected_symbols=[]):
     target_lib = os.path.abspath(target_lib)
     with tempfile.TemporaryDirectory() as tmpdir:
         from .tools.pyobjtools import ar as _ar
@@ -60,7 +60,7 @@ def rename_symbols_in_file(target_lib, prefix, protected_symbols=[]):
                         known_symbols.add(sym[0])
 
         unmatched_symbols = unmatched_symbols - known_symbols
-        rename_map = {sym: prefix + sym for sym in (known_symbols - unmatched_symbols - keep_symbols)}
+        rename_map = {sym: sym + suffix for sym in (known_symbols - unmatched_symbols - keep_symbols)}
 
         if rename_map:
             from .tools.pyobjtools import objcopy as _pyobj_objcopy
