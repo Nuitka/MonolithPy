@@ -27,8 +27,16 @@ fi
 export "PREFIX=$(pwd)/../MonolithPy-Deps"
 export "PYTHON_BASE=$(pwd)"
 export "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig:${PREFIX}/share/pkgconfig"
-export "CFLAGS=-arch $arch -mmacosx-version-min=10.13 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
-export "CXXFLAGS=-arch $arch -mmacosx-version-min=10.13 -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
+deployment_target="${MACOSX_DEPLOYMENT_TARGET:-10.13}"
+if [ "$arch" = "arm64" ]; then
+    deployment_major="${deployment_target%%.*}"
+    if [ "$deployment_major" -lt 11 ] 2>/dev/null; then
+        deployment_target=11.0
+    fi
+fi
+export "MACOSX_DEPLOYMENT_TARGET=$deployment_target"
+export "CFLAGS=-arch $arch -mmacosx-version-min=$deployment_target -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
+export "CXXFLAGS=-arch $arch -mmacosx-version-min=$deployment_target -I${PREFIX}/include -I${PYTHON_BASE}/Include -fPIC ${LTO_OPTS}"
 export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
 # Apple ld does not implement --wrap (any syntax: -wrap, -Wl,-wrap,
 # -Wl,--wrap=, including -ld_classic and -ld_prime all fail with
@@ -43,7 +51,6 @@ export "CPPFLAGS=-I${PREFIX}/include -I${PYTHON_BASE}/Include"
 # plain libc names and no linker rewriting is needed.
 export "LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd ${LTO_OPTS}"
 export "CCexe_LDFLAGS=-arch $arch -L${PREFIX}/lib -lmp_embed -lzstd -I${PYTHON_BASE}/Include"
-export "MACOSX_DEPLOYMENT_TARGET=10.13"
 
 # Allow to overload the compiler used via CC environment variable
 if [ "$CC" = "" ]

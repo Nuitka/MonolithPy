@@ -422,7 +422,7 @@ def main():
         os.environ["CXX"] = cxx_config_var
 
     if platform.system() == "Darwin":
-        os.environ["MACOSX_DEPLOYMENT_TARGET"] = "10.9"
+        os.environ["MACOSX_DEPLOYMENT_TARGET"] = __mp__.get_macos_deployment_target()
 
     # pkg-config uses absolute paths, which do not allow for
     if platform.system() != "Windows":

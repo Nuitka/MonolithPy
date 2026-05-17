@@ -710,7 +710,7 @@ static inline void Py_InitStaticModules(void) {
         link_libs = [libpython_lib] + [x for x in link_libs if x != libpython_lib]
         library_dirs = [x for x in sysconfig_lib_dirs + library_dirs if 'MonolithPy-Deps' not in x]
 
-        os.environ["MACOSX_DEPLOYMENT_TARGET"] = sysconfig.get_config_var("MACOSX_DEPLOYMENT_TARGET") or "10.13"
+        os.environ["MACOSX_DEPLOYMENT_TARGET"] = __mp__.get_macos_deployment_target()
 
         compiler.compile(
             [os.path.join(sysconfig.get_config_var("prefix"), "python.c")],

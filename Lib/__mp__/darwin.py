@@ -1,9 +1,40 @@
 # macOS is mostly the same as linux.
+import os
 import os.path
+import platform
+import sysconfig
 from .linux import *
 from .linux import _parse_rename_arg_file
 
 import hashlib
+
+
+def _version_tuple(value):
+    try:
+        return tuple(int(part) for part in value.split(".")[:2])
+    except (AttributeError, ValueError):
+        return ()
+
+
+def get_macos_deployment_target(env=None, sysconfig_module=None):
+    """Return a macOS deployment target valid for this MonolithPy arch."""
+    if env is None:
+        env = os.environ
+    if sysconfig_module is None:
+        sysconfig_module = sysconfig
+
+    target = (
+        env.get("MACOSX_DEPLOYMENT_TARGET")
+        or sysconfig_module.get_config_var("MACOSX_DEPLOYMENT_TARGET")
+        or "10.13"
+    )
+    sysconfig_platform = sysconfig_module.get_platform()
+    if (
+        platform.machine().lower() == "arm64"
+        or sysconfig_platform.endswith("-arm64")
+    ) and _version_tuple(target) < (11, 0):
+        return "11.0"
+    return target
 
 
 # macOS reuses linux's pyobjtools-based get_object_symbols /
@@ -130,4 +161,3 @@ def remove_symbols_in_file(target_lib, object_file, symbols):
 
         os.rename(target_lib, target_lib + ".orig")
         subprocess.run(["libtool", "-static", "-o", target_lib] + obj_list)
-
