@@ -45,10 +45,12 @@ typedef const wchar_t *LPCWSTR;
 typedef void *LPVOID;
 typedef SSIZE_T ssize_t;
 #else  /* _WIN32 */
+    #include <wchar.h>
     #include <dirent.h>
     #include <limits.h>
     #include <unistd.h>
     #include <libgen.h>
+    #include <sys/uio.h>
     #include <sys/statvfs.h>
 #endif  /* _WIN32 */
 #else  /* FOPEN_MAX */
