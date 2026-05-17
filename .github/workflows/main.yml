@@ -126,17 +126,17 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-#      - name: Download cache
-#        env:
-#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-#        run: |
-#          cd ..
-#          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.zip"
-#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-#          curl -L "$file_url" -o "$file_name" || exit 0
-#          unzip -q "$file_name" || exit 0
-#          rm ${file_name} || exit 0
-#          ln -s lib MonolithPy-Deps/lib64 || exit 0
+      - name: Download cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.tar.gz"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          curl -L "$file_url" -o "$file_name" || exit 0
+          tar -xf "$file_name" || exit 0
+          rm ${file_name} || exit 0
+          ln -s lib MonolithPy-Deps/lib64 || exit 0
       - name: Install zstandard for mkembeddata
         run: python3 -m pip install --break-system-packages zstandard
       - name: Run Build
@@ -199,18 +199,18 @@ jobs:
               "$ART/Embedded/mp_embed.o" \
               -IInclude -IPC -L"$DEPS/lib" -lzstd
           ./tests/mp_embed/test_mp_embed_cpp
-#      - name: Store cache
-#        env:
-#          CACHE_SAS: ${{ secrets.CACHE_SAS }}
-#        run: |
-#          cd ..
-#          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.zip"
-#          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
-#          rm -rf ${file_name}
-#          rm -f MonolithPy-Deps/lib64
-#          zip -r ${file_name} MonolithPy-Deps MonolithPy/dep-build
-#          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
-#          rm -rf ${file_name}
+      - name: Store cache
+        env:
+          CACHE_SAS: ${{ secrets.CACHE_SAS }}
+        run: |
+          cd ..
+          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.tar.gz"
+          export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
+          rm -rf ${file_name}
+          rm -f MonolithPy-Deps/lib64
+          tar -cf ${file_name} MonolithPy-Deps MonolithPy/dep-build
+          curl -H "x-ms-blob-type: BlockBlob" --upload-file ${file_name} --url "$file_url"
+          rm -rf ${file_name}
 
   windows:
     name: Windows Build
