@@ -419,22 +419,6 @@ $ELEVATE cp -r "Embedded/embed_data" "$target/Embedded/"
 # Copy over the compiled dependencies.
 $ELEVATE mkdir -p "$target/dependency_libs"
 $ELEVATE cp -r "$(pwd)/../MonolithPy-Deps" "$target/dependency_libs/base"
-$ELEVATE ln -s base "$target/dependency_libs/bzip2"
-$ELEVATE ln -s base "$target/dependency_libs/editline"
-$ELEVATE ln -s base "$target/dependency_libs/expat"
-$ELEVATE ln -s base "$target/dependency_libs/freetype"
-$ELEVATE ln -s base "$target/dependency_libs/harfbuzz"
-$ELEVATE ln -s base "$target/dependency_libs/b2"
-$ELEVATE ln -s base "$target/dependency_libs/png"
-$ELEVATE ln -s base "$target/dependency_libs/xcrypt"
-$ELEVATE ln -s base "$target/dependency_libs/mpdecimal"
-$ELEVATE ln -s base "$target/dependency_libs/ncurses"
-$ELEVATE ln -s base "$target/dependency_libs/openssl"
-$ELEVATE ln -s base "$target/dependency_libs/sqlite"
-$ELEVATE ln -s base "$target/dependency_libs/tcltk"
-$ELEVATE ln -s base "$target/dependency_libs/xz"
-$ELEVATE ln -s base "$target/dependency_libs/zlib"
-$ELEVATE ln -s base "$target/dependency_libs/zstd"
 
 find "$target" \( -iname '*.la' -o -iname '*.pc' -o -iname '__pycache__' -o -iname 'link.json' \) | xargs $ELEVATE rm -rf
 
