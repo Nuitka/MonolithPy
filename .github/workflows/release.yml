@@ -1,0 +1,147 @@
+name: Publish release
+
+# Promotes the *exact* artifacts of an already-verified Build run into a
+# GitHub Release. Nothing is rebuilt here: a run only qualifies once every
+# platform built and every smoke / mp_embed test in main.yml passed (that is
+# what "conclusion == success" means), so what we publish is byte-for-byte
+# what CI verified.
+#
+# This is a deliberate, manual action - you pick a known-good run id and a
+# tag. There is intentionally no automatic trigger.
+#
+# NOTE: workflow_dispatch only registers/fires from the workflow file on the
+# repo's DEFAULT branch, so this file has to live on the default branch
+# (3.14). It is otherwise branch-agnostic: it keys off a run's artifacts, not
+# the branch it itself sits on.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build run ID to promote (must have concluded successfully)"
+        required: true
+        type: string
+      tag:
+        description: "Release tag, e.g. v3.14.0-monolithpy.1"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as prerelease (auto = infer from a/b/rc in the tag)"
+        required: false
+        type: choice
+        default: "auto"
+        options: ["auto", "true", "false"]
+
+permissions:
+  contents: write   # create releases / tags
+  actions: read     # gh run view / gh run download
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Gated by the "release" environment, which is configured with required
+    # reviewers: the run pauses at "Review pending" and a project admin must
+    # approve before any step (verify / download / publish) executes.
+    environment: release
+    steps:
+      - name: Verify the run and resolve release metadata
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          TAG: ${{ inputs.tag }}
+          IN_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          read -r CONC TARGET BRANCH < <(gh run view "$RUN_ID" \
+            -R "$GITHUB_REPOSITORY" \
+            --json conclusion,headSha,headBranch \
+            -q '[.conclusion, .headSha, .headBranch] | @tsv')
+          if [ "$CONC" != "success" ]; then
+            echo "::error::Run $RUN_ID concluded '$CONC'; refusing to publish an unverified run."
+            exit 1
+          fi
+          case "$IN_PRERELEASE" in
+            true)  PRE=true ;;
+            false) PRE=false ;;
+            *)     case "$TAG" in *a*|*b*|*rc*) PRE=true ;; *) PRE=false ;; esac ;;
+          esac
+          {
+            echo "target=$TARGET"
+            echo "branch=$BRANCH"
+            echo "prerelease=$PRE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download the verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ inputs.run_id }}" -R "$GITHUB_REPOSITORY" -D dist
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+
+          # actions/upload-artifact does not preserve the Unix +x bit, so the
+          # interpreter and shared libs come back non-executable. Restore it on
+          # ELF / Mach-O objects, on #! scripts, and on everything under bin/
+          # before we tar, so the shipped toolchain is runnable as downloaded.
+          restore_exec_bits() {
+            find "$1" -type f -print0 | while IFS= read -r -d '' f; do
+              magic=$(head -c4 "$f" | od -An -tx1 | tr -d ' \n')
+              case "$magic" in
+                7f454c46|feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|bebafeca|2321*) chmod +x "$f" ;;
+              esac
+            done
+            find "$1" -type f -path '*/bin/*' -exec chmod +x {} +
+          }
+
+          for d in dist/*/; do
+            name="$(basename "$d")"
+            case "$name" in
+              *windows*)
+                ( cd "$d" && zip -qr "$GITHUB_WORKSPACE/assets/$name.zip" . ) ;;
+              *)
+                restore_exec_bits "$d"
+                tar -C "$d" -czf "assets/$name.tar.gz" . ;;
+            esac
+          done
+
+          ( cd assets
+            shopt -s nullglob
+            sha256sum *.tar.gz *.zip > SHA256SUMS
+            echo "=== release assets ==="; cat SHA256SUMS )
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TARGET: ${{ steps.resolve.outputs.target }}
+          BRANCH: ${{ steps.resolve.outputs.branch }}
+          PRERELEASE: ${{ steps.resolve.outputs.prerelease }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          pre=()
+          [ "$PRERELEASE" = "true" ] && pre=(--prerelease)
+          {
+            echo "MonolithPy \`$TAG\` - promoted verbatim from verified CI run [$RUN_ID](${{ github.server_url }}/$GITHUB_REPOSITORY/actions/runs/$RUN_ID)."
+            echo
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Commit: \`$TARGET\`"
+            echo
+            echo "Verify downloads against \`SHA256SUMS\`."
+          } > notes.md
+
+          # A stable tag is never silently clobbered: gh release create fails
+          # if the release already exists, which is the behaviour we want.
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" \
+            --target "$TARGET" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            "${pre[@]}" \
+            assets/*
