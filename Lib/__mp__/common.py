@@ -556,6 +556,84 @@ def run_build_tool_exe(tool_name, exe, *args, **kwargs):
     return run_with_output(find_build_tool_exe(tool_name, exe), *args, **kwargs)
 
 
+def meson(*args, **kwargs):
+    """Run meson (the mpy-tool-meson zipapp) as ``python meson.pyz <args>``.
+
+    Accepts the same keyword args as run_with_output (env, cwd, ...). Requires
+    mpy-tool-meson in the build's build_tools.
+    """
+    return run_with_output(
+        sys.executable, find_build_tool_exe("meson", "meson.pyz"), *args, **kwargs
+    )
+
+
+def write_meson_dep_subproject(subprojects_dir, name, dep_var,
+                               include_dirs=(), link_libs=(),
+                               version=None, options=()):
+    """Expose a prebuilt library to a meson project as a subproject fallback.
+
+    Creates ``<subprojects_dir>/<name>/meson.build`` defining ``<dep_var>`` as a
+    declare_dependency for the prebuilt library, so ``dependency(name,
+    fallback: [name, dep_var])`` *can* resolve to our library.
+
+    IMPORTANT: this only provides the fallback target; it does NOT by itself make
+    meson prefer it over a system copy. meson still tries every detection method
+    first (pkg-config, config-tool, cmake, system/framework) and uses this
+    subproject only if those fail or the fallback is forced. To GUARANTEE our
+    library is used, the caller must force the fallback in the ``meson setup``
+    invocation -- pass ``--force-fallback-for=<name>`` (or
+    ``--wrap-mode=forcefallback``). Disabling pkg-config alone is not enough,
+    since the cmake/config-tool/system methods can still discover a system copy.
+
+    Args:
+        include_dirs: absolute paths added as ``-I`` compile args.
+        link_libs:    absolute paths to the prebuilt static libraries.
+        version:      dependency version, to satisfy the parent's ``>=`` checks.
+        options:      build-option names the parent passes via default_options
+                      (e.g. ``name:png``); each is declared as a feature so
+                      meson does not reject them as unknown.
+
+    Any stale ``<subprojects_dir>/<name>.wrap`` is removed so the stub wins.
+    """
+    def _fwd(path):
+        # meson treats backslashes as escape sequences; feed forward slashes.
+        return path.replace("\\", "/")
+
+    wrap = os.path.join(subprojects_dir, name + ".wrap")
+    if os.path.exists(wrap):
+        os.remove(wrap)
+
+    sub_dir = os.path.join(subprojects_dir, name)
+    os.makedirs(sub_dir, exist_ok=True)
+
+    proj_args = "'{0}', 'c'".format(name)
+    if version:
+        proj_args += ", version: '{0}'".format(version)
+
+    decl_lines = []
+    if version:
+        decl_lines.append("  version: '{0}',".format(version))
+    if include_dirs:
+        decl_lines.append("  compile_args: [{0}],".format(
+            ", ".join("'-I{0}'".format(_fwd(p)) for p in include_dirs)))
+    if link_libs:
+        decl_lines.append("  link_args: [{0}],".format(
+            ", ".join("'{0}'".format(_fwd(l)) for l in link_libs)))
+
+    content = "project({0})\n{1} = declare_dependency(\n{2}\n)\n".format(
+        proj_args, dep_var, "\n".join(decl_lines))
+    with open(os.path.join(sub_dir, "meson.build"), "w") as f:
+        f.write(content)
+
+    if options:
+        with open(os.path.join(sub_dir, "meson_options.txt"), "w") as f:
+            f.write("".join(
+                "option('{0}', type: 'feature', value: 'auto')\n".format(o)
+                for o in options))
+
+    return sub_dir
+
+
 def apply_patch(patch_file, directory):
     """Apply a patch file to a directory."""
     my_print("Applying patch '%s' to '%s'" % (patch_file, directory))
