@@ -826,6 +826,7 @@ OPENSSL_LDFLAGS
 OPENSSL_LIBS
 OPENSSL_INCLUDES
 ENSUREPIP
+CFLAGS_CEVAL
 SRCDIRS
 THREADHEADERS
 PANEL_LIBS
@@ -6595,7 +6596,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6644,7 +6645,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6676,7 +6677,7 @@ printf "%s\n" "no" >&6; }
 fi
 
   if test "x$ac_pt_CXX" = x; then
-    CXX="g++"
+    CXX="notfound"
   else
     case $cross_compiling:$ac_tool_warned in
 yes:)
@@ -6705,7 +6706,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6754,7 +6755,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6786,7 +6787,7 @@ printf "%s\n" "no" >&6; }
 fi
 
   if test "x$ac_pt_CXX" = x; then
-    CXX="c++"
+    CXX="notfound"
   else
     case $cross_compiling:$ac_tool_warned in
 yes:)
@@ -6815,7 +6816,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6864,7 +6865,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6896,7 +6897,7 @@ printf "%s\n" "no" >&6; }
 fi
 
   if test "x$ac_pt_CXX" = x; then
-    CXX="clang++"
+    CXX="notfound"
   else
     case $cross_compiling:$ac_tool_warned in
 yes:)
@@ -6925,7 +6926,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -6974,7 +6975,7 @@ else case e in #(
   ;;
   *)
   as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in notfound
+for as_dir in $PATH
 do
   IFS=$as_save_IFS
   case $as_dir in #(((
@@ -7006,7 +7007,7 @@ printf "%s\n" "no" >&6; }
 fi
 
   if test "x$ac_pt_CXX" = x; then
-    CXX="icpc"
+    CXX="notfound"
   else
     case $cross_compiling:$ac_tool_warned in
 yes:)
@@ -9049,7 +9050,57 @@ case "$ac_cv_cc_name" in
     fi
     ;;
   gcc)
-    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether C compiler accepts -fprofile-update=atomic" >&5
+    # Check for 32-bit x86 ISA
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for i686" >&5
+printf %s "checking for i686... " >&6; }
+if test ${ac_cv_i686+y}
+then :
+  printf %s "(cached) " >&6
+else case e in #(
+  e)
+        cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+
+                #ifdef __i386__
+                #  error "i386"
+                #endif
+
+int
+main (void)
+{
+
+  ;
+  return 0;
+}
+
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"
+then :
+  ac_cv_i686=no
+else case e in #(
+  e) ac_cv_i686=yes ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
+     ;;
+esac
+fi
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $ac_cv_i686" >&5
+printf "%s\n" "$ac_cv_i686" >&6; }
+
+    PGO_PROF_GEN_FLAG="-fprofile-generate"
+
+    # Use -fprofile-update=atomic to fix a random GCC internal error on PGO
+    # build (gh-145801) caused by corruption of profile data (.gcda files).
+    #
+    # gh-148535: On i686, using -fprofile-update=atomic makes the PGO build
+    # way slower (up to 47x slower). So far, the GCC internal error on PGO
+    # build was not seen on i686, so don't use this flag on i686.
+    if test "x$ac_cv_i686" = xno
+then :
+
+        { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether C compiler accepts -fprofile-update=atomic" >&5
 printf %s "checking whether C compiler accepts -fprofile-update=atomic... " >&6; }
 if test ${ax_cv_check_cflags___fprofile_update_atomic+y}
 then :
@@ -9084,10 +9135,13 @@ fi
 printf "%s\n" "$ax_cv_check_cflags___fprofile_update_atomic" >&6; }
 if test "x$ax_cv_check_cflags___fprofile_update_atomic" = xyes
 then :
-  PGO_PROF_GEN_FLAG="-fprofile-generate -fprofile-update=atomic"
+  PGO_PROF_GEN_FLAG="$PGO_PROF_GEN_FLAG -fprofile-update=atomic"
 else case e in #(
-  e) PGO_PROF_GEN_FLAG="-fprofile-generate" ;;
+  e) : ;;
 esac
+fi
+
+
 fi
 
     PGO_PROF_USE_FLAG="-fprofile-use -fprofile-correction"
@@ -19322,12 +19376,6 @@ then :
   printf "%s\n" "#define HAVE_DUP 1" >>confdefs.h
 
 fi
-ac_fn_c_check_func "$LINENO" "dup3" "ac_cv_func_dup3"
-if test "x$ac_cv_func_dup3" = xyes
-then :
-  printf "%s\n" "#define HAVE_DUP3 1" >>confdefs.h
-
-fi
 ac_fn_c_check_func "$LINENO" "execv" "ac_cv_func_execv"
 if test "x$ac_cv_func_execv" = xyes
 then :
@@ -19800,12 +19848,6 @@ ac_fn_c_check_func "$LINENO" "pipe" "ac_cv_func_pipe"
 if test "x$ac_cv_func_pipe" = xyes
 then :
   printf "%s\n" "#define HAVE_PIPE 1" >>confdefs.h
-
-fi
-ac_fn_c_check_func "$LINENO" "pipe2" "ac_cv_func_pipe2"
-if test "x$ac_cv_func_pipe2" = xyes
-then :
-  printf "%s\n" "#define HAVE_PIPE2 1" >>confdefs.h
 
 fi
 ac_fn_c_check_func "$LINENO" "plock" "ac_cv_func_plock"
@@ -20452,7 +20494,13 @@ fi
 # header definition prevents usage - autoconf doesn't use the headers), or
 # raise an error if used at runtime. Force these symbols off.
 if test "$ac_sys_system" != "iOS" ; then
-  ac_fn_c_check_func "$LINENO" "getentropy" "ac_cv_func_getentropy"
+  ac_fn_c_check_func "$LINENO" "dup3" "ac_cv_func_dup3"
+if test "x$ac_cv_func_dup3" = xyes
+then :
+  printf "%s\n" "#define HAVE_DUP3 1" >>confdefs.h
+
+fi
+ac_fn_c_check_func "$LINENO" "getentropy" "ac_cv_func_getentropy"
 if test "x$ac_cv_func_getentropy" = xyes
 then :
   printf "%s\n" "#define HAVE_GETENTROPY 1" >>confdefs.h
@@ -20462,6 +20510,12 @@ ac_fn_c_check_func "$LINENO" "getgroups" "ac_cv_func_getgroups"
 if test "x$ac_cv_func_getgroups" = xyes
 then :
   printf "%s\n" "#define HAVE_GETGROUPS 1" >>confdefs.h
+
+fi
+ac_fn_c_check_func "$LINENO" "pipe2" "ac_cv_func_pipe2"
+if test "x$ac_cv_func_pipe2" = xyes
+then :
+  printf "%s\n" "#define HAVE_PIPE2 1" >>confdefs.h
 
 fi
 ac_fn_c_check_func "$LINENO" "system" "ac_cv_func_system"
@@ -30048,6 +30102,52 @@ if test "$have_glibc_memmove_bug" = yes; then
 printf "%s\n" "#define HAVE_GLIBC_MEMMOVE_BUG 1" >>confdefs.h
 
 fi
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking if we need to manually block large inlining in ceval.c" >&5
+printf %s "checking if we need to manually block large inlining in ceval.c... " >&6; }
+if test "$cross_compiling" = yes
+then :
+  block_huge_inlining_in_ceval=undefined
+else case e in #(
+  e) cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int main(void) {
+// See gh-148284: Clang 22 seems to have interactions with inlining
+// and the stackref buffer which cause 40 kB of stack usage on x86-64
+// in buggy versions of _PyEval_EvalFrameDefault() in computed goto
+// interpreter. The normal usage seen is normally 1-2 kB.
+#if defined(__clang__) && (__clang_major__ == 22)
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+_ACEOF
+if ac_fn_c_try_run "$LINENO"
+then :
+  block_huge_inlining_in_ceval=no
+else case e in #(
+  e) block_huge_inlining_in_ceval=yes ;;
+esac
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext ;;
+esac
+fi
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $block_huge_inlining_in_ceval" >&5
+printf "%s\n" "$block_huge_inlining_in_ceval" >&6; }
+
+if test "$block_huge_inlining_in_ceval" = yes && test "$ac_cv_computed_gotos" = yes; then
+    # gh-148284: Suppress inlining of functions whose stack size exceeds
+    # 512 bytes. This number should be tuned to follow the C stack
+    # consumption in _PyEval_EvalFrameDefault() on computed goto
+    # interpreter.
+    CFLAGS_CEVAL="$CFLAGS_CEVAL -finline-max-stacksize=512"
+fi
+
 
 if test "$ac_cv_gcc_asm_for_x87" = yes; then
     # Some versions of gcc miscompile inline asm:

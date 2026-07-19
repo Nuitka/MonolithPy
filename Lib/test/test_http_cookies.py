@@ -1,11 +1,11 @@
 # Simple test suite for http/cookies.py
-
 import copy
 import unittest
 import doctest
 from http import cookies
 import pickle
 from test import support
+import urllib.parse
 
 
 class CookieTests(unittest.TestCase):
@@ -152,17 +152,19 @@ class CookieTests(unittest.TestCase):
 
         self.assertEqual(C.output(['path']),
             'Set-Cookie: Customer="WILE_E_COYOTE"; Path=/acme')
-        self.assertEqual(C.js_output(), r"""
+        cookie_encoded = urllib.parse.quote('Customer="WILE_E_COYOTE"; Path=/acme; Version=1', safe='', encoding='utf-8')
+        self.assertEqual(C.js_output(), fr"""
         <script type="text/javascript">
         <!-- begin hiding
-        document.cookie = "Customer=\"WILE_E_COYOTE\"; Path=/acme; Version=1";
+        document.cookie = decodeURIComponent("{cookie_encoded}");
         // end hiding -->
         </script>
         """)
-        self.assertEqual(C.js_output(['path']), r"""
+        cookie_encoded = urllib.parse.quote('Customer="WILE_E_COYOTE"; Path=/acme', safe='', encoding='utf-8')
+        self.assertEqual(C.js_output(['path']), fr"""
         <script type="text/javascript">
         <!-- begin hiding
-        document.cookie = "Customer=\"WILE_E_COYOTE\"; Path=/acme";
+        document.cookie = decodeURIComponent("{cookie_encoded}");
         // end hiding -->
         </script>
         """)
@@ -267,17 +269,19 @@ class CookieTests(unittest.TestCase):
 
         self.assertEqual(C.output(['path']),
                          'Set-Cookie: Customer="WILE_E_COYOTE"; Path=/acme')
-        self.assertEqual(C.js_output(), r"""
+        expected_encoded_cookie = urllib.parse.quote('Customer=\"WILE_E_COYOTE\"; Path=/acme; Version=1', safe='', encoding='utf-8')
+        self.assertEqual(C.js_output(), fr"""
         <script type="text/javascript">
         <!-- begin hiding
-        document.cookie = "Customer=\"WILE_E_COYOTE\"; Path=/acme; Version=1";
+        document.cookie = decodeURIComponent("{expected_encoded_cookie}");
         // end hiding -->
         </script>
         """)
-        self.assertEqual(C.js_output(['path']), r"""
+        expected_encoded_cookie = urllib.parse.quote('Customer=\"WILE_E_COYOTE\"; Path=/acme', safe='', encoding='utf-8')
+        self.assertEqual(C.js_output(['path']), fr"""
         <script type="text/javascript">
         <!-- begin hiding
-        document.cookie = "Customer=\"WILE_E_COYOTE\"; Path=/acme";
+        document.cookie = decodeURIComponent("{expected_encoded_cookie}");
         // end hiding -->
         </script>
         """)
@@ -368,13 +372,17 @@ class MorselTests(unittest.TestCase):
             self.assertEqual(
                 M.output(),
                 "Set-Cookie: %s=%s; Path=/foo" % (i, "%s_coded_val" % i))
+            expected_encoded_cookie = urllib.parse.quote(
+                "%s=%s; Path=/foo" % (i, "%s_coded_val" % i),
+                safe='', encoding='utf-8',
+            )
             expected_js_output = """
         <script type="text/javascript">
         <!-- begin hiding
-        document.cookie = "%s=%s; Path=/foo";
+        document.cookie = decodeURIComponent("%s");
         // end hiding -->
         </script>
-        """ % (i, "%s_coded_val" % i)
+        """ % (expected_encoded_cookie,)
             self.assertEqual(M.js_output(), expected_js_output)
         for i in ["foo bar", "foo@bar"]:
             # Try some illegal characters

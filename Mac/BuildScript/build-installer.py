@@ -246,9 +246,9 @@ def library_recipes():
 
     result.extend([
           dict(
-              name="OpenSSL 3.0.19",
-              url="https://github.com/openssl/openssl/releases/download/openssl-3.0.19/openssl-3.0.19.tar.gz",
-              checksum='fa5a4143b8aae18be53ef2f3caf29a2e0747430b8bc74d32d88335b94ab63072',
+              name="OpenSSL 3.5.7",
+              url="https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
+              checksum="a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8",
               buildrecipe=build_universal_openssl,
               configure=None,
               install=None,
@@ -264,10 +264,10 @@ def library_recipes():
             tk_patches = ['backport_gh71383_fix.patch', 'tk868_on_10_8_10_9.patch', 'backport_gh110950_fix.patch']
 
         else:
-            tcl_tk_ver='8.6.17'
-            tcl_checksum='a3903371efcce8a405c5c245d029e9f6850258a60fa3761c4d58995610949b31'
+            tcl_tk_ver='9.0.3'
+            tcl_checksum='2537ba0c86112c8c953f7c09d33f134dd45c0fb3a71f2d7f7691fd301d2c33a6'
 
-            tk_checksum='e4982df6f969c08bf9dd858a6891059b4a3f50dc6c87c10abadbbe2fc4838946'
+            tk_checksum='bf344efadb618babb7933f69275620f72454d1c8220130da93e3f7feb0efbf9b'
             tk_patches = []
 
 
@@ -378,9 +378,9 @@ def library_recipes():
               install=f"make && ranlib libsqlite3.a && make install DESTDIR={shellQuote(os.path.join(WORKDIR, 'libraries'))}",
           ),
           dict(
-              name="libmpdec 4.0.0",
-              url="https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.0.tar.gz",
-              checksum="942445c3245b22730fd41a67a7c5c231d11cb1b9936b9c0f76334fb7d0b4468c",
+              name="libmpdec 4.0.1",
+              url="https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz",
+              checksum="96d33abb4bb0070c7be0fed4246cd38416188325f820468214471938545b1ac8",
               configure_pre=[
                   "--disable-cxx",
                   "MACHINE=universal",

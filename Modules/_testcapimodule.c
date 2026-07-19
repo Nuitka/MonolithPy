@@ -3203,9 +3203,8 @@ typedef struct {
 } ManagedDictObject;
 
 int ManagedDict_traverse(PyObject *self, visitproc visit, void *arg) {
-    PyObject_VisitManagedDict(self, visit, arg);
     Py_VISIT(Py_TYPE(self));
-    return 0;
+    return PyObject_VisitManagedDict(self, visit, arg);
 }
 
 int ManagedDict_clear(PyObject *self) {
@@ -3502,6 +3501,9 @@ PyInit__testcapi(void)
         return NULL;
     }
     if (_PyTestCapi_Init_Function(m) < 0) {
+        return NULL;
+    }
+    if (_PyTestCapi_Init_Weakref(m) < 0) {
         return NULL;
     }
 

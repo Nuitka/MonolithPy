@@ -125,6 +125,8 @@ PY_CORE_CFLAGS=	$(PY_STDMODULE_CFLAGS) -DPy_BUILD_CORE
 PY_CORE_LDFLAGS=$(PY_LDFLAGS) $(PY_LDFLAGS_NODIST)
 # Strict or non-strict aliasing flags used to compile dtoa.c, see above
 CFLAGS_ALIASING=@CFLAGS_ALIASING@
+# Compilation flags only for ceval.c.
+CFLAGS_CEVAL=@CFLAGS_CEVAL@
 
 
 # Machine-dependent subdirectories
@@ -817,7 +819,7 @@ check-clean-src:
 		echo "Building Python out of the source tree (in $(abs_builddir)) requires a clean source tree ($(abs_srcdir))" ; \
 		echo "Build artifacts such as .o files, executables, and Python/frozen_modules/*.h must not exist within $(srcdir)." ; \
 		echo "Try to run:" ; \
-		echo "  (cd \"$(srcdir)\" && make clean || git clean -fdx -e Doc/venv)" ; \
+		echo "  (cd \"$(srcdir)\" && make distclean || git clean -fdx -e Doc/venv)" ; \
 		exit 1; \
 	fi
 
@@ -1056,7 +1058,7 @@ $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK): \
 	$(INSTALL) -d -m $(DIRMODE) $(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)
 	$(CC) -o $(LDLIBRARY) $(PY_CORE_LDFLAGS) -dynamiclib \
 		-all_load $(LIBRARY) \
-		-install_name $(DESTDIR)$(PYTHONFRAMEWORKINSTALLNAMEPREFIX)/$(PYTHONFRAMEWORK) \
+		-install_name $(PYTHONFRAMEWORKINSTALLNAMEPREFIX)/$(PYTHONFRAMEWORK) \
 		-compatibility_version $(VERSION) \
 		-current_version $(VERSION) \
 		-framework CoreFoundation $(LIBS);
@@ -3039,7 +3041,7 @@ Python/asm_trampoline.o: $(srcdir)/Python/asm_trampoline.S
 
 Python/emscripten_trampoline_inner.wasm: $(srcdir)/Python/emscripten_trampoline_inner.c
 	# emcc has a path that ends with emsdk/upstream/emscripten/emcc, we're looking for emsdk/upstream/bin/clang.
-	$$(dirname $$(dirname $(CC)))/bin/clang -o $@ $< -mgc -O2 -Wl,--no-entry -Wl,--import-table -Wl,--import-memory -target wasm32-unknown-unknown -nostdlib
+	$$(em-config LLVM_ROOT)/clang -o $@ $< -mgc -O2 -Wl,--no-entry -Wl,--import-table -Wl,--import-memory -target wasm32-unknown-unknown -nostdlib
 
 Python/emscripten_trampoline_wasm.c: Python/emscripten_trampoline_inner.wasm
 	$(PYTHON_FOR_REGEN) $(srcdir)/Platforms/emscripten/prepare_external_wasm.py $< $@ getWasmTrampolineModule
@@ -3070,6 +3072,9 @@ regen-jit:
 # https://bugs.llvm.org//show_bug.cgi?id=31928
 Python/dtoa.o: Python/dtoa.c
 	$(CC) -c $(PY_CORE_CFLAGS) $(CFLAGS_ALIASING) -o $@ $<
+
+Python/ceval.o: Python/ceval.c
+	$(CC) -c $(PY_CORE_CFLAGS) $(CFLAGS_CEVAL) -o $@ $<
 
 # Run reindent on the library
 .PHONY: reindent

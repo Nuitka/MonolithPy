@@ -1122,10 +1122,10 @@ preset_cxx="$CXX"
 if test -z "$CXX"
 then
         case "$ac_cv_cc_name" in
-        gcc)    AC_PATH_TOOL([CXX], [g++], [g++], [notfound]) ;;
-        cc)     AC_PATH_TOOL([CXX], [c++], [c++], [notfound]) ;;
-        clang)             AC_PATH_TOOL([CXX], [clang++], [clang++], [notfound]) ;;
-        icc)               AC_PATH_TOOL([CXX], [icpc], [icpc], [notfound]) ;;
+        gcc)    AC_PATH_TOOL([CXX], [g++], [notfound]) ;;
+        cc)     AC_PATH_TOOL([CXX], [c++], [notfound]) ;;
+        clang)             AC_PATH_TOOL([CXX], [clang++], [notfound]) ;;
+        icc)               AC_PATH_TOOL([CXX], [icpc], [notfound]) ;;
         esac
 	if test "$CXX" = "notfound"
 	then
@@ -2072,10 +2072,32 @@ case "$ac_cv_cc_name" in
     fi
     ;;
   gcc)
-    AX_CHECK_COMPILE_FLAG(
-        [-fprofile-update=atomic],
-        [PGO_PROF_GEN_FLAG="-fprofile-generate -fprofile-update=atomic"],
-        [PGO_PROF_GEN_FLAG="-fprofile-generate"])
+    # Check for 32-bit x86 ISA
+    AC_CACHE_CHECK([for i686], [ac_cv_i686], [
+        AC_COMPILE_IFELSE([
+            AC_LANG_PROGRAM([
+                #ifdef __i386__
+                #  error "i386"
+                #endif
+            ], [])
+        ],[ac_cv_i686=no],[ac_cv_i686=yes])
+    ])
+
+    PGO_PROF_GEN_FLAG="-fprofile-generate"
+
+    # Use -fprofile-update=atomic to fix a random GCC internal error on PGO
+    # build (gh-145801) caused by corruption of profile data (.gcda files).
+    #
+    # gh-148535: On i686, using -fprofile-update=atomic makes the PGO build
+    # way slower (up to 47x slower). So far, the GCC internal error on PGO
+    # build was not seen on i686, so don't use this flag on i686.
+    AS_VAR_IF([ac_cv_i686], [no], [
+        AX_CHECK_COMPILE_FLAG(
+            [-fprofile-update=atomic],
+            [PGO_PROF_GEN_FLAG="$PGO_PROF_GEN_FLAG -fprofile-update=atomic"],
+            [])
+    ])
+
     PGO_PROF_USE_FLAG="-fprofile-use -fprofile-correction"
     LLVM_PROF_MERGER="true"
     LLVM_PROF_FILE=""
@@ -5242,7 +5264,7 @@ fi
 # checks for library functions
 AC_CHECK_FUNCS([ \
   accept4 alarm bind_textdomain_codeset chmod chown clock closefrom close_range confstr \
-  copy_file_range ctermid dladdr dup dup3 execv explicit_bzero explicit_memset \
+  copy_file_range ctermid dladdr dup execv explicit_bzero explicit_memset \
   faccessat fchmod fchmodat fchown fchownat fdopendir fdwalk fexecve \
   fork fork1 fpathconf fstatat ftime ftruncate futimens futimes futimesat \
   gai_strerror getegid geteuid getgid getgrent getgrgid getgrgid_r \
@@ -5252,7 +5274,7 @@ AC_CHECK_FUNCS([ \
   getspnam getuid getwd grantpt if_nameindex initgroups kill killpg lchown linkat \
   lockf lstat lutimes madvise mbrtowc memrchr mkdirat mkfifo mkfifoat \
   mknod mknodat mktime mmap mremap nice openat opendir pathconf pause pipe \
-  pipe2 plock poll posix_fadvise posix_fallocate posix_openpt posix_spawn posix_spawnp \
+  plock poll posix_fadvise posix_fallocate posix_openpt posix_spawn posix_spawnp \
   posix_spawn_file_actions_addclosefrom_np \
   pread preadv preadv2 process_vm_readv \
   pthread_cond_timedwait_relative_np pthread_condattr_setclock pthread_init \
@@ -5283,7 +5305,7 @@ fi
 # header definition prevents usage - autoconf doesn't use the headers), or
 # raise an error if used at runtime. Force these symbols off.
 if test "$ac_sys_system" != "iOS" ; then
-  AC_CHECK_FUNCS([getentropy getgroups system])
+  AC_CHECK_FUNCS([dup3 getentropy getgroups pipe2 system])
 fi
 
 AC_CHECK_DECL([dirfd],
@@ -7243,6 +7265,34 @@ if test "$have_glibc_memmove_bug" = yes; then
     [Define if glibc has incorrect _FORTIFY_SOURCE wrappers
      for memmove and bcopy.])
 fi
+
+AC_MSG_CHECKING([if we need to manually block large inlining in ceval.c])
+AC_RUN_IFELSE([AC_LANG_SOURCE([[
+int main(void) {
+// See gh-148284: Clang 22 seems to have interactions with inlining
+// and the stackref buffer which cause 40 kB of stack usage on x86-64
+// in buggy versions of _PyEval_EvalFrameDefault() in computed goto
+// interpreter. The normal usage seen is normally 1-2 kB.
+#if defined(__clang__) && (__clang_major__ == 22)
+    return 1;
+#else
+    return 0;
+#endif
+}
+]])],
+[block_huge_inlining_in_ceval=no],
+[block_huge_inlining_in_ceval=yes],
+[block_huge_inlining_in_ceval=undefined])
+AC_MSG_RESULT([$block_huge_inlining_in_ceval])
+
+if test "$block_huge_inlining_in_ceval" = yes && test "$ac_cv_computed_gotos" = yes; then
+    # gh-148284: Suppress inlining of functions whose stack size exceeds
+    # 512 bytes. This number should be tuned to follow the C stack
+    # consumption in _PyEval_EvalFrameDefault() on computed goto
+    # interpreter.
+    CFLAGS_CEVAL="$CFLAGS_CEVAL -finline-max-stacksize=512"
+fi
+AC_SUBST([CFLAGS_CEVAL])
 
 if test "$ac_cv_gcc_asm_for_x87" = yes; then
     # Some versions of gcc miscompile inline asm:
