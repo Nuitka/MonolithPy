@@ -349,7 +349,29 @@ def run_rebuild():
     for _name, path in foundLibs.items():
         link_libs += [path]
 
-    link_libs = list(set(link_libs))
+    # De-dup multiple module files in a smart way based on the actual module path.
+    def _dedup_by_module(libs):
+        real_site = os.path.normpath(sysconfig.get_paths().get("purelib", "") or "").lower()
+
+        def _identity(p):
+            parts = os.path.normpath(p).split(os.sep)
+            for i in range(len(parts) - 1, -1, -1):
+                if parts[i].lower() == "site-packages":
+                    return os.sep.join(parts[i + 1:]).lower()
+            return os.path.normpath(p).lower()
+
+        def _under_real(p):
+            return bool(real_site) and os.path.normpath(p).lower().startswith(real_site + os.sep)
+
+        chosen = {}
+        for lib in libs:
+            key = _identity(lib)
+            prev = chosen.get(key)
+            if prev is None or (not _under_real(prev) and _under_real(lib)):
+                chosen[key] = lib
+        return list(chosen.values())
+
+    link_libs = _dedup_by_module(link_libs)
     library_dirs = list(set(library_dirs))
     extra_link_args = []
 
@@ -394,7 +416,7 @@ def run_rebuild():
                         extra_link_args.append(arg)
         libIdx += 1
 
-    link_libs = list(set(link_libs))
+    link_libs = _dedup_by_module(link_libs)
     library_dirs = list(set(library_dirs))
 
     # Scan any libraries that haven't been scanned yet for symbol information
