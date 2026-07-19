@@ -592,7 +592,16 @@ static inline void Py_InitStaticModules(void) {
             shutil.move(sys.executable, sys.executable + uuid.uuid4().hex + ".old_interp")
         ctypes.windll.kernel32.MoveFileExW(temp_path, None, MOVEFILE_DELAY_UNTIL_REBOOT)
 
-        shutil.move(os.path.join(build_dir, "python.exe"), interpreter_path)
+        # Give it a few retries to work around antivirus locking.
+        import time
+        for _move_attempt in range(60):
+            try:
+                shutil.move(os.path.join(build_dir, "python.exe"), interpreter_path)
+                break
+            except PermissionError:
+                if _move_attempt == 59:
+                    raise
+                time.sleep(1)
     elif platform.system() == "Linux":
         sysconfig_libs = []
         sysconfig_lib_dirs = []
