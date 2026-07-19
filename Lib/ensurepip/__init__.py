@@ -10,11 +10,11 @@ from importlib import resources
 
 __all__ = ["version", "bootstrap", "_PROJECTS", "_get_packages"]
 _PACKAGE_NAMES = ('setuptools', 'packaging', 'pip', 'pyproject-hooks', 'wheel')
-_SETUPTOOLS_VERSION = "80.9.0"
-_PACKAGING_VERSION = "24.2"
-_PIP_VERSION = "25.3"
+_SETUPTOOLS_VERSION = "83.0.0"
+_PACKAGING_VERSION = "26.2"
+_PIP_VERSION = "26.1.2"
 _PYPROJECT_HOOKS_VERSION = "1.2.0"
-_WHEEL_VERSION = "0.42.0"
+_WHEEL_VERSION = "0.47.0"
 _PROJECTS = [
     ("setuptools", _SETUPTOOLS_VERSION, "py3"),
     ("packaging", _PACKAGING_VERSION, "py3"),
