@@ -71,6 +71,12 @@ cp Include/mp_embed.h ${PREFIX}/include/
 
 mkdir -p dep-build
 
+# harfbuzz (>= 9) is meson-only, so we need meson + ninja to build it. zstandard
+# gives mkembeddata a zstd backend when python3 predates 3.14 (compression.zstd).
+# Install them for the build user and put the user script dir on PATH.
+python3 -m pip install --user --quiet meson ninja zstandard || python3 -m pip install --user --quiet --break-system-packages meson ninja zstandard
+export PATH="$(python3 -m site --user-base)/bin:$PATH"
+
 download_file() {
   local url="$1"
   local filename="$2"
@@ -164,21 +170,20 @@ done
 cd ..
 fi
 
-if [ ! -d editline-f735e4d1d566cac3caa4a5e248179d07f0babefd ]; then
-download_file https://github.com/troglobit/editline/archive/f735e4d1d566cac3caa4a5e248179d07f0babefd.tar.gz editline.tar.gz
+if [ ! -d editline-2.1.0 ]; then
+download_file https://github.com/troglobit/editline/releases/download/2.1.0/editline-2.1.0.tar.gz editline.tar.gz
 tar -xf editline.tar.gz
-cd editline-f735e4d1d566cac3caa4a5e248179d07f0babefd
-./autogen.sh
+cd editline-2.1.0
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
 cd ..
 fi
 
-if [ ! -d sqlite-autoconf-3440000 ]; then
-download_file https://sqlite.org/2023/sqlite-autoconf-3440000.tar.gz sqlite.tar.gz
+if [ ! -d sqlite-autoconf-3530300 ]; then
+download_file https://sqlite.org/2026/sqlite-autoconf-3530300.tar.gz sqlite.tar.gz
 tar -xf sqlite.tar.gz
-cd sqlite-autoconf-3440000
+cd sqlite-autoconf-3530300
 export "CFLAGS_bak=$CFLAGS"
 export "CPPFLAGS_bak=$CPPFLAGS"
 export "CFLAGS=$CFLAGS -DSQLITE_ENABLE_COLUMN_METADATA"
@@ -191,10 +196,10 @@ export "CPPFLAGS=$CPPFLAGS_bak"
 cd ..
 fi
 
-if [ ! -d openssl-3.5.4 ]; then
-download_file https://www.openssl.org/source/openssl-3.5.4.tar.gz openssl.tar.gz
+if [ ! -d openssl-3.5.7 ]; then
+download_file https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz openssl.tar.gz
 tar -xf openssl.tar.gz
-cd openssl-3.5.4
+cd openssl-3.5.7
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
@@ -222,20 +227,20 @@ cp ./libuuid/src/uuid.h ${PREFIX}/include/
 cd ..
 fi
 
-if [ ! -d xz-5.4.5 ]; then
-download_file https://downloads.sourceforge.net/project/lzmautils/xz-5.4.5.tar.gz xz.tar.gz
+if [ ! -d xz-5.8.1 ]; then
+download_file https://github.com/tukaani-project/xz/releases/download/v5.8.1/xz-5.8.1.tar.gz xz.tar.gz
 tar -xf xz.tar.gz
-cd xz-5.4.5
+cd xz-5.8.1
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
 cd ..
 fi
 
-if [ ! -d libffi-3.4.6 ]; then
-download_file https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz libffi.tar.gz
+if [ ! -d libffi-3.7.1 ]; then
+download_file https://github.com/libffi/libffi/releases/download/v3.7.1/libffi-3.7.1.tar.gz libffi.tar.gz
 tar -xf libffi.tar.gz
-cd libffi-3.4.6
+cd libffi-3.7.1
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
@@ -253,10 +258,10 @@ make install
 cd ..
 fi
 
-if [ ! -d libpng-1.6.39 ]; then
-download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.39/libpng-1.6.39.tar.xz libpng.tar.gz
+if [ ! -d libpng-1.6.50 ]; then
+download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.50/libpng-1.6.50.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
-cd libpng-1.6.39
+cd libpng-1.6.50
 ./configure --prefix=${PREFIX} --disable-shared
 make pnglibconf.h
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
@@ -266,14 +271,16 @@ make install
 cd ..
 fi
 
-if [ ! -d harfbuzz-8.3.0 ]; then
-download_file https://github.com/harfbuzz/harfbuzz/releases/download/8.3.0/harfbuzz-8.3.0.tar.xz harfbuzz.tar.gz
+if [ ! -d harfbuzz-14.2.1 ]; then
+download_file https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
-cd harfbuzz-8.3.0
+cd harfbuzz-14.2.1
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
-./configure --prefix=${PREFIX} --disable-shared
-make -j$(nproc --all)
-make install
+# harfbuzz >= 9 dropped autotools and is meson-only. Static build with all
+# optional deps disabled (on Linux freetype is built separately and does not
+# link harfbuzz, so harfbuzz needs no freetype/pkg-config here).
+meson setup build-static --prefix=${PREFIX} --default-library=static --buildtype=release -Dfreetype=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
+meson install -C build-static
 cd ..
 fi
 
@@ -327,10 +334,10 @@ make install
 cd ..
 fi
 
-if [ ! -d freetype-2.13.3 ]; then
-download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.13.3/freetype-2.13.3.tar.xz freetype.tar.gz
+if [ ! -d freetype-2.14.3 ]; then
+download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
-cd freetype-2.13.3
+cd freetype-2.14.3
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(nproc --all)
@@ -480,10 +487,10 @@ make install
 cd ..
 fi
 
-if [ ! -d tcl8.6.15 ]; then
-download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.15/tcl8.6.15-src.tar.gz tcl.tar.gz
+if [ ! -d tcl8.6.18 ]; then
+download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.18/tcl8.6.18-src.tar.gz tcl.tar.gz
 tar -xf tcl.tar.gz
-cd tcl8.6.15
+cd tcl8.6.18
 rm -rf pkgs/tdbc* pkgs/sqlite*
 cd unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads
@@ -492,30 +499,30 @@ make install
 cd ../..
 fi
 
-if [ ! -d expat-2.5.0 ]; then
-download_file https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.gz expat.tar.gz
+if [ ! -d expat-2.8.2 ]; then
+download_file https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.gz expat.tar.gz
 tar -xf expat.tar.gz
-cd expat-2.5.0
+cd expat-2.8.2
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
 cd ..
 fi
 
-if [ ! -d tk8.6.15 ]; then
-download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.15/tk8.6.15-src.tar.gz tk.tar.gz
+if [ ! -d tk8.6.18 ]; then
+download_file http://downloads.sourceforge.net/project/tcl/Tcl/8.6.18/tk8.6.18-src.tar.gz tk.tar.gz
 tar -xf tk.tar.gz
-cd tk8.6.15/unix
+cd tk8.6.18/unix
 ./configure --prefix=${PREFIX} --enable-shared=no --enable-threads --with-tcl=${PREFIX}/lib
 make -j$(nproc --all) "X11_LIB_SWITCHES=-l:libX11.a -l:libxcb.a -l:libXss.a -l:libfontconfig.a -l:libXft.a -l:libXext.a -l:libXrandr.a -l:libXau.a -l:libXrender.a -l:libXdmcp.a -l:libfreetype.a -l:libexpat.a -l:libpng.a -l:libharfbuzz.a -l:libX11.a -l:libxcb.a -l:libbz2.a"
 make install
 cd ../..
 fi
 
-if [ ! -d mpdecimal-4.0.0 ]; then
-download_file https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.0.tar.gz mpdecimal.tar.gz
+if [ ! -d mpdecimal-4.0.1 ]; then
+download_file https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz mpdecimal.tar.gz
 tar -xf mpdecimal.tar.gz
-cd mpdecimal-4.0.0
+cd mpdecimal-4.0.1
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
