@@ -553,6 +553,13 @@ static inline void Py_InitStaticModules(void) {
 
         link_flags += ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
         extra_preargs_ = ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
+        # _wmi's _wmimodule.obj references the native-wchar_t overload of
+        # _com_util::ConvertStringToBSTR, which lives in comsuppw.lib. The obj's
+        # own /DEFAULTLIB directive instead names comsupp.lib (the unsigned-short
+        # variant, which lacks that symbol), so this monolithic relink can't
+        # resolve it and /FORCE silently masks it -> _wmi.exec_query() then
+        # segfaults. Link comsuppw.lib explicitly (found on %LIB%) to resolve it.
+        extra_preargs_.append("comsuppw.lib")
         # if not ('32bit', 'WindowsPE') == platform.architecture():
         #    # Not Win32 where is no PGO
         #    extra_preargs_.append("/USEPROFILE:PGD=python.pgd")
