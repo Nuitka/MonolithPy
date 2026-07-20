@@ -32811,11 +32811,7 @@ fi
 
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for HACL* library linking type" >&5
 printf %s "checking for HACL* library linking type... " >&6; }
-# WASI has always been static; --disable-shared (MonolithPy's model) also
-# needs static - the shared .so flavor doesn't produce a .a that other
-# link steps can pull the HACL symbols from, so MODULE__*_LDEPS prereqs
-# won't cause the archive to be built in time.
-if test "$ac_sys_system" = "WASI" || test "$PY_ENABLE_SHARED" = "0"; then
+if test "$ac_sys_system" = "WASI" || test "$MODULE_BUILDTYPE" = "static"; then
   LIBHACL_LDEPS_LIBTYPE=STATIC
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: static" >&5
 printf "%s\n" "static" >&6; }
