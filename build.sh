@@ -279,7 +279,7 @@ find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -i
 # harfbuzz >= 9 dropped autotools and is meson-only. Static build with all
 # optional deps disabled (on Linux freetype is built separately and does not
 # link harfbuzz, so harfbuzz needs no freetype/pkg-config here).
-meson setup build-static --prefix=${PREFIX} --default-library=static --buildtype=release -Dfreetype=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
+meson setup build-static --prefix=${PREFIX} --libdir=lib --default-library=static --buildtype=release -Dfreetype=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
 meson install -C build-static
 cd ..
 fi

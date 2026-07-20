@@ -303,7 +303,7 @@ find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -
 # harfbuzz >= 9 dropped autotools and is meson-only. Build a static lib with
 # freetype disabled on this first pass (freetype is built next, then harfbuzz
 # is rebuilt with freetype enabled). meson finds freetype via pkg-config.
-meson setup build-pass1 --prefix=${PREFIX} --default-library=static --buildtype=release -Dfreetype=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
+meson setup build-pass1 --prefix=${PREFIX} --libdir=lib --default-library=static --buildtype=release -Dfreetype=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
 meson install -C build-pass1
 cd ..
 fi
@@ -320,7 +320,7 @@ cd ..
 
 cd harfbuzz-14.2.1
 # Rebuild harfbuzz now that freetype is installed (found via pkg-config).
-meson setup build-pass2 --prefix=${PREFIX} --default-library=static --buildtype=release -Dfreetype=enabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
+meson setup build-pass2 --prefix=${PREFIX} --libdir=lib --default-library=static --buildtype=release -Dfreetype=enabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
 meson install -C build-pass2
 cd ..
 fi
