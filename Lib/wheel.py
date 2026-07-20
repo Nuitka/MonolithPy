@@ -14,11 +14,16 @@ wheel = loader.load_module()
 sys.modules["wheel"] = wheel
 loader.exec_module(wheel)
 
-def our_generic_abi():
-    return [wheel.vendored.packaging.tags._normalize_string(sysconfig.get_config_var("SOABI"))]
+import packaging.tags
 
-import wheel.vendored.packaging.tags
-wheel.vendored.packaging.tags._generic_abi = our_generic_abi
+def our_generic_abi():
+    return [packaging.tags._normalize_string(sysconfig.get_config_var("SOABI"))]
+
+# wheel >= 0.45 dropped its vendored packaging and uses the standalone
+# packaging.tags (our bundled packaging already SOABI-patches _generic_abi, but
+# patch it here too so wheels this interpreter builds are tagged with the real
+# SOABI regardless of import order).
+packaging.tags._generic_abi = our_generic_abi
 
 
 # --- Performance optimization: batch write support for WheelFile ---
@@ -31,8 +36,8 @@ from concurrent.futures import ThreadPoolExecutor
 from zipfile import ZipFile, ZipInfo
 
 import wheel.wheelfile
-from wheel.wheelfile import WheelFile, get_zipinfo_datetime
-from wheel.util import log, urlsafe_b64encode
+# wheel >= 0.45 removed wheel.util; log + urlsafe_b64encode now live in wheelfile.
+from wheel.wheelfile import WheelFile, get_zipinfo_datetime, log, urlsafe_b64encode
 
 
 def _wheelfile_write_batch(self, file_entries, max_workers=None):
