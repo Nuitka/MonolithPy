@@ -85,6 +85,11 @@ def _register_overlay_prefix(prefix):
         os.environ[_OVERLAYS_ENV] = os.pathsep.join(prefixes)
 
 
+def _under_real_site(path, real_site):
+    # True if `path` lives under the interpreter's real site-packages `real_site`.
+    return bool(real_site) and os.path.normpath(path).lower().startswith(real_site + os.sep)
+
+
 def get_lib_hash():
     hash_string = ""
     read_files = set()
@@ -207,6 +212,10 @@ def run_rebuild():
 
     foundLibs = {}
     checkedLibs = set()
+    # Real site-packages of the interpreter being rebuilt. Used to prefer a
+    # module's real installed copy over any transient pip build-isolation overlay
+    # copy when the same module turns up in both (see _under_real_site).
+    real_site = os.path.normpath(sysconfig.get_paths().get("purelib", "") or "").lower()
 
     from setuptools._distutils.sysconfig import get_config_var
 
@@ -271,7 +280,13 @@ def run_rebuild():
                 if relative_path.startswith("~"):
                     continue
                 print(relative_path, file)
-                foundLibs[relative_path] = file
+                # Prefer the real installed copy over any pip-build-env overlay
+                # copy so this registration and the link set (_dedup_by_module)
+                # agree on which copy of a duplicated module to embed.
+                prev = foundLibs.get(relative_path)
+                if prev is None or (not _under_real_site(prev, real_site)
+                                    and _under_real_site(file, real_site)):
+                    foundLibs[relative_path] = file
 
     print("Scanning for any additional libs to link...")
     print(foundLibs)
@@ -351,8 +366,6 @@ def run_rebuild():
 
     # De-dup multiple module files in a smart way based on the actual module path.
     def _dedup_by_module(libs):
-        real_site = os.path.normpath(sysconfig.get_paths().get("purelib", "") or "").lower()
-
         def _identity(p):
             parts = os.path.normpath(p).split(os.sep)
             for i in range(len(parts) - 1, -1, -1):
@@ -360,14 +373,12 @@ def run_rebuild():
                     return os.sep.join(parts[i + 1:]).lower()
             return os.path.normpath(p).lower()
 
-        def _under_real(p):
-            return bool(real_site) and os.path.normpath(p).lower().startswith(real_site + os.sep)
-
         chosen = {}
         for lib in libs:
             key = _identity(lib)
             prev = chosen.get(key)
-            if prev is None or (not _under_real(prev) and _under_real(lib)):
+            if prev is None or (not _under_real_site(prev, real_site)
+                                and _under_real_site(lib, real_site)):
                 chosen[key] = lib
         return list(chosen.values())
 
