@@ -562,8 +562,8 @@ static inline void Py_InitStaticModules(void) {
             ["python.c"], output_dir=build_dir, include_dirs=include_dirs, macros=macros
         )
 
-        link_flags += ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
-        extra_preargs_ = ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE"]
+        link_flags += ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE:MULTIPLE"]
+        extra_preargs_ = ["/LTCG", "/NODEFAULTLIB:python3.lib", "/FORCE:MULTIPLE"]
         # _wmi's _wmimodule.obj references the native-wchar_t overload of
         # _com_util::ConvertStringToBSTR, which lives in comsuppw.lib. The obj's
         # own /DEFAULTLIB directive instead names comsupp.lib (the unsigned-short
