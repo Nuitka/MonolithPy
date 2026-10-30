@@ -202,6 +202,18 @@ static void test_ifstream_virtual_seek() {
     CHECK(static_cast<unsigned char>(ch) == 100, "byte at 100 == 100");
 }
 
+static void test_ifstream_virtual_ate() {
+    std::fprintf(stderr, "[std::ifstream ios::ate on virtual path]\n");
+    std::ifstream f(VPATH_PREFIX VPATH_SEP "binary.bin", std::ios::binary | std::ios::ate);
+    CHECK(f.is_open(), "open binary.bin with ios::ate (virtual)");
+    if (!f.is_open()) return;
+    CHECK(f.tellg() == std::streampos(256), "ios::ate opens at the end");
+    f.seekg(10);
+    char ch = 0;
+    f.read(&ch, 1);
+    CHECK(f && static_cast<unsigned char>(ch) == 10, "read after seeking back from the end");
+}
+
 static void test_ifstream_virtual_huge() {
     std::fprintf(stderr, "[std::ifstream huge.dat on virtual path]\n");
     std::ifstream f(VPATH_PREFIX VPATH_SEP "huge.dat", std::ios::binary);
@@ -352,6 +364,7 @@ int main() {
     test_ifstream_virtual_basic();
     test_ifstream_virtual_getline();
     test_ifstream_virtual_seek();
+    test_ifstream_virtual_ate();
     test_ifstream_virtual_huge();
     test_ifstream_real_file_compiles_and_runs();
     test_cpp_headers_compile();

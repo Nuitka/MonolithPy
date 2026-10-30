@@ -98,6 +98,13 @@ jobs:
             "$ART/Embedded/mp_embed.o" \
             -IInclude -IPC -L"$DEPS/lib" -lzstd
         ./tests/mp_embed/test_mp_embed
+        # Executable-relative entries must resolve however the binary is
+        # reached: through a symlinked directory, and through a file symlink
+        # whose target goes through one (getpath keeps both spellings).
+        ln -sfn "$PWD/tests/mp_embed" tests/mp_embed_link
+        ./tests/mp_embed_link/test_mp_embed
+        ln -sfn "$PWD/tests/mp_embed_link/test_mp_embed" tests/test_mp_embed_link
+        ./tests/test_mp_embed_link
         # C++ suite - see MACOSMIN comment above.
         c++ -std=c++17 -O2 -pthread $MACOSMIN \
             -o tests/mp_embed/test_mp_embed_cpp \
@@ -189,6 +196,13 @@ jobs:
               "$ART/Embedded/mp_embed.o" \
               -IInclude -IPC -L"$DEPS/lib" -lzstd
           ./tests/mp_embed/test_mp_embed
+          # Executable-relative entries must resolve however the binary is
+          # reached: through a symlinked directory, and through a file
+          # symlink whose target goes through one (getpath keeps both).
+          ln -sfn "$PWD/tests/mp_embed" tests/mp_embed_link
+          ./tests/mp_embed_link/test_mp_embed
+          ln -sfn "$PWD/tests/mp_embed_link/test_mp_embed" tests/test_mp_embed_link
+          ./tests/test_mp_embed_link
           # C++ suite. -static-libstdc++ + --wrap so libstdc++.a's
           # basic_file entry points (fopen/fclose/read/lseek/fstat/close)
           # route to mp_embed.o's __wrap_* and serve from embed memory.
@@ -263,6 +277,12 @@ jobs:
         cl /MT /std:c++17 /EHsc /nologo /Fe:tests\mp_embed\test_mp_embed_cpp.exe /IInclude /IPC tests\mp_embed\test_mp_embed.cpp tests\mp_embed\gen\mp_embed_data.c Embedded\mp_embed.cpp /link Shlwapi.lib %ART%\libs\mp_embed.lib
         if errorlevel 1 exit /b 1
         tests\mp_embed\test_mp_embed.exe
+        if errorlevel 1 exit /b 1
+        rem Executable-relative entries must resolve whether the folder is
+        rem reached through a junction or by its final path.
+        mklink /J tests\mp_embed_link tests\mp_embed
+        if errorlevel 1 exit /b 1
+        tests\mp_embed_link\test_mp_embed.exe
         if errorlevel 1 exit /b 1
         tests\mp_embed\test_mp_embed_cpp.exe
         if errorlevel 1 exit /b 1

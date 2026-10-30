@@ -161,15 +161,16 @@ def next_prime(n: int) -> int:
 class Entry:
     __slots__ = ('vpath', 'hash', 'type', 'data_pos', 'data_size',
                  'path_offset', 'children_start', 'children_count',
-                 'parent_vpath', 'fs_path')
+                 'parent_vpath', 'fs_path', 'mtime_ns')
 
     def __init__(self, vpath: str, type_: int, fs_path: str = None):
         self.vpath = vpath
         # Hash on the lowercased path so runtime case-insensitive lookups
         # (mp_embed.c lowercases the search path before hashing) hit our entry
-        # regardless of the case used in the Python-level open() call. The
-        # stored vpath stays case-preserved for listdir() display.
-        self.hash = fnv1a_64(vpath.lower().encode('utf-8'))
+        # regardless of the case used in the Python-level open() call. Like the
+        # runtime, bytes.lower() folds ASCII only. The stored vpath stays
+        # case-preserved for listdir() display.
+        self.hash = fnv1a_64(vpath.encode('utf-8').lower())
         self.type = type_
         self.data_pos = 0
         self.data_size = 0
@@ -178,6 +179,9 @@ class Entry:
         self.children_count = 0
         self.parent_vpath = None
         self.fs_path = fs_path
+        # Reported by stat(), so that pycs compiled from the packed sources
+        # validate against them.
+        self.mtime_ns = os.stat(fs_path).st_mtime_ns
 
 
 # ---- main pipeline ----
@@ -199,7 +203,7 @@ def collect_entries() -> list:
         # `seen` keeps lowercased keys to detect case-insensitive collisions
         # (the runtime VFS is case-insensitive, so foo.PY and foo.py would
         # both hash to the same slot - reject at gen time).
-        vdir_key = vdir.lower()
+        vdir_key = vdir.encode('utf-8').lower()
         if vdir_key in seen:
             raise RuntimeError(f"duplicate directory: {vdir}")
         seen.add(vdir_key)
@@ -213,7 +217,7 @@ def collect_entries() -> list:
             # is case-sensitive; os.listdir must return correctly cased names
             # for that to work on a case-insensitive VFS).
             vfile = vdir + "/" + fname
-            vfile_key = vfile.lower()
+            vfile_key = vfile.encode('utf-8').lower()
             if vfile_key in seen:
                 raise RuntimeError(f"duplicate file: {vfile}")
             seen.add(vfile_key)
@@ -473,17 +477,18 @@ def main():
     entries_size_bytes = n * EMAP_SIZE
     paths_offset = entries_offset + entries_size_bytes
     paths_size = len(paths_blob)
-    map_total_size = paths_offset + paths_size
+    mtimes_offset = (paths_offset + paths_size + 7) & ~7
+    map_total_size = mtimes_offset + n * 8
 
     # Header (64 bytes):
     #   uint32 num_entries, num_buckets,
     #          bloom_size_words, bloom_num_hashes, bloom_num_bits,
     #          bloom_offset, seeds_offset, child_slots_offset,
     #          entries_offset, paths_offset, paths_size,
-    #          num_child_slots, map_total_size
-    #          + 12 bytes pad
+    #          num_child_slots, map_total_size, mtimes_offset
+    #          + 8 bytes pad
     header = struct.pack(
-        "<IIIIIIIIIIIII" + "12x",
+        "<IIIIIIIIIIIIII" + "8x",
         n,                              # num_entries
         len(seeds),                     # num_buckets
         len(bloom_words),               # bloom_size_words
@@ -497,6 +502,7 @@ def main():
         paths_size,                     # paths_size
         len(child_slots),               # num_child_slots
         map_total_size,                 # map_total_size
+        mtimes_offset,                  # mtimes_offset
     )
     assert len(header) == HEADER_SIZE, f"header is {len(header)} bytes, expected {HEADER_SIZE}"
 
@@ -547,6 +553,11 @@ def main():
 
     # Paths
     map_blob.extend(paths_blob)
+
+    # Mtimes (slot order, 8-aligned)
+    map_blob.extend(bytes(mtimes_offset - len(map_blob)))
+    for e in slot_entries:
+        map_blob.extend(struct.pack("<q", e.mtime_ns))
     assert len(map_blob) == map_total_size
 
     # Write intermediate .dat files (kept for legacy/debug parity).

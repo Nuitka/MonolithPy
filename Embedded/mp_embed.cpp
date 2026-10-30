@@ -11,10 +11,9 @@
  * NOTE: this file does NOT include <mp_embed.h>. The renaming and
  * inline machinery there are intended for user TUs that want to call
  * fopen/fread/etc. as if they were the standard CRT - we, the runtime,
- * just need the EFILE struct definition and a few entry-point
- * declarations. We declare those manually below to avoid pulling the
- * whole header in (and avoid recursive macro substitution, which would
- * rename the very function we're defining).
+ * just need a few entry-point declarations. We declare those manually
+ * below to avoid pulling the whole header in (and avoid recursive macro
+ * substitution, which would rename the very function we're defining).
  */
 
 #ifdef _WIN32
@@ -26,28 +25,14 @@
 #include <wchar.h>
 #include <cstring>
 
-/* Local copy of the EFILE struct. Must match Include/mp_embed.h. */
-struct EMAP_STUB; /* opaque to this TU */
-struct EFILE_S {
-    uint32_t handle_type;
-    const char* name;
-    const char* pos;
-    const char* end;
-    size_t size;
-    int err;
-    FILE* f;
-    struct EMAP_STUB* map;
-    char* crt_base;
-    char* crt_ptr;
-    int   crt_cnt;
-};
+/* Opaque here; only mp_embed.c looks inside. */
 typedef struct EFILE_S EFILE;
-
-#define EHANDLE_VIRTUAL 0x11111111
 
 extern "C" {
     /* From mp_embed.c. */
     EFILE* mp_wfopen(const wchar_t *filename, const wchar_t *mode);
+    int mp_fseek(void *stream, long offset, int origin);
+    int mp_fclose(void *stream);
 }
 
 /* Mirror of MSVC's _Fiopen mode-table. Returns nullptr for invalid
@@ -104,20 +89,10 @@ extern "C++" FILE* mp__Fiopen(const wchar_t* filename, ios_base::openmode mode, 
     EFILE* e = mp_wfopen(filename, mode_str);
     if (!e) return nullptr;
 
-    /* Honour ios_base::ate (seek to end after open). For virtual files
-     * we update pos directly; for native we punt to fseek. */
-    if ((mode & std::ios_base::ate) != 0) {
-        if (e->handle_type == EHANDLE_VIRTUAL) {
-            e->pos = e->end;
-            e->crt_ptr = (char*)e->end;
-            e->crt_cnt = 0;
-        } else if (e->f) {
-            if (fseek(e->f, 0, SEEK_END) != 0) {
-                fclose(e->f);
-                free(e);
-                return nullptr;
-            }
-        }
+    /* Honour ios_base::ate (seek to end after open). */
+    if ((mode & std::ios_base::ate) != 0 && mp_fseek(e, 0, SEEK_END) != 0) {
+        mp_fclose(e);
+        return nullptr;
     }
     return reinterpret_cast<FILE*>(e);
 }

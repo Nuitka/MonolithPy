@@ -10,6 +10,8 @@ import os
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "tree"))
+# 2023-11-14 22:13:20.5 UTC; NTFS keeps the half second exactly.
+SMALL_MTIME_NS = 1700000000 * 10**9 + 500000000
 
 
 def write(rel_path, data):
@@ -35,6 +37,8 @@ def main():
     write(f"{base}/empty.txt", b"")
     write(f"{base}/one.bin", b"\x42")
     write(f"{base}/small.txt", "Hello, World!\n")
+    # The runtime reports the mtime recorded in the blob.
+    os.utime(os.path.join(ROOT, base, "small.txt"), ns=(SMALL_MTIME_NS, SMALL_MTIME_NS))
 
     # All-bytes binary
     write(f"{base}/binary.bin", bytes(range(256)))
@@ -76,6 +80,9 @@ def main():
 
     # Top-level too
     write(f"{base}/readme.md", "Test tree readme\n")
+
+    # Executable-relative entry: ~/embedrel/rel.txt, next to the test binary.
+    write("__relative__/embedrel/rel.txt", "relative to the executable\n")
 
     print(f"wrote test tree under {ROOT}")
 

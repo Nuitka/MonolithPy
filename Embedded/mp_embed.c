@@ -46,29 +46,58 @@ typedef struct FDMAP_S FDMAP;
 FDMAP mp_fd2file[512] = {};
 bool mp_fd2file_initialized = false;
 
+#if defined(__linux__)
+#include <sys/auxv.h>
+#endif
 #if defined(__linux__) || defined(__APPLE__)
 #include <pthread.h>
-/* Protects mp_fd2file slot allocation/free. The std::ifstream
- * threading torture (16 threads x 200 iters of open/read/close)
- * otherwise races on slot reuse. */
+/* Protects slot allocation/free in the handle registries. The
+ * std::ifstream threading torture (16 threads x 200 iters of
+ * open/read/close) otherwise races on slot reuse. */
 static pthread_mutex_t mp_fd2file_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define MP_REGISTRY_LOCK()   pthread_mutex_lock(&mp_fd2file_mutex)
+#define MP_REGISTRY_UNLOCK() pthread_mutex_unlock(&mp_fd2file_mutex)
 #endif
 
 #ifdef _WIN32
-// A map to associate mapping HANDLEs with our virtual EFILE structs.
-struct VMAP_S {   // Virtual File Mapping
+static SRWLOCK mp_registry_lock = SRWLOCK_INIT;
+#define MP_REGISTRY_LOCK()   AcquireSRWLockExclusive(&mp_registry_lock)
+#define MP_REGISTRY_UNLOCK() ReleaseSRWLockExclusive(&mp_registry_lock)
+
+/* Handles of virtual files. A CreateFile handle owns its EFILE; the OS handle
+ * behind a virtual fd is fd_owned, and the fd's close releases it. */
+struct HNDMAP_S {
     HANDLE h;
     EFILE *f;
+    bool fd_owned;
+};
+typedef struct HNDMAP_S HNDMAP;
+
+HNDMAP mp_handle2file[512] = {};
+
+/* A mapping of a virtual file owns its own decompressed copy, so like a real
+ * section object it outlives the file handle it was created from. */
+typedef struct VMAPPING_S {
+    char *data;
+    size_t size;
+    int views;
+    bool closed;
+} VMAPPING;
+
+// A map to associate mapping HANDLEs with our virtual mappings.
+struct VMAP_S {   // Virtual File Mapping
+    HANDLE h;
+    VMAPPING *m;
 };
 typedef struct VMAP_S VMAP;
 
 // An array to store the mappings for open virtual files.
 VMAP mp_mapping2file[512] = {};
 
-// A map to associate view pointers with our virtual EFILE structs
+// A map to associate view pointers with our virtual mappings
 struct VIEWMAP_S { // Virtual File View
     LPVOID view;
-    EFILE *f;
+    VMAPPING *m;
 };
 typedef struct VIEWMAP_S VIEWMAP;
 
@@ -78,7 +107,10 @@ VIEWMAP mp_view2file[512] = {};
 typedef struct VIRTUAL_FIND_HANDLE_DATA_S {
     const EMAP* dir_map;        // The directory entry being iterated
     uint32_t next_child;        // Index into dir_map->children of next entry to return
-    char search_pattern[PATH_MAX]; // The file pattern (e.g., "*.txt")
+    wchar_t search_pattern[MAX_PATH]; // The file pattern (e.g., "*.txt")
+    HANDLE real;                // The same search on disk, or INVALID_HANDLE_VALUE
+    bool real_ready;            // real_next holds its next match
+    WIN32_FIND_DATAW real_next;
 } VIRTUAL_FIND_HANDLE_DATA;
 
 // A map to associate find handles with our virtual find data
@@ -125,6 +157,7 @@ static const uint32_t          *mp_seeds      = NULL;
 static const uint32_t          *mp_child_slots = NULL;
 static const EMAP              *mp_entries    = NULL;
 static const char              *mp_paths      = NULL;
+static const char              *mp_mtimes     = NULL;  /* NULL if the blob has none */
 
 ALWAYS_INLINE void mp_embed_init(void) {
   if (likely(mp_hdr != NULL)) return;
@@ -144,6 +177,7 @@ ALWAYS_INLINE void mp_embed_init(void) {
   mp_child_slots = (const uint32_t *)(base + h->child_slots_offset);
   mp_entries     = (const EMAP     *)(base + h->entries_offset);
   mp_paths       = (const char     *)(base + h->paths_offset);
+  if (h->mtimes_offset != 0) mp_mtimes = base + h->mtimes_offset;
   mp_hdr         = h;  /* publish last so other threads see consistent state */
 }
 
@@ -193,6 +227,23 @@ ALWAYS_INLINE const EMAP *mp_embed_find(const char *path) {
   return NULL;
 }
 
+/* MP_EMBED_DEBUG is read once: getenv() on every intercepted call is slow and
+ * races with setenv() from other threads. */
+static int mp_debug_flag = -1;
+static bool mp_debug(void) {
+  if (unlikely(mp_debug_flag < 0)) {
+    const char *dbg = getenv("MP_EMBED_DEBUG");
+    mp_debug_flag = (dbg && *dbg) ? 1 : 0;
+  }
+  return mp_debug_flag == 1;
+}
+
+/* ASCII-only, locale-independent; mkembeddata.py folds the same way, so
+ * UTF-8 bytes of non-ASCII names pass through untouched. */
+ALWAYS_INLINE char mp_ascii_lower(char c) {
+  return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
+}
+
 /* Backwards-compatible wrapper: existing code does
  *   if (find_embedded_file(path, &map)) ...
  * with `EMAP *map`. Cast away const since the callers don't write. */
@@ -200,13 +251,12 @@ static bool find_embedded_file(char *search_path, EMAP **found_map) {
   /* Lowercase the input path. (get_virtual_path already does this for
    * paths derived from absolute paths, but some call sites pass other
    * paths through.) */
-  for (char *p = search_path; *p; ++p) *p = (char)tolower((unsigned char)*p);
-  const char *dbg = getenv("MP_EMBED_DEBUG");
-  if (dbg && *dbg) {
+  for (char *p = search_path; *p; ++p) *p = mp_ascii_lower(*p);
+  if (mp_debug()) {
     fprintf(stderr, "[mp_embed] find: '%s'\n", search_path);
   }
   const EMAP *e = mp_embed_find(search_path);
-  if (dbg && *dbg) {
+  if (mp_debug()) {
     fprintf(stderr, "[mp_embed] -> %s\n", e ? "HIT" : "MISS");
   }
   if (!e) return false;
@@ -253,39 +303,60 @@ static size_t mp_uncompressed_size(const EMAP *map) {
   return (size_t)ucs;
 }
 
-/* Decompress the zstd frame for `map` into a freshly malloc'd buffer.
- * Returns NULL on failure. *out_size receives the uncompressed size. */
-static char *mp_decompress_entry(const EMAP *map, size_t *out_size) {
-  if (map->data_size == 0) {
-    /* Empty file shortcut - mkembeddata stores no frame at all. */
-    *out_size = 0;
-    return NULL;
-  }
+/* When the entry's source was last modified, in nanoseconds since the
+ * epoch; 0 for a blob without mtimes. */
+static int64_t mp_mtime_ns(const EMAP *map) {
+  if (mp_mtimes == NULL) return 0;
+  int64_t ns;
+  memcpy(&ns, mp_mtimes + sizeof ns * (size_t)(map - mp_entries), sizeof ns);
+  return ns;
+}
+
+/* Decompress the zstd frame for `map` into a freshly malloc'd buffer: the
+ * content follows `headroom' zero bytes and is followed by one spare byte,
+ * so the buffer is never empty. Returns NULL (errno set) on failure.
+ * *out_size receives the uncompressed size. */
+static char *mp_decompress_entry(const EMAP *map, size_t headroom, size_t *out_size) {
   const char *src = (const char*)&nuitka_embed_data + map->data_pos;
-  unsigned long long ucs = ZSTD_getFrameContentSize(src, map->data_size);
-  if (ucs == ZSTD_CONTENTSIZE_ERROR || ucs == ZSTD_CONTENTSIZE_UNKNOWN) {
+  size_t ucs = 0;
+  /* Empty files have no frame at all. */
+  if (map->data_size != 0) {
+    unsigned long long n = ZSTD_getFrameContentSize(src, map->data_size);
+    if (n == ZSTD_CONTENTSIZE_ERROR || n == ZSTD_CONTENTSIZE_UNKNOWN) {
+      errno = EIO;
+      return NULL;
+    }
+    ucs = (size_t)n;
+  }
+  char *buf = (char*)malloc(headroom + ucs + 1);
+  if (!buf) {
+    errno = ENOMEM;
     return NULL;
   }
-  if (ucs == 0) {
-    *out_size = 0;
-    /* Allocate 1 byte so the EFILE has a valid (non-NULL) base pointer
-     * we can later free; pos==end means "EOF immediately". */
-    return (char*)malloc(1);
+  memset(buf, 0, headroom);
+  if (ucs != 0) {
+    size_t n = ZSTD_decompress(buf + headroom, ucs, src, map->data_size);
+    if (ZSTD_isError(n) || n != ucs) {
+      free(buf);
+      errno = EIO;
+      return NULL;
+    }
   }
-  char *buf = (char*)malloc((size_t)ucs);
-  if (!buf) return NULL;
-  size_t n = ZSTD_decompress(buf, (size_t)ucs, src, map->data_size);
-  if (ZSTD_isError(n) || n != (size_t)ucs) {
-    free(buf);
-    return NULL;
-  }
-  *out_size = (size_t)ucs;
+  *out_size = ucs;
   return buf;
 }
 
-ALWAYS_INLINE void mp_efile_init_virtual(EFILE *e, const EMAP *map) {
+/* Returns false (errno set) if the entry cannot be decompressed; the EFILE
+ * must then not be handed out, or it would read as an empty file. */
+static bool mp_efile_init_virtual(EFILE *e, const EMAP *map) {
   size_t ucs = 0;
-  char *base = mp_decompress_entry(map, &ucs);
+  char *buf = NULL, *base = NULL;
+  if (map->type == ETYPE_FILE) {
+    /* One byte of headroom lets ungetc() push back before the first byte. */
+    buf = mp_decompress_entry(map, 1, &ucs);
+    if (buf == NULL) return false;
+    base = buf + 1;
+  }
   e->handle_type = EHANDLE_VIRTUAL;
   e->name        = mp_path_of(map);
   e->pos         = base;
@@ -294,12 +365,62 @@ ALWAYS_INLINE void mp_efile_init_virtual(EFILE *e, const EMAP *map) {
   e->err         = 0;
   e->f           = NULL;
   e->map         = (EMAP*)map;
-  e->owned_buf   = base;     /* free in fclose/close */
+  e->owned_buf   = buf;     /* free in fclose/close */
 #ifdef _WIN32
   e->crt_base    = base;
   e->crt_ptr     = base;
   e->crt_cnt     = (int)ucs;
 #endif
+  e->unget_saved = 0;
+  return true;
+}
+
+#ifdef _WIN32
+/* For handles that only ever answer metadata queries (CreateFile is how
+ * Python's os.stat() looks at a file): no decompression. */
+ALWAYS_INLINE void mp_efile_init_metadata(EFILE *e, const EMAP *map) {
+  e->handle_type = EHANDLE_VIRTUAL;
+  e->name        = mp_path_of(map);
+  e->size        = mp_uncompressed_size(map);
+  e->map         = (EMAP*)map;
+}
+#endif
+
+/* Bytes left to read. The position may lie past the end after an lseek()
+ * beyond EOF, which is legal and reads as EOF. */
+ALWAYS_INLINE size_t mp_avail(const EFILE *e) {
+  return e->pos < e->end ? (size_t)(e->end - e->pos) : 0;
+}
+
+/* EFILE.err bits of a virtual stream, as feof()/ferror() report them. */
+#define MP_EFILE_EOF 1
+#define MP_EFILE_ERR 2
+
+/* Puts back the byte an ungetc() overwrote, once the stream is repositioned
+ * or the pushed-back byte has been read. */
+ALWAYS_INLINE void mp_unget_restore(EFILE *e) {
+  if (e->unget_saved != 0) {
+    ((char*)e->owned_buf)[e->unget_at] = (char)(e->unget_saved & 0xff);
+    e->unget_saved = 0;
+  }
+}
+
+/* ungetc() on a virtual stream: the next read returns `c'. As stdio
+ * guarantees, one byte that differs from the content can be pending. */
+static bool mp_unget(EFILE *e, unsigned char c) {
+  char *buf = (char*)e->owned_buf;
+  if (buf == NULL || e->pos <= buf || e->pos > e->end) return false;
+  if (e->unget_saved != 0 && e->pos > buf + e->unget_at) mp_unget_restore(e);
+  char *at = (char*)e->pos - 1;
+  if ((unsigned char)*at != c) {
+    if (e->unget_saved != 0) return false;
+    e->unget_saved = 0x100 | (unsigned char)*at;
+    e->unget_at = (size_t)(at - buf);
+    *at = (char)c;
+  }
+  e->pos = at;
+  e->err &= ~MP_EFILE_EOF;
+  return true;
 }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -349,7 +470,7 @@ ALWAYS_INLINE void mp_sync_in(EFILE *e) {
 ALWAYS_INLINE void mp_sync_out(EFILE *e) {
   if (e->handle_type != EHANDLE_VIRTUAL) return;
   e->crt_ptr = (char*)e->pos;
-  e->crt_cnt = (int)((const char*)e->end - e->pos);
+  e->crt_cnt = (int)mp_avail(e);
 }
 
 /* Implementation of the _get_stream_buffer_pointers intercept.
@@ -364,15 +485,14 @@ MP_DECL(int) mp__get_stream_buffer_pointers(void *e, char ***pBase, char ***pPoi
     return _get_stream_buffer_pointers(((EFILE*)e)->f, pBase, pPointer, pCount);
   }
   EFILE *ef = (EFILE*)e;
-  const char *dbg = getenv("MP_EMBED_DEBUG");
-  if (dbg && *dbg) {
+  if (mp_debug()) {
     fprintf(stderr, "[mp_embed] _get_stream_buffer_pointers: pos=%p crt_ptr=%p crt_cnt=%d\n",
             (void*)ef->pos, (void*)ef->crt_ptr, ef->crt_cnt);
   }
   /* Pull the streambuf's view back into pos first - it may have advanced
    * crt_ptr past pos via direct cursor reads. */
   ef->pos = ef->crt_ptr;
-  ef->crt_cnt = (int)((const char*)ef->end - ef->pos);
+  ef->crt_cnt = (int)mp_avail(ef);
   if (pBase)    *pBase    = &ef->crt_base;
   if (pPointer) *pPointer = &ef->crt_ptr;
   if (pCount)   *pCount   = &ef->crt_cnt;
@@ -402,16 +522,99 @@ ALWAYS_INLINE void init_fd2file() {
 #else
 ALWAYS_INLINE void init_fd2file() {
   if (unlikely(!mp_fd2file_initialized)) {
-    for (int i = 0; i < 512; ++i) {
-      mp_fd2file[i].fd = -1;
-      // The pointer 'f' is already NULL due to the initial zero-initialization
-      // but it's good practice to be explicit if the intent isn't just zeroing.
-      mp_fd2file[i].f = NULL;
+    MP_REGISTRY_LOCK();
+    if (!mp_fd2file_initialized) {
+      for (int i = 0; i < 512; ++i) {
+        mp_fd2file[i].fd = -1;
+        // The pointer 'f' is already NULL due to the initial zero-initialization
+        // but it's good practice to be explicit if the intent isn't just zeroing.
+        mp_fd2file[i].f = NULL;
+      }
+      mp_fd2file_initialized = true;
     }
-    mp_fd2file_initialized = true;
+    MP_REGISTRY_UNLOCK();
   }
 }
 #endif
+
+/* fd -> EFILE registry for virtual files opened at the fd level. Slots are
+ * claimed and released under the registry lock; lookups need none, as a
+ * thread only ever looks up fds it owns. fd -1 marks a free slot, so a
+ * negative fd must never be looked up. */
+static bool mp_fd_register(int fd, EFILE *e) {
+  init_fd2file();
+#ifdef _WIN32
+  HANDLE h = (HANDLE)_get_osfhandle(fd);
+#endif
+  bool registered = false;
+  MP_REGISTRY_LOCK();
+  for (int i = 0; i < 512; i++) {
+    if (mp_fd2file[i].fd == -1) {
+      mp_fd2file[i].f = e;
+      mp_fd2file[i].fd = fd;
+      registered = true;
+      break;
+    }
+  }
+#ifdef _WIN32
+  /* Python's fstat() asks the fd's OS handle, which is the executable's:
+   * answer for the virtual file instead. */
+  for (int i = 0; registered && h != INVALID_HANDLE_VALUE && i < 512; i++) {
+    if (mp_handle2file[i].h == NULL) {
+      mp_handle2file[i].f = e;
+      mp_handle2file[i].fd_owned = true;
+      mp_handle2file[i].h = h;
+      break;
+    }
+  }
+#endif
+  MP_REGISTRY_UNLOCK();
+  if (!registered) errno = EMFILE;
+  return registered;
+}
+
+static EFILE *mp_fd_lookup(int fd) {
+  if (fd < 0 || !mp_fd2file_initialized) return NULL;
+  for (int i = 0; i < 512; i++) {
+    if (mp_fd2file[i].fd == fd) return mp_fd2file[i].f;
+  }
+  return NULL;
+}
+
+/* Must run before the kernel fd is closed: otherwise another thread's open()
+ * can be handed the same number while the slot still points here. */
+static EFILE *mp_fd_unregister(int fd) {
+  if (fd < 0 || !mp_fd2file_initialized) return NULL;
+  EFILE *e = NULL;
+  MP_REGISTRY_LOCK();
+  for (int i = 0; i < 512; i++) {
+    if (mp_fd2file[i].fd == fd) {
+      e = mp_fd2file[i].f;
+      mp_fd2file[i].fd = -1;
+      mp_fd2file[i].f = NULL;
+      break;
+    }
+  }
+#ifdef _WIN32
+  for (int i = 0; e != NULL && i < 512; i++) {
+    if (mp_handle2file[i].fd_owned && mp_handle2file[i].f == e) {
+      mp_handle2file[i].h = NULL;
+      mp_handle2file[i].f = NULL;
+      mp_handle2file[i].fd_owned = false;
+    }
+  }
+#endif
+  MP_REGISTRY_UNLOCK();
+  return e;
+}
+
+static int mp_fd_of(const EFILE *e) {
+  if (!mp_fd2file_initialized) return -1;
+  for (int i = 0; i < 512; i++) {
+    if (mp_fd2file[i].f == e && mp_fd2file[i].fd != -1) return mp_fd2file[i].fd;
+  }
+  return -1;
+}
 
 // Normalize path by resolving ".." and "."
 void mp_normalize_path(char *path) {
@@ -636,89 +839,347 @@ void mp_get_absolute_path(const char *relative_path, char *absolute_path, size_t
 #endif
 }
 
-/* Cache executable path - it doesn't change during process lifetime, but
- * the legacy code re-derived it on every fopen/stat/etc. via GetModuleFileName
- * or readlink("/proc/self/exe"). On miss-heavy workloads (most fopen calls
- * aren't for embedded data) that syscall dominates the embed lookup.
- *
- * We populate the cache on first call. Race conditions are benign: every
- * thread that loses the race writes the same content. */
-static char       mp_cached_execfolder[PATH_MAX] = {0};
-static char       mp_cached_executable[PATH_MAX] = {0};
-static int        mp_cached_exec_state           = 0;  /* 0=unset, 1=ok, -1=fail */
+/* The executable's location never changes during the process lifetime, so it
+ * is resolved once. On miss-heavy workloads (most fopen calls aren't for
+ * embedded data) re-deriving it per call dominated the embed lookup. */
 
-static bool mp_resolve_exec_path_uncached(char *execfolder, char *executable) {
+#define MP_NOT_IN_FOLDER ((size_t) -1)
+
 #ifdef _WIN32
-  if (GetModuleFileName(NULL, executable, PATH_MAX) == 0) return false;
-  if (GetModuleFileName(NULL, execfolder, PATH_MAX) == 0) return false;
-  if (!PathRemoveFileSpecA(execfolder)) return false;
-#elif defined(__APPLE__)
-  char path[PATH_MAX];
+static wchar_t    mp_executable_w[PATH_MAX];
+/* Folder of the executable as launched, with 8.3 names expanded. */
+static wchar_t    mp_execfolder_w[PATH_MAX];
+/* Folder of the executable's final path (junctions and symlinks resolved),
+ * which Python's getpath takes its prefix from; empty if the same folder. */
+static wchar_t    mp_execfolder_alias_w[PATH_MAX];
+static bool       mp_exec_ok = false;
+static INIT_ONCE  mp_exec_once = INIT_ONCE_STATIC_INIT;
+
+/* "\\?\C:\x" -> "C:\x", "\\?\UNC\srv\x" -> "\\srv\x". */
+static void mp_win_strip_verbatim(wchar_t *path) {
+  if (wcsncmp(path, L"\\\\?\\UNC\\", 8) == 0) {
+    memmove(path + 2, path + 8, (wcslen(path + 8) + 1) * sizeof(wchar_t));
+  } else if (wcsncmp(path, L"\\\\?\\", 4) == 0 && path[4] != L'\0' && path[5] == L':') {
+    memmove(path, path + 4, (wcslen(path + 4) + 1) * sizeof(wchar_t));
+  }
+}
+
+/* Expands 8.3 names in the longest prefix of `path' that exists on disk. */
+static void mp_win_long_path(wchar_t *path) {
+  size_t len = wcslen(path);
+  size_t stop = (len >= 2 && path[1] == L':') ? 2 : 0;
+  for (size_t cut = len; cut > stop;) {
+    wchar_t saved = path[cut];
+    path[cut] = L'\0';
+    wchar_t expanded[PATH_MAX];
+    DWORD n = GetLongPathNameW(path, expanded, PATH_MAX);
+    path[cut] = saved;
+    if (n > 0 && n < PATH_MAX) {
+      if (n + (len - cut) < PATH_MAX) {
+        wcscpy(expanded + n, path + cut);
+        wcscpy(path, expanded);
+      }
+      return;
+    }
+    while (cut > 0 && path[cut - 1] != L'\\') cut--;
+    if (cut > 0) cut--;
+  }
+}
+
+static BOOL CALLBACK mp_exec_init(PINIT_ONCE once, PVOID param, PVOID *context) {
+  (void)once; (void)param; (void)context;
+  DWORD n = GetModuleFileNameW(NULL, mp_executable_w, PATH_MAX);
+  if (n == 0 || n >= PATH_MAX) return TRUE;
+  wcscpy(mp_execfolder_w, mp_executable_w);
+  mp_win_strip_verbatim(mp_execfolder_w);
+  if (!PathRemoveFileSpecW(mp_execfolder_w)) return TRUE;
+  if (wcschr(mp_execfolder_w, L'~')) mp_win_long_path(mp_execfolder_w);
+  HANDLE h = CreateFileW(mp_executable_w, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  if (h != INVALID_HANDLE_VALUE) {
+    wchar_t final_path[PATH_MAX];
+    DWORD len = GetFinalPathNameByHandleW(h, final_path, PATH_MAX, VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (len > 0 && len < PATH_MAX) {
+      mp_win_strip_verbatim(final_path);
+      if (PathRemoveFileSpecW(final_path) &&
+          CompareStringOrdinal(final_path, -1, mp_execfolder_w, -1, TRUE) != CSTR_EQUAL) {
+        wcscpy(mp_execfolder_alias_w, final_path);
+      }
+    }
+  }
+  mp_exec_ok = true;
+  return TRUE;
+}
+#else
+static char       mp_executable[PATH_MAX];
+static char       mp_execfolder[PATH_MAX];
+/* The folder Python's getpath derives from the launch path. It follows
+ * symlinks in the final component only (readlink, never realpath), so
+ * directory symlinks such as /tmp -> /private/tmp on macOS survive. Empty
+ * when it is the same as mp_execfolder. */
+static char       mp_execfolder_alias[PATH_MAX];
+static dev_t      mp_exec_dev = 0;
+static bool       mp_exec_ok = false;
+static pthread_once_t mp_exec_once = PTHREAD_ONCE_INIT;
+
+static void mp_parent_dir(char *path) {
+  char *slash = strrchr(path, '/');
+  if (slash == path) slash[1] = '\0';
+  else if (slash != NULL) *slash = '\0';
+}
+
+static void mp_set_execfolder_alias(const char *launched) {
+  char path[PATH_MAX] = {0};
+  mp_get_absolute_path(launched, path, PATH_MAX);
+  for (int links = 0; path[0] == '/' && links < 40; links++) {
+    char target[PATH_MAX];
+    ssize_t n = readlink(path, target, sizeof(target) - 1);
+    if (n < 0) break;
+    target[n] = '\0';
+    if (target[0] == '/') {
+      memcpy(path, target, (size_t)n + 1);
+    } else {
+      mp_parent_dir(path);
+      size_t used = strlen(path);
+      snprintf(path + used, PATH_MAX - used, "/%s", target);
+      mp_normalize_path(path);
+    }
+  }
+  mp_parent_dir(path);
+  if (path[0] == '/' && strcmp(path, mp_execfolder) != 0) {
+    memcpy(mp_execfolder_alias, path, PATH_MAX);
+  }
+}
+
+static void mp_exec_init(void) {
+#if defined(__APPLE__)
+  char launched[PATH_MAX];
   uint32_t bufsize = PATH_MAX;
-  if (_NSGetExecutablePath(path, &bufsize) != 0) return false;
-  char resolved_path[PATH_MAX];
-  if (realpath(path, resolved_path) == NULL) return false;
-  strncpy(executable, resolved_path, PATH_MAX);
-  strncpy(execfolder, dirname(resolved_path), PATH_MAX);
+  if (_NSGetExecutablePath(launched, &bufsize) != 0) return;
+  if (realpath(launched, mp_executable) == NULL) return;
 #else
-  char path[PATH_MAX];
-  ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-  if (len == -1) return false;
-  path[len] = '\0';
-  strncpy(executable, path, PATH_MAX);
-  strncpy(execfolder, dirname(path), PATH_MAX);
+  ssize_t len = readlink("/proc/self/exe", mp_executable, sizeof(mp_executable) - 1);
+  if (len == -1) return;
+  mp_executable[len] = '\0';
+  const char *launched = (const char *) getauxval(AT_EXECFN);
 #endif
-  return true;
+  memcpy(mp_execfolder, mp_executable, PATH_MAX);
+  mp_parent_dir(mp_execfolder);
+#if defined(__APPLE__)
+  mp_set_execfolder_alias(launched);
+#else
+  if (launched != NULL) mp_set_execfolder_alias(launched);
+#endif
+  struct stat st;
+  if (stat(mp_execfolder, &st) == 0) mp_exec_dev = st.st_dev;
+  mp_exec_ok = true;
 }
+#endif
 
-static bool get_executable_path(char *execfolder, char *executable) {
-  if (likely(mp_cached_exec_state == 1)) {
-    memcpy(execfolder, mp_cached_execfolder, PATH_MAX);
-    memcpy(executable, mp_cached_executable, PATH_MAX);
-    return true;
-  }
-  if (mp_cached_exec_state == -1) return false;
-
-  /* First call - resolve and cache. */
-  if (!mp_resolve_exec_path_uncached(execfolder, executable)) {
-    mp_cached_exec_state = -1;
-    return false;
-  }
-  memcpy(mp_cached_execfolder, execfolder, PATH_MAX);
-  memcpy(mp_cached_executable, executable, PATH_MAX);
-  mp_cached_exec_state = 1;
-  return true;
-}
-
-/* find_embedded_file moved to top of file with v2 implementation. */
-
-static void get_virtual_path(char *search_path, const char *execfolder, const char *absolute_path) {
-  size_t execfolder_len = strlen(execfolder);
-  size_t absolute_path_len = strlen(absolute_path);
-
-  if (strncmp(absolute_path, execfolder, execfolder_len) == 0) {
-    search_path[0] = '~';
-    int pos = 0;
-    for (size_t i = execfolder_len; i < absolute_path_len; i++) {
-      pos = i - execfolder_len + 1;
-      search_path[pos] = (absolute_path[i] == '\\') ? '/' : tolower(absolute_path[i]);
-    }
-    search_path[pos + 1] = '\0';
-  } else {
+static bool mp_exec_paths(void) {
 #ifdef _WIN32
-    int pos = 2;
-    search_path[0] = '/';
-    search_path[1] = tolower(absolute_path[0]);
-    for (size_t i = 2; i < absolute_path_len; i++) {
+  InitOnceExecuteOnce(&mp_exec_once, mp_exec_init, NULL, NULL);
 #else
-    int pos = 0;
-    for (size_t i = 0; i < absolute_path_len; i++) {
+  pthread_once(&mp_exec_once, mp_exec_init);
 #endif
-      search_path[pos] = (absolute_path[i] == '\\') ? '/' : tolower(absolute_path[i]);
-      pos++;
-    }
-    search_path[pos] = '\0';
+  return mp_exec_ok;
+}
+
+#ifndef _WIN32
+/* Length of `folder' if `path' lies inside it, else MP_NOT_IN_FOLDER. Matches
+ * on a directory boundary only, so /tmp/x does not claim /tmp/xyz. A trailing
+ * separator on `folder' (the root) is not counted, keeping it in the remainder. */
+static size_t mp_folder_prefix_len(const char *path, const char *folder) {
+  size_t n = strlen(folder);
+  if (n == 0 || strncmp(path, folder, n) != 0) return MP_NOT_IN_FOLDER;
+  if (folder[n - 1] == '/') return n - 1;
+  if (path[n] == '\0' || path[n] == '/') return n;
+  return MP_NOT_IN_FOLDER;
+}
+
+static void get_virtual_path(char *search_path, const char *absolute_path) {
+  size_t prefix = mp_folder_prefix_len(absolute_path, mp_execfolder);
+  if (prefix == MP_NOT_IN_FOLDER && mp_execfolder_alias[0] != '\0') {
+    prefix = mp_folder_prefix_len(absolute_path, mp_execfolder_alias);
   }
+  char *out = search_path;
+  const char *in = absolute_path;
+  if (prefix != MP_NOT_IN_FOLDER) {
+    *out++ = '~';
+    in += prefix;
+  }
+  const char *last = search_path + PATH_MAX - 1;
+  for (; *in && out < last; in++) {
+    *out++ = (*in == '\\') ? '/' : mp_ascii_lower(*in);
+  }
+  *out = '\0';
+}
+
+static bool mp_find_virtual(const char *path, EMAP **found_map) {
+  if (path == NULL || !mp_exec_paths()) return false;
+  char absolute_path[PATH_MAX] = {0};
+  mp_get_absolute_path(path, absolute_path, PATH_MAX);
+  char search_path[PATH_MAX];
+  get_virtual_path(search_path, absolute_path);
+  return find_embedded_file(search_path, found_map);
+}
+#else
+/* Paths are compared case-insensitively, as the file system does. */
+static size_t mp_win_folder_prefix_len(const wchar_t *path, const wchar_t *folder) {
+  size_t n = wcslen(folder);
+  if (n == 0 || wcslen(path) < n ||
+      CompareStringOrdinal(path, (int)n, folder, (int)n, TRUE) != CSTR_EQUAL) {
+    return MP_NOT_IN_FOLDER;
+  }
+  if (folder[n - 1] == L'\\') return n - 1;
+  if (path[n] == L'\0' || path[n] == L'\\') return n;
+  return MP_NOT_IN_FOLDER;
+}
+
+/* The search path for `path': "~/..." below the executable's folder, else
+ * "/<drive>/...", as UTF-8 with ASCII lowercased and '/' separators. Built
+ * from wide strings, so folders outside the ANSI code page match too. */
+static bool mp_win_virtual_path(const wchar_t *path, char *search_path) {
+  if (path == NULL || !mp_exec_paths() || wcslen(path) >= PATH_MAX) return false;
+  wchar_t raw[PATH_MAX], full[PATH_MAX];
+  wcscpy(raw, path);
+  mp_win_strip_verbatim(raw);
+  if (_wfullpath(full, raw, PATH_MAX) == NULL) return false;
+  if (wcschr(full, L'~')) mp_win_long_path(full);
+  size_t prefix = mp_win_folder_prefix_len(full, mp_execfolder_w);
+  if (prefix == MP_NOT_IN_FOLDER && mp_execfolder_alias_w[0] != L'\0') {
+    prefix = mp_win_folder_prefix_len(full, mp_execfolder_alias_w);
+  }
+  char *out = search_path;
+  const wchar_t *rest = full;
+  if (prefix != MP_NOT_IN_FOLDER) {
+    *out++ = '~';
+    rest += prefix;
+  } else if (full[0] != L'\0' && full[1] == L':') {
+    *out++ = '/';
+    *out++ = mp_ascii_lower((char)full[0]);
+    rest += 2;
+  }
+  int room = PATH_MAX - (int)(out - search_path);
+  if (WideCharToMultiByte(CP_UTF8, 0, rest, -1, out, room, NULL, NULL) == 0) return false;
+  for (char *p = out; *p; ++p) *p = (*p == '\\') ? '/' : mp_ascii_lower(*p);
+  return true;
+}
+
+static bool mp_find_virtual_w(const wchar_t *path, EMAP **found_map) {
+  char search_path[PATH_MAX];
+  return mp_win_virtual_path(path, search_path) && find_embedded_file(search_path, found_map);
+}
+
+/* Narrow paths are in the ANSI code page, as for the CRT's narrow APIs. */
+static bool mp_find_virtual(const char *path, EMAP **found_map) {
+  wchar_t wide[PATH_MAX];
+  if (path == NULL || MultiByteToWideChar(CP_ACP, 0, path, -1, wide, PATH_MAX) == 0) return false;
+  return mp_find_virtual_w(wide, found_map);
+}
+#endif
+
+/* Serves a virtual entry at the fd level. The fd is a real read-only fd on
+ * the executable, so the number is unique and close() works on it, while
+ * every read is answered from the EFILE registered for it. */
+static int mp_open_virtual_fd(const EMAP *map, int flags) {
+  if (flags & (O_WRONLY | O_RDWR)) {
+    errno = EROFS;
+    return -1;
+  }
+#ifdef O_DIRECTORY
+  if ((flags & O_DIRECTORY) && map->type != ETYPE_DIRECTORY) {
+    errno = ENOTDIR;
+    return -1;
+  }
+#endif
+  EFILE *e = (EFILE*)calloc(1, sizeof *e);
+  if (e == NULL) {
+    errno = ENOMEM;
+    return -1;
+  }
+  if (!mp_efile_init_virtual(e, map)) {
+    free(e);
+    return -1;
+  }
+#ifdef _WIN32
+  int fakefd = _wopen(mp_executable_w, _O_RDONLY | _O_BINARY | (flags & _O_NOINHERIT));
+#else
+  int fakefd = open(mp_executable, O_RDONLY | (flags & O_CLOEXEC));
+#endif
+  if (fakefd < 0) {
+    mp_efile_destroy(e);
+    return -1;
+  }
+  if (!mp_fd_register(fakefd, e)) {
+    close(fakefd);
+    mp_efile_destroy(e);
+    errno = EMFILE;
+    return -1;
+  }
+  return fakefd;
+}
+
+/* fopen() modes that would write: the embedded files are read-only. */
+static bool mp_mode_writes(const char *mode) {
+  return mode != NULL && (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+'));
+}
+
+/* lseek() on a virtual fd. Any position >= 0 is valid, past EOF included
+ * (reads there return 0); a failed seek leaves the position unchanged. */
+static int64_t mp_virtual_seek(EFILE *e, int64_t offset, int whence) {
+  const char *base = e->end - e->size;
+  int64_t target;
+  switch (whence) {
+    case SEEK_SET: target = offset; break;
+    case SEEK_CUR: target = (int64_t)(e->pos - base) + offset; break;
+    case SEEK_END: target = (int64_t)e->size + offset; break;
+    default: errno = EINVAL; return -1;
+  }
+  if (target < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  mp_unget_restore(e);
+  e->pos = base + target;
+#ifdef _WIN32
+  mp_sync_out(e);
+#endif
+  return target;
+}
+
+#ifndef _WIN32
+/* Each entry gets its own inode number on the executable's device, so
+ * samefile() and ismount() treat embedded files like files next to it. */
+#define MP_VIRTUAL_INO_BASE ((ino_t)0x4d50000000000000ULL)
+static void mp_fill_stat(const EMAP *map, struct stat *buf) {
+  memset(buf, 0, sizeof *buf);
+  buf->st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+  buf->st_mode |= (map->type == ETYPE_DIRECTORY) ? S_IFDIR : S_IFREG;
+  buf->st_size = mp_uncompressed_size(map);
+  buf->st_nlink = 1;
+  buf->st_ino = MP_VIRTUAL_INO_BASE + (ino_t)(map - mp_entries);
+  buf->st_dev = mp_exec_dev;
+  int64_t ns = mp_mtime_ns(map);
+  struct timespec t = { (time_t)(ns / 1000000000), (long)(ns % 1000000000) };
+#ifdef __APPLE__
+  buf->st_atimespec = buf->st_mtimespec = buf->st_ctimespec = buf->st_birthtimespec = t;
+#else
+  buf->st_atim = buf->st_mtim = buf->st_ctim = t;
+#endif
+}
+#endif
+
+/* Whether an entry of the directory on disk behind a virtual directory is
+ * left out of its listing: the embedded entries win, and "." and ".." are
+ * not listed. `name' is UTF-8. */
+static bool mp_shadowed(const EMAP *dir_map, const char *name) {
+  if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return true;
+  char vpath[PATH_MAX];
+  int n = snprintf(vpath, PATH_MAX, "%s/%s", mp_path_of(dir_map), name);
+  EMAP *map;
+  return n > 0 && n < PATH_MAX && find_embedded_file(vpath, &map);
 }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -756,40 +1217,47 @@ extern int     __real_close(int fd);
  * and return the resulting search path. Useful for verifying path
  * translation without going through fopen. */
 void mp_resolve_virtual_path_for_test(const char *input, char *out, size_t out_size) {
-  char absolute_path[PATH_MAX] = {0};
-  mp_get_absolute_path(input, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {0}, executable[PATH_MAX] = {0};
-  if (!get_executable_path(execfolder, executable)) {
-    if (out_size > 0) out[0] = '\0';
-    return;
-  }
   char search_path[PATH_MAX] = {0};
-  get_virtual_path(search_path, execfolder, absolute_path);
+#ifdef _WIN32
+  wchar_t wide[PATH_MAX];
+  if (MultiByteToWideChar(CP_ACP, 0, input, -1, wide, PATH_MAX) == 0 ||
+      !mp_win_virtual_path(wide, search_path)) {
+    search_path[0] = '\0';
+  }
+#else
+  if (mp_exec_paths()) {
+    char absolute_path[PATH_MAX] = {0};
+    mp_get_absolute_path(input, absolute_path, PATH_MAX);
+    get_virtual_path(search_path, absolute_path);
+  }
+#endif
+  if (out_size == 0) return;
   strncpy(out, search_path, out_size - 1);
   out[out_size - 1] = '\0';
 }
 
 MP_DECL(EFILE*) mp_fopen(const char* file, const char* mode) {
-  const char *dbg = getenv("MP_EMBED_DEBUG");
-  if (dbg && *dbg) fprintf(stderr, "[mp_embed] mp_fopen: '%s'\n", file ? file : "(null)");
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-    if (dbg && *dbg) fprintf(stderr, "[mp_embed]   abs='%s' virt='%s'\n", absolute_path, search_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
-      /* User-facing virtual fopen returns an EFILE wrapper - mp_fread/
-       * mp_fseek/etc check the EHANDLE_VIRTUAL magic and serve from
-       * embed memory directly. libstdc++.a, which doesn't go through
-       * our macros, takes the __wrap_fopen path further down instead. */
-      EFILE *e = (EFILE *) calloc(1, sizeof *e);
-      mp_efile_init_virtual(e, map);
-      return e;
+  if (mp_debug()) fprintf(stderr, "[mp_embed] mp_fopen: '%s'\n", file ? file : "(null)");
+  EMAP *map;
+  if (mp_find_virtual(file, &map) && map->type == ETYPE_FILE) {
+    if (mp_mode_writes(mode)) {
+      errno = EROFS;
+      return NULL;
     }
+    /* User-facing virtual fopen returns an EFILE wrapper - mp_fread/
+     * mp_fseek/etc check the EHANDLE_VIRTUAL magic and serve from
+     * embed memory directly. libstdc++.a, which doesn't go through
+     * our macros, takes the __wrap_fopen path further down instead. */
+    EFILE *e = (EFILE *) calloc(1, sizeof *e);
+    if (e == NULL) {
+      errno = ENOMEM;
+      return NULL;
+    }
+    if (!mp_efile_init_virtual(e, map)) {
+      free(e);
+      return NULL;
+    }
+    return e;
   }
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -839,14 +1307,8 @@ MP_DECL(EFILE*) mp_fopen(const char* file, const char* mode) {
  * EFILE bound to it. mp_fd2file is also used by the existing mp_open
  * fakefd registry so this is shared state. */
 static EFILE *mp_lookup_virtual_fd(int fd) {
-    if (!mp_fd2file_initialized) return NULL;
-    for (int i = 0; i < 512; i++) {
-        if (mp_fd2file[i].fd == fd) {
-            EFILE *e = mp_fd2file[i].f;
-            return (e && e->handle_type == EHANDLE_VIRTUAL) ? e : NULL;
-        }
-    }
-    return NULL;
+    EFILE *e = mp_fd_lookup(fd);
+    return (e && e->handle_type == EHANDLE_VIRTUAL) ? e : NULL;
 }
 
 /* __wrap_fopen serves precompiled library callers (libstdc++.a's
@@ -857,47 +1319,20 @@ static EFILE *mp_lookup_virtual_fd(int fd) {
  * fakefd, registered in mp_fd2file - the __wrap_read/lseek/fstat
  * functions look the fakefd up and serve from embed memory. */
 FILE *__wrap_fopen(const char *path, const char *mode) {
-    /* Path translation: same as mp_fopen, but we want our own EFILE
-     * + real FILE* rather than the user-facing EFILE wrapper. */
-    char absolute_path[PATH_MAX] = {0};
-    mp_get_absolute_path(path, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {0}, executable[PATH_MAX] = {0};
-    if (!get_executable_path(execfolder, executable))
-        return __real_fopen(path, mode);
-    char search_path[PATH_MAX] = {0};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
     EMAP *map = NULL;
-    if (!find_embedded_file(search_path, &map) || map->type != ETYPE_FILE)
+    if (!mp_find_virtual(path, &map) || map->type != ETYPE_FILE)
         return __real_fopen(path, mode);
+    if (mp_mode_writes(mode)) { errno = EROFS; return NULL; }
 
     EFILE *e = (EFILE*)calloc(1, sizeof *e);
     if (!e) return NULL;
-    mp_efile_init_virtual(e, map);
-    init_fd2file();
+    if (!mp_efile_init_virtual(e, map)) { free(e); return NULL; }
     int fakefd = open("/dev/null", O_RDONLY);
     if (fakefd < 0) { mp_efile_destroy(e); return NULL; }
-    bool registered = false;
-    pthread_mutex_lock(&mp_fd2file_mutex);
-    for (int i = 0; i < 512; i++) {
-        if (mp_fd2file[i].fd == -1) {
-            mp_fd2file[i].fd = fakefd;
-            mp_fd2file[i].f  = e;
-            registered = true;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&mp_fd2file_mutex);
-    if (!registered) { __real_close(fakefd); mp_efile_destroy(e); return NULL; }
+    if (!mp_fd_register(fakefd, e)) { __real_close(fakefd); mp_efile_destroy(e); return NULL; }
     FILE *f = fdopen(fakefd, "rb");
     if (!f) {
-        pthread_mutex_lock(&mp_fd2file_mutex);
-        for (int i = 0; i < 512; i++) {
-            if (mp_fd2file[i].fd == fakefd) {
-                mp_fd2file[i].fd = -1; mp_fd2file[i].f = NULL; break;
-            }
-        }
-        pthread_mutex_unlock(&mp_fd2file_mutex);
+        mp_fd_unregister(fakefd);
         __real_close(fakefd); mp_efile_destroy(e); return NULL;
     }
     return f;
@@ -906,7 +1341,7 @@ FILE *__wrap_fopen(const char *path, const char *mode) {
 ssize_t __wrap_read(int fd, void *buf, size_t n) {
     EFILE *e = mp_lookup_virtual_fd(fd);
     if (!e) return __real_read(fd, buf, n);
-    size_t avail = (size_t)(e->end - e->pos);
+    size_t avail = mp_avail(e);
     size_t to_read = (n < avail) ? n : avail;
     if (to_read == 0) return 0;
     memcpy(buf, e->pos, to_read);
@@ -917,57 +1352,21 @@ ssize_t __wrap_read(int fd, void *buf, size_t n) {
 off_t __wrap_lseek(int fd, off_t offset, int whence) {
     EFILE *e = mp_lookup_virtual_fd(fd);
     if (!e) return __real_lseek(fd, offset, whence);
-    const char *base = e->end - e->size;
-    const char *newp;
-    switch (whence) {
-        case SEEK_SET: newp = base + offset; break;
-        case SEEK_CUR: newp = e->pos + offset; break;
-        case SEEK_END: newp = e->end + offset; break;
-        default: errno = EINVAL; return (off_t)-1;
-    }
-    if (newp < base || newp > e->end) { errno = EINVAL; return (off_t)-1; }
-    e->pos = newp;
-    return (off_t)(newp - base);
+    return (off_t)mp_virtual_seek(e, offset, whence);
 }
 
 int __wrap_fstat(int fd, struct stat *st) {
     EFILE *e = mp_lookup_virtual_fd(fd);
     if (!e) return __real_fstat(fd, st);
-    memset(st, 0, sizeof *st);
-    st->st_size = (off_t)e->size;
-    st->st_mode = S_IFREG | 0444;
-    st->st_nlink = 1;
+    mp_fill_stat(e->map, st);
     return 0;
-}
-
-/* Helper: drop the registry entry for a given fakefd if it's one of
- * ours. Returns the EFILE that should be freed (or NULL). The caller
- * is responsible for the actual free outside the lock. */
-static EFILE *mp_unregister_fakefd(int fd) {
-    EFILE *to_free = NULL;
-    pthread_mutex_lock(&mp_fd2file_mutex);
-    if (mp_fd2file_initialized) {
-        for (int i = 0; i < 512; i++) {
-            if (mp_fd2file[i].fd == fd) {
-                EFILE *e = mp_fd2file[i].f;
-                if (e && e->handle_type == EHANDLE_VIRTUAL) {
-                    to_free = e;
-                    mp_fd2file[i].fd = -1;
-                    mp_fd2file[i].f  = NULL;
-                }
-                break;
-            }
-        }
-    }
-    pthread_mutex_unlock(&mp_fd2file_mutex);
-    return to_free;
 }
 
 int __wrap_close(int fd) {
     /* Drop our registry entry BEFORE closing the kernel fd. Otherwise
      * the kernel can recycle the fd into another thread's open() while
      * our slot still points at the (now-freed) EFILE. */
-    EFILE *to_free = mp_unregister_fakefd(fd);
+    EFILE *to_free = mp_fd_unregister(fd);
     int r = __real_close(fd);
     if (to_free) mp_efile_destroy(to_free);
     return r;
@@ -980,7 +1379,7 @@ int __wrap_close(int fd) {
 int __wrap_fclose(FILE *f) {
     int fd = -1;
     if (f) fd = fileno(f);
-    EFILE *to_free = (fd >= 0) ? mp_unregister_fakefd(fd) : NULL;
+    EFILE *to_free = mp_fd_unregister(fd);
     int r = __real_fclose(f);
     if (to_free) mp_efile_destroy(to_free);
     return r;
@@ -1011,51 +1410,29 @@ MP_DECL(int) mp_open(const char *file, int flags, int mode) {
 #else
 MP_DECL(int) mp_open(const char *file, int flags, mode_t mode) {
 #endif
-  init_fd2file();
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (!get_executable_path(execfolder, executable)) {
-    return open(file, flags, mode);
-  }
-  char search_path[PATH_MAX] = {};
-  get_virtual_path(search_path, execfolder, absolute_path);
-
   EMAP *map;
-  if (find_embedded_file(search_path, &map)) {
-    EFILE *e = (EFILE*)calloc(1, sizeof *e);
-    mp_efile_init_virtual(e, map);
-    int fakefd = open(executable, O_RDONLY);
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].fd == -1) {
-        mp_fd2file[i].fd = fakefd;
-        mp_fd2file[i].f = e;
-        break;
-      }
-    }
-    return fakefd;
-  }
+  if (mp_find_virtual(file, &map)) return mp_open_virtual_fd(map, flags);
   return open(file, flags, mode);
 }
 
 #ifdef _WIN32
 MP_DECL(EFILE*) mp_wfopen(const wchar_t *wfile, const wchar_t *mode) {
-  char file[PATH_MAX] = {};
-  wcstombs(file, wfile, PATH_MAX);
-
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map) && map->type == ETYPE_FILE) {
-      EFILE *e = (EFILE *) calloc(1, sizeof *e);
-      mp_efile_init_virtual(e, map);
-      return e;
+  EMAP *map;
+  if (mp_find_virtual_w(wfile, &map) && map->type == ETYPE_FILE) {
+    if (mode != NULL && wcspbrk(mode, L"wa+") != NULL) {
+      errno = EROFS;
+      return NULL;
     }
+    EFILE *e = (EFILE *) calloc(1, sizeof *e);
+    if (e == NULL) {
+      errno = ENOMEM;
+      return NULL;
+    }
+    if (!mp_efile_init_virtual(e, map)) {
+      free(e);
+      return NULL;
+    }
+    return e;
   }
 
   FILE* f = _wfopen(wfile, mode);
@@ -1117,128 +1494,52 @@ MP_DECL(int) mp__wsopen_s(int *pfh, const wchar_t *filename, int oflag, int shfl
 }
 
 MP_DECL(int) mp_wopen(const wchar_t *wfile, int flags, int mode) {
-  init_fd2file();
-  char file[PATH_MAX] = {};
-  wcstombs((char*)&file, wfile, PATH_MAX);
-
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (!get_executable_path(execfolder, executable)) {
-    return _wopen(wfile, flags, mode);
-  }
-  char search_path[PATH_MAX] = {};
-  get_virtual_path(search_path, execfolder, absolute_path);
-
   EMAP *map;
-  if (find_embedded_file(search_path, &map)) {
-    EFILE* e = (EFILE*)calloc(1, sizeof *e);
-    mp_efile_init_virtual(e, map);
-    int fakefd = open(executable, O_RDONLY);
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].fd == -1) {
-        mp_fd2file[i].fd = fakefd;
-        mp_fd2file[i].f = e;
-        break;
-      }
-    }
-    return fakefd;
-  }
-
+  if (mp_find_virtual_w(wfile, &map)) return mp_open_virtual_fd(map, flags);
   return _wopen(wfile, flags, mode);
 }
 #else
-MP_DECL(int) mp_openat(int dirfd, const char *pathname, int flags, mode_t mode) {
-  init_fd2file();
-  char full_virtual_path[PATH_MAX] = {};
-  bool is_virtual_context = false;
-
-  // Handle cases where pathname is relative to a virtual directory fd
-  if (pathname[0] != '/') {
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].fd == dirfd) {
-        is_virtual_context = true;
-        EFILE *e = mp_fd2file[i].f;
-        // We found the fd, it corresponds to a virtual file.
-        if (e->map->type != ETYPE_DIRECTORY) {
-          errno = ENOTDIR;
-          return -1;
-        }
-
-        // It's a directory, construct the full virtual path.
-        snprintf(full_virtual_path, PATH_MAX, "%s/%s", e->name, pathname);
-
-        // The base virtual path is already normalized, but the new one might not be.
-        mp_normalize_path(full_virtual_path);
-        break; // Found our context, exit the loop
-      }
-    }
+/* `rel' resolved against the virtual directory `dir' (an entry's "~/..." or
+ * "/..." path). ".." stops at the root of the embedded tree. */
+static void mp_virtual_join(char *out, const char *dir, const char *rel) {
+  bool relative_root = dir[0] == '~';
+  snprintf(out, PATH_MAX - 1, "%s/%s", relative_root ? dir + 1 : dir, rel);
+  mp_normalize_path(out);
+  if (relative_root) {
+    memmove(out + 1, out, strlen(out) + 1);
+    out[0] = '~';
   }
+}
 
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (!get_executable_path(execfolder, executable)) {
-    // If we can't get executable path, we cannot proceed with virtual file logic.
-    return openat(dirfd, pathname, flags, mode);
-  }
-
-  // If we are not in a virtual context, resolve the path from CWD or absolute.
-  if (!is_virtual_context && pathname[0] == '/') {
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
-    get_virtual_path(full_virtual_path, execfolder, absolute_path);
-  }
-
-  EMAP *map;
-  if (find_embedded_file(full_virtual_path, &map)) {
-    // Virtual files are read-only.
-    if ((flags & O_WRONLY) || (flags & O_RDWR)) {
-      errno = EROFS;
-      return -1;
-    }
-
-    // Do not allow opening a directory with open/openat unless O_DIRECTORY is specified.
-    if (map->type == ETYPE_DIRECTORY && !(flags & O_DIRECTORY)) {
-      errno = EISDIR;
-      return -1;
-    }
-
-    if (map->type == ETYPE_FILE && (flags & O_DIRECTORY)) {
+/* Lookup for the *at() calls: 1 if `*map' is the entry, 0 if the path is not
+ * virtual, -1 (errno set) if it names nothing inside a virtual directory.
+ * Relative paths against a real dirfd stay with the OS, which alone knows
+ * where that directory is. */
+static int mp_find_virtual_at(int dirfd, const char *pathname, EMAP **map) {
+  EFILE *dir = pathname[0] == '/' ? NULL : mp_fd_lookup(dirfd);
+  if (dir != NULL) {
+    if (dir->map->type != ETYPE_DIRECTORY) {
       errno = ENOTDIR;
       return -1;
     }
-
-    EFILE *e = (EFILE*)calloc(1, sizeof *e);
-    mp_efile_init_virtual(e, map);
-
-    // Use the executable itself for the underlying native fd
-    int fakefd = open(executable, O_RDONLY);
-    if (fakefd == -1) {
-      mp_efile_destroy(e);
-      return -1; // errno will be set by open()
-    }
-
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].fd == -1) {
-        mp_fd2file[i].fd = fakefd;
-        mp_fd2file[i].f = e;
-        return fakefd;
-      }
-    }
-
-    // No more file descriptors available in our virtual table
-    mp_efile_destroy(e);
-    close(fakefd);
-    errno = EMFILE;
-    return -1;
-  }
-
-  // If we determined the context was a virtual directory but didn't find the file
-  if (is_virtual_context) {
+    char vpath[PATH_MAX];
+    mp_virtual_join(vpath, dir->name, pathname);
+    if (find_embedded_file(vpath, map)) return 1;
     errno = ENOENT;
     return -1;
   }
+  if (pathname[0] != '/' && dirfd != AT_FDCWD) return 0;
+  return mp_find_virtual(pathname, map) ? 1 : 0;
+}
 
-  // Fallback to the real openat for all other cases (non-virtual paths)
+MP_DECL(int) mp_openat(int dirfd, const char *pathname, int flags, mode_t mode) {
+  EMAP *map;
+  int found = mp_find_virtual_at(dirfd, pathname, &map);
+  if (found > 0) return mp_open_virtual_fd(map, flags);
+  if (found < 0) {
+    if (errno == ENOENT && (flags & O_CREAT)) errno = EROFS;
+    return -1;
+  }
   return openat(dirfd, pathname, flags, mode);
 }
 #endif
@@ -1262,60 +1563,28 @@ MP_DECL(int) mp_fclose(void* e) {
 
   // Handle virtual file streams.
   if (efile->handle_type == EHANDLE_VIRTUAL) {
-    // To close a virtual file, we must find its associated native file
-    // descriptor in our map and close it.
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].f == efile) {
-        int fd_to_close = mp_fd2file[i].fd;
-
-        // Important: Clear the map entry to prevent dangling pointers
-        // and incorrect reuse of the slot.
-        mp_fd2file[i].fd = -1;
-        mp_fd2file[i].f = NULL;
-
-        mp_efile_destroy(efile);
-
-        // Finally, close the underlying native file descriptor.
-        // The return value of the underlying close() is the result of this operation.
-        return close(fd_to_close);
-      }
+    // A virtual stream only owns an fd if mp_fileno() handed one out.
+    int fd_to_close = mp_fd_of(efile);
+    if (fd_to_close != -1) {
+      mp_fd_unregister(fd_to_close);
+      mp_efile_destroy(efile);
+      return close(fd_to_close);
     }
   }
 
-  // Fallback for unrecognized handle types or for virtual files that
-  // were somehow created without a map entry (which indicates a bug).
-  // The best we can do is free the wrapper to prevent a memory leak.
   mp_efile_destroy(efile);
   return 0;
 }
 
 MP_DECL(int) mp_close(int fd) {
-  init_fd2file();
-  EFILE *e = NULL;
-  int fd_idx = -1;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      fd_idx = i;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_unregister(fd);
   if (e == NULL) {
     return close(fd);
   }
   if (e->handle_type != EHANDLE_VIRTUAL) {
     fclose(e->f);
-    if (fd_idx != -1) {
-      mp_fd2file[fd_idx].fd = -1;
-      mp_fd2file[fd_idx].f = NULL;
-    }
     mp_efile_destroy(e);
     return 0;
-  }
-
-  if (fd_idx != -1) {
-    mp_fd2file[fd_idx].fd = -1;
-    mp_fd2file[fd_idx].f = NULL;
   }
   mp_efile_destroy(e);
 
@@ -1325,19 +1594,53 @@ MP_DECL(int) mp_close(int fd) {
 
 MP_DECL(EFILE*) mp_freopen(const char *filename, const char *mode, void *e) {
   if (MP_FOREIGN_PTR) {
-    EFILE* e = (EFILE*)calloc(1, sizeof *e);
-    e->handle_type = EHANDLE_NATIVE;
-    e->f = freopen(filename, mode, (FILE*)e);
-    return e;
+    return (EFILE*)freopen(filename, mode, (FILE*)e);
   }
-  if (((EFILE*)e)->handle_type == EHANDLE_NATIVE) {
-    EFILE* e = (EFILE*)calloc(1, sizeof *e);
-    e->handle_type = EHANDLE_NATIVE;
-    e->f = freopen(filename, mode, ((EFILE*)e)->f);
-    return e;
+  EFILE *stream = (EFILE*)e;
+  if (stream->handle_type == EHANDLE_NATIVE) {
+    FILE *f = freopen(filename, mode, stream->f);
+    if (f == NULL) {
+      free(stream);  /* freopen() closes the stream even when it fails */
+      return NULL;
+    }
+    stream->f = f;
+    return stream;
   }
 
-  return NULL;
+  /* A virtual stream is reopened in place, so callers that keep using the
+   * pointer they passed in (the usual idiom) see the new file. */
+  if (filename == NULL) {
+    if (!mp_mode_writes(mode)) return stream;
+    mp_fclose(stream);
+    errno = EROFS;
+    return NULL;
+  }
+  int fd = mp_fd_of(stream);
+  if (fd != -1) {
+    mp_fd_unregister(fd);
+    close(fd);
+  }
+  free(stream->owned_buf);
+  memset(stream, 0, sizeof *stream);
+  EMAP *map;
+  if (mp_find_virtual(filename, &map) && map->type == ETYPE_FILE) {
+    if (!mp_mode_writes(mode) && mp_efile_init_virtual(stream, map)) return stream;
+    if (mp_mode_writes(mode)) errno = EROFS;
+    free(stream);
+    return NULL;
+  }
+#if defined(__linux__) || defined(__APPLE__)
+  FILE *f = __real_fopen(filename, mode);
+#else
+  FILE *f = fopen(filename, mode);
+#endif
+  if (f == NULL) {
+    free(stream);
+    return NULL;
+  }
+  stream->handle_type = EHANDLE_NATIVE;
+  stream->f = f;
+  return stream;
 }
 
 MP_DECL(EFILE*) mp_tmpfile() {
@@ -1365,11 +1668,7 @@ MP_DECL(bool) mp_feof(void* e) {
     return feof(((EFILE*)e)->f);
   }
 
-  if (((EFILE*)e)->end < ((EFILE*)e)->pos){
-    errno = EINVAL;
-    return true;
-  }
-  return (((EFILE*)e)->end == ((EFILE*)e)->pos);
+  return (((EFILE*)e)->err & MP_EFILE_EOF) != 0;
 }
 
 MP_DECL(size_t) mp_fread(void* ptr, size_t size, size_t count, void* e) {
@@ -1385,8 +1684,7 @@ MP_DECL(size_t) mp_fread(void* ptr, size_t size, size_t count, void* e) {
    * is left unchanged. */
   if (size == 0 || count == 0) return 0;
 
-  const char *dbg = getenv("MP_EMBED_DEBUG");
-  if (dbg && *dbg) {
+  if (mp_debug()) {
     EFILE *ef = (EFILE*)e;
 #ifdef _WIN32
     fprintf(stderr, "[mp_embed] mp_fread size=%zu count=%zu pos=%p crt_ptr=%p crt_cnt=%d\n",
@@ -1401,13 +1699,14 @@ MP_DECL(size_t) mp_fread(void* ptr, size_t size, size_t count, void* e) {
   mp_sync_in((EFILE*)e);
 #endif
 
-  size_t avail = (size_t)(((EFILE*)e)->end - ((EFILE*)e)->pos);
-  size_t want  = size * count;
+  size_t avail = mp_avail((EFILE*)e);
+  size_t want  = (count > (size_t)-1 / size) ? (size_t)-1 : size * count;
   size_t result;
   if (avail < want) {
     size_t scount = avail;
     memcpy(ptr, (void*)((EFILE*)e)->pos, scount);
-    ((EFILE*)e)->pos = ((EFILE*)e)->end;
+    ((EFILE*)e)->pos += scount;
+    ((EFILE*)e)->err |= MP_EFILE_EOF;
     result = scount / size;
   } else {
     memcpy(ptr, (void*)((EFILE*)e)->pos, want);
@@ -1426,54 +1725,54 @@ MP_DECL(int) mp_read(int fd, void *buf, unsigned int count) {
 #else
 MP_DECL(ssize_t) mp_read(int fd, void *buf, size_t count) {
 #endif
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e == NULL) {
     return read(fd, buf, count);
   }
-
-  if (e->end - e->pos < count){
-    size_t scount = e->end - e->pos;
-    memcpy(buf, (void*)e->pos, scount);
-    e->pos = e->end;
-    return (scount);
+  if (e->map != NULL && e->map->type == ETYPE_DIRECTORY) {
+    errno = EISDIR;
+    return -1;
   }
 
-  memcpy(buf, (void*)e->pos, count);
-  e->pos = (char*)e->pos + count;
-  return count;
+#ifdef _WIN32
+  mp_sync_in(e);
+#endif
+  size_t n = mp_avail(e);
+  if (count < n) n = count;
+  if (n != 0) memcpy(buf, e->pos, n);
+  e->pos += n;
+#ifdef _WIN32
+  mp_sync_out(e);
+#endif
+  return n;
 }
 
+/* Reads at an absolute offset without moving the file position. */
 MP_DECL(ssize_t) mp_pread(int fd, void *buf, size_t count, off_t offset) {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e == NULL) {
-    return read(fd, buf, count);
+#ifdef _WIN32
+    __int64 saved = _lseeki64(fd, 0, SEEK_CUR);
+    if (saved < 0 || _lseeki64(fd, offset, SEEK_SET) < 0) return -1;
+    int n = _read(fd, buf, (unsigned int)count);
+    _lseeki64(fd, saved, SEEK_SET);
+    return n;
+#else
+    return pread(fd, buf, count, offset);
+#endif
   }
-
-  if (offset >= e->size) {
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if ((uint64_t)offset >= e->size) {
     return 0; // Offset is beyond the end of the file
   }
 
-  size_t available = e->end - e->pos;
-  if (offset + count > e->size) {
-    count = e->size - offset; // Adjust count to not exceed the file size
-  }
-
-  memcpy(buf, e->pos + offset, count);
-  return count;
+  size_t n = e->size - (size_t)offset;
+  if (count < n) n = count;
+  memcpy(buf, (e->end - e->size) + offset, n);
+  return (ssize_t)n;
 }
 
 MP_DECL(int) mp_fgetpos(void* e, fpos_t* pos) {
@@ -1485,6 +1784,9 @@ MP_DECL(int) mp_fgetpos(void* e, fpos_t* pos) {
     return fgetpos(((EFILE*)e)->f, pos);
   }
 
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
   // fgetpos should store the absolute offset from the start of the file.
   // We use the same logic as mp_ftell_priv to get this value.
   int64_t offset = ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
@@ -1515,9 +1817,15 @@ MP_DECL(char*) mp_fgets(char* str, int num, void* e ) {
     return fgets(str, num, ((EFILE*)e)->f);
   }
 
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
   //if num 0 or 1 e->pos will not advance
   if (num <= 1) return NULL;
-  if (mp_feof(e)) return NULL;
+  if (mp_avail((EFILE*)e) == 0) {
+    ((EFILE*)e)->err |= MP_EFILE_EOF;
+    return NULL;
+  }
 
   int i = 0;
 
@@ -1525,9 +1833,16 @@ MP_DECL(char*) mp_fgets(char* str, int num, void* e ) {
   {
     //i < (num - 1) so still room for two characters: \n and \0
     if ((str[i++] = *(((EFILE*)e)->pos++)) == '\n') break;
-    if (mp_feof(e) || (i == (num - 1))) break;
+    if (i == (num - 1)) break;
+    if (mp_avail((EFILE*)e) == 0) {
+      ((EFILE*)e)->err |= MP_EFILE_EOF;
+      break;
+    }
   }
   str[i] = '\0';
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
   return str;
 }
 
@@ -1541,18 +1856,19 @@ MP_DECL(ssize_t) mp_getline(char **lineptr, size_t *n, void* e) {
     return getline(lineptr, n, ((EFILE*)e)->f);
   }
 
-  // Handle virtual files
-  if (mp_feof(e)) {
+  if (lineptr == NULL || n == NULL) {
+    errno = EINVAL;
     return -1;
   }
 
   // Initialize buffer if needed
   if (*lineptr == NULL || *n == 0) {
-    *n = 128; // Initial buffer size
-    *lineptr = (char*)malloc(*n);
-    if (*lineptr == NULL) {
+    char *new_ptr = (char*)realloc(*lineptr, 128);
+    if (new_ptr == NULL) {
       return -1;
     }
+    *lineptr = new_ptr;
+    *n = 128; // Initial buffer size
   }
 
   size_t pos = 0;
@@ -1606,8 +1922,10 @@ MP_DECL(int) mp_fgetc(void* e) {
   mp_sync_in((EFILE*)e);
 #endif
 
-  if(mp_feof(e))
+  if (mp_avail((EFILE*)e) == 0) {
+    ((EFILE*)e)->err |= MP_EFILE_EOF;
     return -1;
+  }
   int ch = (int)(unsigned char)(*(((EFILE*)e)->pos++));
 #ifdef _WIN32
   mp_sync_out((EFILE*)e);
@@ -1647,6 +1965,9 @@ int64_t mp_ftell_priv(void* e) {
 #endif
   }
 
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
   return ((EFILE*)e)->pos - (((EFILE*)e)->end - ((EFILE*)e)->size);
 }
 
@@ -1670,27 +1991,8 @@ int mp_fseek_priv(void* e, int64_t offset, int origin) {
 #ifdef _WIN32
   mp_sync_in((EFILE*)e);
 #endif
-
-  /* Compute the new position into a local first so we can validate
-   * before mutating - leaving pos in a half-updated state on failure
-   * (and then having a subsequent fread return garbage past the end)
-   * was a real bug. */
-  const char *base = ((EFILE*)e)->end - ((EFILE*)e)->size;
-  const char *new_pos = ((EFILE*)e)->pos;
-  if (origin == SEEK_SET)      new_pos = base + offset;
-  else if (origin == SEEK_CUR) new_pos = ((EFILE*)e)->pos + offset;
-  else if (origin == SEEK_END) new_pos = ((EFILE*)e)->end + offset;
-  else { errno = EINVAL; return -1; }
-
-  if (new_pos < base || new_pos > ((EFILE*)e)->end) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  ((EFILE*)e)->pos = new_pos;
-#ifdef _WIN32
-  mp_sync_out((EFILE*)e);
-#endif
+  if (mp_virtual_seek((EFILE*)e, offset, origin) < 0) return -1;
+  ((EFILE*)e)->err &= ~MP_EFILE_EOF;
   return 0;
 }
 
@@ -1725,7 +2027,42 @@ MP_DECL(int) mp_fscanf(void *e, const char *format, ...) {
     va_end(args);
     return result;
   }
-  return 0;
+
+  /* Scan a private stream over the unread bytes, then advance by what the
+   * scan consumed. Windows has no fmemopen(), so it goes through tmpfile(). */
+  EFILE *ef = (EFILE*)e;
+#ifdef _WIN32
+  mp_sync_in(ef);
+#endif
+  size_t avail = mp_avail(ef);
+  if (avail == 0) {
+    ef->err |= MP_EFILE_EOF;
+    return EOF;
+  }
+#ifdef _WIN32
+  FILE *mem = tmpfile();
+  if (mem == NULL) return EOF;
+  if (fwrite(ef->pos, 1, avail, mem) != avail) {
+    fclose(mem);
+    return EOF;
+  }
+  rewind(mem);
+#else
+  FILE *mem = fmemopen((void*)ef->pos, avail, "r");
+  if (mem == NULL) return EOF;
+#endif
+  va_list args;
+  va_start(args, format);
+  int result = vfscanf(mem, format, args);
+  va_end(args);
+  long used = ftell(mem);
+  if (feof(mem)) ef->err |= MP_EFILE_EOF;
+  fclose(mem);
+  if (used > 0) ef->pos += used;
+#ifdef _WIN32
+  mp_sync_out(ef);
+#endif
+  return result;
 }
 
 MP_DECL(int) mp_fputc(int character, void *e) {
@@ -1735,7 +2072,8 @@ MP_DECL(int) mp_fputc(int character, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fputc(character, ((EFILE*)e)->f);
   }
-  errno = EACCES;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
   return -1;
 }
 
@@ -1746,7 +2084,8 @@ MP_DECL(int) mp_fputs(const char *str, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fputs(str, ((EFILE*)e)->f);
   }
-  errno = EACCES;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
   return -1;
 }
 
@@ -1765,7 +2104,8 @@ MP_DECL(int) mp_fprintf(void *e, const char *format, ...) {
     va_end(args);
     return result;
   }
-  errno = EACCES;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
   return -1;
 }
 MP_DECL(int) mp_vfprintf(void *e, const char *format, va_list args) {
@@ -1775,7 +2115,8 @@ MP_DECL(int) mp_vfprintf(void *e, const char *format, va_list args) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return vfprintf(((EFILE*)e)->f, format, args);
   }
-  errno = EACCES;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
   return -1;
 }
 
@@ -1786,8 +2127,9 @@ MP_DECL(size_t) mp_fwrite(const void *ptr, size_t size, size_t count, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return fwrite(ptr, size, count, ((EFILE*)e)->f);
   }
-  errno = EACCES;
-  return -1;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
+  return 0;
 }
 
 MP_DECL(void) mp_setbuf(void *e, char *buffer) {
@@ -1817,7 +2159,15 @@ MP_DECL(void) mp_rewind(void *e) {
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     rewind(((EFILE*)e)->f);
+    return;
   }
+  EFILE *ef = (EFILE*)e;
+  mp_unget_restore(ef);
+  ef->pos = ef->end - ef->size;
+  ef->err = 0;
+#ifdef _WIN32
+  mp_sync_out(ef);
+#endif
 }
 
 MP_DECL(int) mp_fsetpos(void *e, const fpos_t *pos) {
@@ -1846,7 +2196,9 @@ MP_DECL(void) mp_clearerr(void *e) {
   }
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     clearerr(((EFILE*)e)->f);
+    return;
   }
+  ((EFILE*)e)->err = 0;
 }
 
 MP_DECL(int) mp_ferror(void *e) {
@@ -1856,7 +2208,7 @@ MP_DECL(int) mp_ferror(void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return ferror(((EFILE*)e)->f);
   }
-  return 0;
+  return (((EFILE*)e)->err & MP_EFILE_ERR) != 0;
 }
 
 MP_DECL(int) mp_fileno(void *e) {
@@ -1872,46 +2224,30 @@ MP_DECL(int) mp_fileno(void *e) {
   }
 
   // For a virtual file, first attempt to find the existing file descriptor.
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].f == efile) {
-      // Found the existing mapping, which is the correct behavior.
-      return mp_fd2file[i].fd;
-    }
+  int fd = mp_fd_of(efile);
+  if (fd != -1) {
+    return fd;
   }
 
-  // The stream was not found in the map. We will now
-  // create and add a new file descriptor.
-
-  char execfolder[PATH_MAX] = {}, executable_path[PATH_MAX];
-  // We need the executable path to open a new native handle.
-  if (!get_executable_path(execfolder, executable_path)) {
-    // Cannot get executable path, cannot create a new fd.
+  // The stream has no fd yet: give it one on the executable, registered to
+  // this EFILE, which fclose() closes again.
+  if (!mp_exec_paths()) {
     errno = EBADF;
     return -1;
   }
-
-  // DANGER: Opening a new file descriptor here because the original was lost.
-  int new_fd = open(executable_path, O_RDONLY);
+#ifdef _WIN32
+  int new_fd = _wopen(mp_executable_w, _O_RDONLY | _O_BINARY | _O_NOINHERIT);
+#else
+  int new_fd = open(mp_executable, O_RDONLY | O_CLOEXEC);
+#endif
   if (new_fd == -1) {
-    // The open call failed, return its error.
     return -1;
   }
-
-  // Now, find an empty slot in the map to store this new, leaked descriptor.
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == -1) {
-      mp_fd2file[i].fd = new_fd;
-      mp_fd2file[i].f = efile;
-      // The function now returns a NEW descriptor that the calling code wasn't expecting.
-      return new_fd;
-    }
+  if (!mp_fd_register(new_fd, efile)) {
+    close(new_fd);
+    return -1;
   }
-
-  // If we are here, our virtual descriptor map is full.
-  // We must close the descriptor we just opened and return an error.
-  close(new_fd);
-  errno = EMFILE; // Too many open files
-  return -1;
+  return new_fd;
 }
 
 MP_DECL(int) mp_fflush(void *e) {
@@ -1963,26 +2299,15 @@ MP_DECL(int) mp_ungetc(int character, void *e) {
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) {
     return ungetc(character, ((EFILE*)e)->f);
   }
+  if (character == EOF) return EOF;
 #ifdef _WIN32
   mp_sync_in((EFILE*)e);
 #endif
-  EFILE *ef = (EFILE*)e;
-  /* Move pos back one byte if possible. The C standard allows ungetting
-   * a different character than what was last read; we just store the
-   * caller's character at pos-1 if we can, but for our read-only blob
-   * we just rewind without storing - the next read will get the original
-   * bytes again, which is fine because callers normally unget the same
-   * character they just read. */
-  const char *base = ef->end - ef->size;
-  if (ef->pos > base) {
-    ef->pos--;
-  } else {
-    return -1;  // can't unget at start of file
-  }
+  if (!mp_unget((EFILE*)e, (unsigned char)character)) return EOF;
 #ifdef _WIN32
-  mp_sync_out(ef);
+  mp_sync_out((EFILE*)e);
 #endif
-  return character;
+  return (unsigned char)character;
 }
 
 /* Wide-char IO: needed because MSVC's STL filebuf calls fgetwc/fputwc/
@@ -1994,29 +2319,45 @@ MP_DECL(int) mp_ungetc(int character, void *e) {
 MP_DECL(wint_t) mp_fgetwc(void *e) {
   if (MP_FOREIGN_PTR) return fgetwc((FILE*)e);
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return fgetwc(((EFILE*)e)->f);
-  if (mp_feof(e)) return WEOF;
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
+  if (mp_avail((EFILE*)e) == 0) {
+    ((EFILE*)e)->err |= MP_EFILE_EOF;
+    return WEOF;
+  }
   /* Virtual files are binary blobs. Returning one byte at a time gives
    * MSVC's filebuf code conversion enough to do its work for ASCII /
    * single-byte UTF-8 input. Multibyte conversion is left to upper
    * layers. */
-  return (wint_t)(unsigned char)(*(((EFILE*)e)->pos++));
+  wint_t c = (wint_t)(unsigned char)(*(((EFILE*)e)->pos++));
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
+  return c;
 }
 
 MP_DECL(wint_t) mp_fputwc(wchar_t c, void *e) {
   if (MP_FOREIGN_PTR) return fputwc(c, (FILE*)e);
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return fputwc(c, ((EFILE*)e)->f);
-  errno = EACCES;
+  ((EFILE*)e)->err |= MP_EFILE_ERR;
+  errno = EBADF;
   return WEOF;
 }
 
 MP_DECL(wint_t) mp_ungetwc(wint_t c, void *e) {
   if (MP_FOREIGN_PTR) return ungetwc(c, (FILE*)e);
   if (((EFILE*)e)->handle_type != EHANDLE_VIRTUAL) return ungetwc(c, ((EFILE*)e)->f);
-  if (((EFILE*)e)->pos > ((EFILE*)e)->end - ((EFILE*)e)->size) {
-    --((EFILE*)e)->pos;
-    return c;
-  }
-  return WEOF;
+  /* Virtual streams read wide characters byte by byte (mp_fgetwc). */
+  if (c == WEOF || c > 0xff) return WEOF;
+#ifdef _WIN32
+  mp_sync_in((EFILE*)e);
+#endif
+  if (!mp_unget((EFILE*)e, (unsigned char)c)) return WEOF;
+#ifdef _WIN32
+  mp_sync_out((EFILE*)e);
+#endif
+  return c;
 }
 
 #ifdef _WIN32
@@ -2034,33 +2375,162 @@ MP_DECL(void) mp__unlock_file(void *e) {
 #endif
 
 MP_DECL(EFILE*) mp_fdopen(int fd, const char *mode) {
-  init_fd2file();
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      return mp_fd2file[i].f;
-    }
+  EFILE *virtual_file = mp_fd_lookup(fd);
+  if (virtual_file != NULL) {
+    return virtual_file;
   }
 
   // If this is not a virtual fd, fallback.
+  FILE *f = fdopen(fd, mode);
+  if (f == NULL) {
+    return NULL;
+  }
   EFILE* e = (EFILE*)calloc(1, sizeof *e);
   e->handle_type = EHANDLE_NATIVE;
-  e->f = fdopen(fd, mode);
+  e->f = f;
   return e;
 }
+
+/* A copy of a virtual fd's EFILE, at the same position, for a duplicate of
+ * the fd or of its handle. Unlike OS duplicates, the two do not share the
+ * position afterwards. */
+static EFILE *mp_efile_dup(const EFILE *src) {
+  EFILE *e = (EFILE*)calloc(1, sizeof *e);
+  if (e == NULL) {
+    errno = ENOMEM;
+    return NULL;
+  }
+  /* A directory, or a handle that has not read anything yet. */
+  if (src->owned_buf == NULL) {
+    *e = *src;
+    return e;
+  }
+  if (!mp_efile_init_virtual(e, src->map)) {
+    free(e);
+    return NULL;
+  }
+  int64_t at = src->pos - (src->end - src->size);
+  if (at > 0) mp_virtual_seek(e, at, SEEK_SET);
+  e->err = src->err;
+  return e;
+}
+
+/* Registers `fd2', a new duplicate of a virtual fd, with a copy of its
+ * EFILE. Closes it again on failure. */
+static int mp_fd_adopt(int fd2, const EFILE *src) {
+  EFILE *e = mp_efile_dup(src);
+  if (e != NULL && mp_fd_register(fd2, e)) return fd2;
+  int err = errno;
+  mp_efile_destroy(e);
+  close(fd2);
+  errno = err;
+  return -1;
+}
+
+MP_DECL(int) mp_dup(int fd) {
+  EFILE *e = mp_fd_lookup(fd);
+#ifdef _WIN32
+  int fd2 = _dup(fd);
+#else
+  int fd2 = dup(fd);
+#endif
+  return (e != NULL && fd2 >= 0) ? mp_fd_adopt(fd2, e) : fd2;
+}
+
+/* dup2() and dup3(); flags < 0 picks dup2(). The OS closes fd2 first, so a
+ * virtual fd2 is unregistered beforehand, and registered again if the call
+ * fails. */
+static int mp_dup_onto(int fd, int fd2, int flags) {
+  EFILE *e = mp_fd_lookup(fd);
+  EFILE *old = fd == fd2 ? NULL : mp_fd_unregister(fd2);
+#if defined(_WIN32)
+  (void)flags;
+  int r = _dup2(fd, fd2);
+#elif defined(__linux__)
+  int r = flags < 0 ? dup2(fd, fd2) : dup3(fd, fd2, flags);
+#else
+  (void)flags;
+  int r = dup2(fd, fd2);
+#endif
+  if (r < 0) {
+    int err = errno;
+    if (old != NULL) mp_fd_register(fd2, old);
+    errno = err;
+    return r;
+  }
+  mp_efile_destroy(old);
+  if (e == NULL || fd == fd2) return r;
+  /* _dup2() returns 0, dup2() fd2. */
+  return mp_fd_adopt(fd2, e) < 0 ? -1 : r;
+}
+
+MP_DECL(int) mp_dup2(int fd, int fd2) {
+  return mp_dup_onto(fd, fd2, -1);
+}
+
+#ifdef __linux__
+MP_DECL(int) mp_dup3(int fd, int fd2, int flags) {
+  return mp_dup_onto(fd, fd2, flags);
+}
+#endif
+
+#ifndef _WIN32
+/* The argument goes through as the pointer-sized value libc reads it as.
+ * F_DUPFD duplicates are registered like dup()'s. */
+MP_DECL(int) mp_fcntl(int fd, int cmd, ...) {
+  va_list args;
+  va_start(args, cmd);
+  void *arg = va_arg(args, void *);
+  va_end(args);
+  int r = fcntl(fd, cmd, arg);
+  bool dups = cmd == F_DUPFD;
+#ifdef F_DUPFD_CLOEXEC
+  dups = dups || cmd == F_DUPFD_CLOEXEC;
+#endif
+  EFILE *e = (dups && r >= 0) ? mp_fd_lookup(fd) : NULL;
+  return e != NULL ? mp_fd_adopt(r, e) : r;
+}
+
+/* A virtual fd has no pages of its own: mapping it gives an anonymous
+ * mapping holding a copy of the content, which munmap() releases as usual.
+ * Like a read-only fd, it cannot back a writable shared mapping. */
+MP_DECL(void*) mp_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
+  EFILE *e = (flags & MAP_ANON) ? NULL : mp_fd_lookup(fd);
+  if (e == NULL) return mmap(addr, len, prot, flags, fd, offset);
+  if (e->map->type != ETYPE_FILE) {
+    errno = ENODEV;
+    return MAP_FAILED;
+  }
+  if ((prot & PROT_WRITE) && (flags & MAP_SHARED)) {
+    errno = EACCES;
+    return MAP_FAILED;
+  }
+  if (len == 0 || offset < 0 || offset % sysconf(_SC_PAGESIZE) != 0) {
+    errno = EINVAL;
+    return MAP_FAILED;
+  }
+  char *p = (char*)mmap(addr, len, PROT_READ | PROT_WRITE, (flags & MAP_FIXED) | MAP_PRIVATE | MAP_ANON, -1, 0);
+  if (p == (char*)MAP_FAILED) return MAP_FAILED;
+  if ((uint64_t)offset < e->size) {
+    size_t n = e->size - (size_t)offset;
+    memcpy(p, (e->end - e->size) + offset, n < len ? n : len);
+  }
+  if (prot != (PROT_READ | PROT_WRITE) && mprotect(p, len, prot) != 0) {
+    int err = errno;
+    munmap(p, len);
+    errno = err;
+    return MAP_FAILED;
+  }
+  return p;
+}
+#endif
 
 #ifdef _WIN32
 MP_DECL(__int64) mp_lseeki64(int fd, __int64 offset, int whence) {
 #else
 MP_DECL(ssize_t) mp_lseek(int fd, off_t offset, int whence) {
 #endif
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e == NULL) {
 #ifdef _WIN32
     return _lseeki64(fd, offset, whence);
@@ -2068,233 +2538,103 @@ MP_DECL(ssize_t) mp_lseek(int fd, off_t offset, int whence) {
     return lseek(fd, offset, whence);
 #endif
   }
-  if(whence == SEEK_SET)
-    e->pos = (e->end - e->size) + offset;
-  else if(whence == SEEK_CUR)
-    e->pos += offset;
-  else if(whence == SEEK_END)
-    e->pos = e->end + offset;
-
-  if(e->end < e->pos || (e->pos - (e->end - e->size)) < 0) {
-    errno = EINVAL;
-    return -1;
-  }
-  return (e->pos - (e->end - e->size));
+#ifdef _WIN32
+  mp_sync_in(e);
+#endif
+  return mp_virtual_seek(e, offset, whence);
 }
 
 #ifdef _WIN32
 
-MP_DECL(int) mp__stat32(const char *file, struct _stat32 *buf) {
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat32 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
+/* Virtual handles live in the same registry as the fds' OS handles. */
+static EFILE *mp_handle_lookup(HANDLE h) {
+    if (h == NULL || h == INVALID_HANDLE_VALUE) return NULL;
+    for (int i = 0; i < 512; i++) {
+        if (mp_handle2file[i].h == h) return mp_handle2file[i].f;
     }
-    return _stat32(file, buf);
+    return NULL;
 }
 
-MP_DECL(int) mp__wstat32(const wchar_t *file, struct _stat32 *buf) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, file, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat32 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
+/* Registers a handle that owns its EFILE, which CloseHandle() frees. */
+static bool mp_handle_register(HANDLE h, EFILE *e) {
+    bool registered = false;
+    MP_REGISTRY_LOCK();
+    for (int i = 0; i < 512; i++) {
+        if (mp_handle2file[i].h == NULL) {
+            mp_handle2file[i].f = e;
+            mp_handle2file[i].fd_owned = false;
+            mp_handle2file[i].h = h;
+            registered = true;
+            break;
         }
     }
-    return _wstat32(file, buf);
+    MP_REGISTRY_UNLOCK();
+    return registered;
 }
 
-MP_DECL(int) mp__stat64(const char *file, struct _stat64 *buf) {
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat64 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
+/* Drops a handle from the registry. Returns its EFILE if the handle owned
+ * it; an fd-owned handle's EFILE belongs to the fd. */
+static EFILE *mp_handle_unregister(HANDLE h) {
+    if (mp_handle_lookup(h) == NULL) return NULL;
+    EFILE *e = NULL;
+    MP_REGISTRY_LOCK();
+    for (int i = 0; i < 512; i++) {
+        if (mp_handle2file[i].h == h) {
+            if (!mp_handle2file[i].fd_owned) e = mp_handle2file[i].f;
+            mp_handle2file[i].h = NULL;
+            mp_handle2file[i].f = NULL;
+            mp_handle2file[i].fd_owned = false;
+            break;
         }
     }
-    return _stat64(file, buf);
+    MP_REGISTRY_UNLOCK();
+    return e;
 }
 
-MP_DECL(int) mp__wstat64(const wchar_t *file, struct _stat64 *buf) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, file, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat64 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
-    }
-    return _wstat64(file, buf);
+/* An entry's mtime as a FILETIME: 100 ns ticks since 1601. */
+static FILETIME mp_filetime(const EMAP *map) {
+    ULARGE_INTEGER t;
+    t.QuadPart = (ULONGLONG)(mp_mtime_ns(map) / 100) + 116444736000000000ULL;
+    FILETIME ft;
+    ft.dwLowDateTime = t.LowPart;
+    ft.dwHighDateTime = t.HighPart;
+    return ft;
 }
 
-MP_DECL(int) mp__stat32i64(const char *file, struct _stat32i64 *buf) {
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
+/* The CRT's stat structs differ only in field widths. */
+#define MP_FILL_CRT_STAT(buf, map) do {                                        \
+    memset((buf), 0, sizeof *(buf));                                           \
+    (buf)->st_mode = S_IREAD | S_IEXEC | ((map)->type == ETYPE_DIRECTORY ? S_IFDIR : S_IFREG); \
+    (buf)->st_nlink = 1;                                                       \
+    (buf)->st_size = mp_uncompressed_size(map);                                \
+    (buf)->st_atime = (buf)->st_mtime = (buf)->st_ctime = mp_mtime_ns(map) / 1000000000; \
+} while (0)
 
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat32i64 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
-    }
-    return _stat32i64(file, buf);
+/* _stat*(), _wstat*() and _fstat*() for one of the CRT's stat structs. */
+#define MP_DEFINE_STAT(stat_fn, wstat_fn, fstat_fn, type)                      \
+MP_DECL(int) mp_##stat_fn(const char *file, struct type *buf) {               \
+    EMAP *map;                                                                 \
+    if (!mp_find_virtual(file, &map)) return stat_fn(file, buf);               \
+    MP_FILL_CRT_STAT(buf, map);                                                \
+    return 0;                                                                  \
+}                                                                              \
+MP_DECL(int) mp_##wstat_fn(const wchar_t *file, struct type *buf) {           \
+    EMAP *map;                                                                 \
+    if (!mp_find_virtual_w(file, &map)) return wstat_fn(file, buf);            \
+    MP_FILL_CRT_STAT(buf, map);                                                \
+    return 0;                                                                  \
+}                                                                              \
+MP_DECL(int) mp_##fstat_fn(int fd, struct type *buf) {                        \
+    EFILE *e = mp_fd_lookup(fd);                                               \
+    if (e == NULL) return fstat_fn(fd, buf);                                   \
+    MP_FILL_CRT_STAT(buf, e->map);                                             \
+    return 0;                                                                  \
 }
 
-MP_DECL(int) mp__wstat32i64(const wchar_t *file, struct _stat32i64 *buf) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, file, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat32i64 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
-    }
-    return _wstat32i64(file, buf);
-}
-
-MP_DECL(int) mp__stat64i32(const char *file, struct _stat64i32 *buf) {
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat64i32 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
-    }
-    return _stat64i32(file, buf);
-}
-
-MP_DECL(int) mp__wstat64i32(const wchar_t *file, struct _stat64i32 *buf) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, file, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            struct _stat64i32 tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            tmp.st_mode = S_IREAD | S_IEXEC;
-            switch (map->type) {
-                case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-                case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-            }
-            tmp.st_size = mp_uncompressed_size(map);
-            memcpy(buf, &tmp, sizeof(tmp));
-            return 0;
-        }
-    }
-    return _wstat64i32(file, buf);
-}
+MP_DEFINE_STAT(_stat32, _wstat32, _fstat32, _stat32)
+MP_DEFINE_STAT(_stat64, _wstat64, _fstat64, _stat64)
+MP_DEFINE_STAT(_stat32i64, _wstat32i64, _fstat32i64, _stat32i64)
+MP_DEFINE_STAT(_stat64i32, _wstat64i32, _fstat64i32, _stat64i32)
 
 MP_STD(DWORD) mp_GetFileAttributesA(LPCSTR lpFileName) {
     wchar_t wide_path[PATH_MAX];
@@ -2305,24 +2645,13 @@ MP_STD(DWORD) mp_GetFileAttributesA(LPCSTR lpFileName) {
 }
 
 MP_STD(DWORD) mp_GetFileAttributesW(LPCWSTR lpFileName) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            DWORD attributes = FILE_ATTRIBUTE_READONLY;
-            if (map->type == ETYPE_DIRECTORY) {
-                attributes |= FILE_ATTRIBUTE_DIRECTORY;
-            }
-            return attributes;
+    EMAP *map;
+    if (mp_find_virtual_w(lpFileName, &map)) {
+        DWORD attributes = FILE_ATTRIBUTE_READONLY;
+        if (map->type == ETYPE_DIRECTORY) {
+            attributes |= FILE_ATTRIBUTE_DIRECTORY;
         }
+        return attributes;
     }
     return GetFileAttributesW(lpFileName);
 }
@@ -2341,49 +2670,27 @@ MP_STD(BOOL) mp_GetFileAttributesExW(LPCWSTR lpFileName, GET_FILEEX_INFO_LEVELS 
         return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
     }
 
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, PATH_MAX);
+    EMAP *map;
+    if (mp_find_virtual_w(lpFileName, &map)) {
+        WIN32_FILE_ATTRIBUTE_DATA *pData = (WIN32_FILE_ATTRIBUTE_DATA *)lpFileInformation;
+        memset(pData, 0, sizeof(WIN32_FILE_ATTRIBUTE_DATA));
 
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            WIN32_FILE_ATTRIBUTE_DATA *pData = (WIN32_FILE_ATTRIBUTE_DATA *)lpFileInformation;
-            memset(pData, 0, sizeof(WIN32_FILE_ATTRIBUTE_DATA));
-
-            pData->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
-            if (map->type == ETYPE_DIRECTORY) {
-                pData->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
-            }
-
-            // Populate file size
-            ULARGE_INTEGER fileSize;
-            fileSize.QuadPart = mp_uncompressed_size(map);
-            pData->nFileSizeHigh = fileSize.HighPart;
-            pData->nFileSizeLow = fileSize.LowPart;
-
-            // Timestamps are zeroed by memset.
-            return TRUE;
+        pData->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
+        if (map->type == ETYPE_DIRECTORY) {
+            pData->dwFileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
         }
+
+        // Populate file size
+        ULARGE_INTEGER fileSize;
+        fileSize.QuadPart = mp_uncompressed_size(map);
+        pData->nFileSizeHigh = fileSize.HighPart;
+        pData->nFileSizeLow = fileSize.LowPart;
+
+        pData->ftCreationTime = pData->ftLastAccessTime = pData->ftLastWriteTime = mp_filetime(map);
+        return TRUE;
     }
     return GetFileAttributesExW(lpFileName, fInfoLevelId, lpFileInformation);
 }
-
-// A map to associate native HANDLEs with our virtual EFILE structs.
-struct HNDMAP_S {   // Virtual File Handle
-    HANDLE h;
-    EFILE *f;
-};
-typedef struct HNDMAP_S HNDMAP;
-
-// An array to store the mappings for open virtual files.
-HNDMAP mp_handle2file[512] = {};
-
 
 /**
  * @brief Closes an open object handle. This can be a handle to a file,
@@ -2399,34 +2706,35 @@ MP_STD(BOOL) mp_CloseHandle(HANDLE hObject) {
     // Check if it's a handle to a virtual file mapping.
     for (int i = 0; i < 512; i++) {
         if (mp_mapping2file[i].h == hObject) {
-            // This is a handle to one of our virtual file mappings.
-            // Since the "handle" is just a pointer to an EFILE struct
-            // and doesn't correspond to a real system object that needs closing,
-            // we just clear our tracking entry. The actual EFILE struct
-            // will be freed when the original file handle is closed.
-            mp_mapping2file[i].h = NULL;
-            mp_mapping2file[i].f = NULL;
+            // This is a handle to one of our virtual file mappings, not a
+            // system object. Its data lives on until the last view is unmapped.
+            MP_REGISTRY_LOCK();
+            VMAPPING *m = mp_mapping2file[i].h == hObject ? mp_mapping2file[i].m : NULL;
+            bool unused = false;
+            if (m != NULL) {
+                mp_mapping2file[i].h = NULL;
+                mp_mapping2file[i].m = NULL;
+                m->closed = true;
+                unused = m->views == 0;
+            }
+            MP_REGISTRY_UNLOCK();
+            if (m == NULL) {
+                SetLastError(ERROR_INVALID_HANDLE);
+                return FALSE;
+            }
+            if (unused) {
+                free(m->data);
+                free(m);
+            }
             return TRUE; // Indicate success.
         }
     }
 
-    // Check if it's a handle to a virtual file created by CreateFile.
-    for (int i = 0; i < 512; i++) {
-        if (mp_handle2file[i].h == hObject) {
-            // This is a handle to one of our virtual files.
-            // Free the memory for the EFILE struct.
-            free(mp_handle2file[i].f);
+    // Check if it's a handle to a virtual file.
+    mp_efile_destroy(mp_handle_unregister(hObject));
 
-            // Clear the entry in our map.
-            mp_handle2file[i].h = NULL;
-            mp_handle2file[i].f = NULL;
-
-            // Now, close the underlying native handle we created.
-            return CloseHandle(hObject);
-        }
-    }
-
-    // If it's not a handle we're managing, pass it to the real API.
+    // Close the native handle: the executable handle behind a virtual file,
+    // or one we don't manage.
     return CloseHandle(hObject);
 }
 
@@ -2464,22 +2772,8 @@ MP_STD(HANDLE) mp_CreateFileW(
         DWORD dwFlagsAndAttributes,
         HANDLE hTemplateFile
 ) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, sizeof(file_mb));
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
-    if (!get_executable_path(execfolder, executable)) {
-        return CreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-    }
-
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
     EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
+    if (mp_find_virtual_w(lpFileName, &map)) {
         // Virtual files are read-only. If write access is requested, return access denied.
         if (dwDesiredAccess & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA)) {
             SetLastError(ERROR_ACCESS_DENIED);
@@ -2507,24 +2801,18 @@ MP_STD(HANDLE) mp_CreateFileW(
             return INVALID_HANDLE_VALUE;
         }
 
-        mp_efile_init_virtual(e, map);
+        // Metadata only, until the first read or seek (mp_efile_load).
+        mp_efile_init_metadata(e, map);
 
         // Create a real, underlying handle by opening the executable itself.
         // This gives us a valid system handle to return to the caller.
-        HANDLE hFake = CreateFileA(executable, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        HANDLE hFake = CreateFileW(mp_executable_w, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hFake == INVALID_HANDLE_VALUE) {
             mp_efile_destroy(e);
-            return INVALID_HANDLE_VALUE; // Let caller get the error from CreateFileA.
+            return INVALID_HANDLE_VALUE; // Let caller get the error from CreateFileW.
         }
 
-        // Find an empty slot in our handle map to store the association.
-        for (int i = 0; i < 512; i++) {
-            if (mp_handle2file[i].h == NULL) {
-                mp_handle2file[i].h = hFake;
-                mp_handle2file[i].f = e;
-                return hFake; // Return the fake handle to the caller.
-            }
-        }
+        if (mp_handle_register(hFake, e)) return hFake;
 
         // No free slots in our map.
         mp_efile_destroy(e);
@@ -2570,22 +2858,10 @@ MP_STD(BOOL) mp_DeleteFileA(LPCSTR lpFileName) {
 }
 
 MP_STD(BOOL) mp_DeleteFileW(LPCWSTR lpFileName) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, sizeof(file_mb));
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            SetLastError(ERROR_ACCESS_DENIED);
-            return FALSE;
-        }
+    EMAP *map;
+    if (mp_find_virtual_w(lpFileName, &map)) {
+        SetLastError(ERROR_ACCESS_DENIED);
+        return FALSE;
     }
     return DeleteFileW(lpFileName);
 }
@@ -2637,7 +2913,9 @@ MP_STD(BOOL) mp_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORM
         lpFileInformation->nFileIndexHigh = (DWORD)(fileIndex >> 32);
         lpFileInformation->nFileIndexLow = (DWORD)(fileIndex & 0xFFFFFFFF);
 
-        // Timestamps and volume serial are zeroed by memset.
+        lpFileInformation->ftCreationTime = lpFileInformation->ftLastAccessTime =
+            lpFileInformation->ftLastWriteTime = mp_filetime(e->map);
+        // The volume serial is zeroed by memset.
         return TRUE;
     }
 
@@ -2683,7 +2961,10 @@ MP_STD(BOOL) mp_GetFileInformationByHandleEx(HANDLE hFile, FILE_INFO_BY_HANDLE_C
                 if (e->map->type == ETYPE_DIRECTORY) {
                     info->FileAttributes |= FILE_ATTRIBUTE_DIRECTORY;
                 }
-                // Timestamps are zeroed by memset.
+                FILETIME ft = mp_filetime(e->map);
+                info->LastWriteTime.LowPart = ft.dwLowDateTime;
+                info->LastWriteTime.HighPart = (LONG)ft.dwHighDateTime;
+                info->CreationTime = info->LastAccessTime = info->ChangeTime = info->LastWriteTime;
                 return TRUE;
             }
 
@@ -2754,48 +3035,39 @@ MP_STD(DWORD) mp_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DW
         }
     }
 
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (e != NULL && get_executable_path(execfolder, executable)) {
-        char resulting_path[PATH_MAX] = {};
-        if (e->name[0] == '~') {
-            // This is a relative path.
-            size_t execfolder_len = strlen(execfolder);
-            strcpy(&resulting_path[0], execfolder);
-            size_t curr_res_pos = execfolder_len;
-            for (size_t i = 1; i < PATH_MAX && curr_res_pos < PATH_MAX - 1; i++) {
-                char curr = e->name[i];
-                if (curr == '\0')
-                    break;
-                if (curr == '/')
-                    curr = '\\';
-
-                resulting_path[curr_res_pos] = curr;
-                curr_res_pos++;
-            }
-            resulting_path[PATH_MAX - 1] = '\0';
-        } else {
-            strcpy(&resulting_path[0], e->name);
+    if (e != NULL) {
+        // Embedded paths below the executable resolve against the folder
+        // Python's getpath uses; "/c/..." entries map back to "c:\...".
+        wchar_t resulting_path[PATH_MAX];
+        const char *name = e->name;
+        size_t used = 0;
+        if (name[0] == '~') {
+            const wchar_t *folder = mp_execfolder_alias_w[0] != L'\0' ? mp_execfolder_alias_w : mp_execfolder_w;
+            wcscpy(resulting_path, folder);
+            used = wcslen(resulting_path);
+            if (used > 0 && resulting_path[used - 1] == L'\\') used--;
+            name++;
+        } else if (name[0] == '/' && name[1] != '\0') {
+            resulting_path[0] = (wchar_t)name[1];
+            resulting_path[1] = L':';
+            used = 2;
+            name += 2;
         }
-
-        // It's a virtual file. The name is the final path.
-        size_t required_chars = mbstowcs(NULL, resulting_path, 0);
-        if (required_chars == (size_t)-1) {
+        if (MultiByteToWideChar(CP_UTF8, 0, name, -1, resulting_path + used, PATH_MAX - (int)used) == 0) {
             SetLastError(ERROR_INVALID_DATA);
             return 0;
         }
+        for (wchar_t *p = resulting_path + used; *p; ++p) {
+            if (*p == L'/') *p = L'\\';
+        }
 
+        size_t required_chars = wcslen(resulting_path);
         if (cchFilePath < required_chars + 1) {
             // Buffer is too small. Return the required size.
-            return required_chars + 1;
+            return (DWORD)(required_chars + 1);
         }
-
-        size_t converted_chars = mbstowcs(lpszFilePath, resulting_path, cchFilePath);
-        if (converted_chars == (size_t)-1) {
-            SetLastError(ERROR_INVALID_DATA);
-            return 0;
-        }
-
-        return converted_chars;
+        wcscpy(lpszFilePath, resulting_path);
+        return (DWORD)required_chars;
     }
 
     // Not a virtual file, fall back to the real API.
@@ -2806,43 +3078,10 @@ MP_STD(DWORD) mp_GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DW
  * @brief Retrieves the full path and file name of the specified file.
  * @return The length of the string copied to lpBuffer, or the required buffer size.
  *
- * For virtual files, this returns the calculated absolute path.
+ * The real API is purely lexical and never touches the disk, so it already
+ * gives the right answer for virtual paths.
  */
 MP_STD(DWORD) mp_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWSTR lpBuffer, LPWSTR *lpFilePart) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            // It's a virtual file. Return the absolute path we constructed.
-            size_t required_chars = mbstowcs(NULL, absolute_path, 0) + 1;
-            if (required_chars == 0) {
-                SetLastError(ERROR_INVALID_DATA);
-                return 0;
-            }
-
-            if (nBufferLength < required_chars) {
-                return required_chars; // Return required buffer size
-            }
-
-            mbstowcs(lpBuffer, absolute_path, nBufferLength);
-
-            if (lpFilePart) {
-                *lpFilePart = PathFindFileNameW(lpBuffer);
-            }
-            return wcslen(lpBuffer);
-        }
-    }
-
-    // Not a virtual file, fall back to the real API.
     return GetFullPathNameW(lpFileName, nBufferLength, lpBuffer, lpFilePart);
 }
 
@@ -2853,25 +3092,10 @@ MP_STD(DWORD) mp_GetFullPathNameW(LPCWSTR lpFileName, DWORD nBufferLength, LPWST
  * For virtual files, this retrieves the volume of the executable itself.
  */
 MP_STD(BOOL) mp_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathName, DWORD cchBufferLength) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpszFileName, PATH_MAX);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(file_mb, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map)) {
-            // It's a virtual file. The volume is the volume of the executable.
-            wchar_t exec_path_w[PATH_MAX];
-            mbstowcs(exec_path_w, executable, PATH_MAX);
-
-            return GetVolumePathNameW(exec_path_w, lpszVolumePathName, cchBufferLength);
-        }
+    EMAP *map;
+    if (mp_find_virtual_w(lpszFileName, &map)) {
+        // It's a virtual file. The volume is the volume of the executable.
+        return GetVolumePathNameW(mp_executable_w, lpszVolumePathName, cchBufferLength);
     }
 
     // Not a virtual file, fall back to the real API.
@@ -2885,26 +3109,10 @@ MP_STD(BOOL) mp_GetVolumePathNameW(LPCWSTR lpszFileName, LPWSTR lpszVolumePathNa
  * For virtual paths, this returns the disk space for the volume hosting the executable.
  */
 MP_STD(BOOL) mp_GetDiskFreeSpaceExW(LPCWSTR lpDirectoryName, PULARGE_INTEGER lpFreeBytesAvailableToCaller, PULARGE_INTEGER lpTotalNumberOfBytes, PULARGE_INTEGER lpTotalNumberOfFreeBytes) {
-    char dir_mb[PATH_MAX];
-    if (lpDirectoryName != NULL) {
-        wcstombs(dir_mb, lpDirectoryName, PATH_MAX);
-    } else {
-        GetCurrentDirectoryA(PATH_MAX, dir_mb);
-    }
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(dir_mb, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-        char search_path[PATH_MAX] = {};
-        get_virtual_path(search_path, execfolder, absolute_path);
-
-        EMAP *map;
-        if (find_embedded_file(search_path, &map) && map->type == ETYPE_DIRECTORY) {
-            // It's a virtual directory. The disk space is the one for the executable's drive.
-            return GetDiskFreeSpaceExA(execfolder, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
-        }
+    EMAP *map;
+    if (lpDirectoryName != NULL && mp_find_virtual_w(lpDirectoryName, &map) && map->type == ETYPE_DIRECTORY) {
+        // It's a virtual directory. The disk space is the one for the executable's drive.
+        return GetDiskFreeSpaceExW(mp_execfolder_w, lpFreeBytesAvailableToCaller, lpTotalNumberOfBytes, lpTotalNumberOfFreeBytes);
     }
 
     // Fall back for real paths.
@@ -2925,15 +3133,20 @@ static void ConvertFindDataWtoA(LPWIN32_FIND_DATAA lpFindFileDataA, const WIN32_
     WideCharToMultiByte(CP_ACP, 0, lpFindFileDataW->cAlternateFileName, -1, lpFindFileDataA->cAlternateFileName, 14, NULL, NULL);
 }
 
+// Last component of an entry's path; entry paths are stored as UTF-8.
+static void mp_entry_name_w(const EMAP* map, wchar_t* out, int cch) {
+    const char* path = mp_path_of(map);
+    const char* slash = strrchr(path, '/');
+    if (MultiByteToWideChar(CP_UTF8, 0, slash ? slash + 1 : path, -1, out, cch) == 0) {
+        out[0] = L'\0';
+    }
+}
+
 // Helper to populate WIN32_FIND_DATAW from an EMAP entry for FindFirst/Next
 static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
     memset(find_data, 0, sizeof(WIN32_FIND_DATAW));
 
-    // Convert filename to wide char
-    const char* filename = PathFindFileNameA(mp_path_of(map));
-    mbstowcs(find_data->cFileName, filename, _countof(find_data->cFileName));
-    // Ensure null-termination for safety
-    find_data->cFileName[_countof(find_data->cFileName) - 1] = L'\0';
+    mp_entry_name_w(map, find_data->cFileName, _countof(find_data->cFileName));
 
     // Set attributes
     find_data->dwFileAttributes = FILE_ATTRIBUTE_READONLY;
@@ -2946,6 +3159,39 @@ static void populate_find_data(EMAP* map, WIN32_FIND_DATAW* find_data) {
     fileSize.QuadPart = mp_uncompressed_size(map);
     find_data->nFileSizeHigh = fileSize.HighPart;
     find_data->nFileSizeLow = fileSize.LowPart;
+
+    find_data->ftCreationTime = find_data->ftLastAccessTime = find_data->ftLastWriteTime = mp_filetime(map);
+}
+
+/* Next match of a virtual directory search: its embedded entries, then the
+ * entries of the same directory on disk that they do not shadow. */
+static bool mp_find_next(VIRTUAL_FIND_HANDLE_DATA* data, WIN32_FIND_DATAW* out) {
+    const EMAP *dir_map = data->dir_map;
+    while (data->next_child < dir_map->children_count) {
+        const EMAP* child = mp_embed_child_at(dir_map, data->next_child++);
+        wchar_t filename_part[MAX_PATH];
+        mp_entry_name_w(child, filename_part, MAX_PATH);
+        if (PathMatchSpecW(filename_part, data->search_pattern)) {
+            populate_find_data((EMAP*)child, out);
+            return true;
+        }
+    }
+    while (data->real_ready) {
+        WIN32_FIND_DATAW found = data->real_next;
+        data->real_ready = FindNextFileW(data->real, &data->real_next) != FALSE;
+        char name[MAX_PATH * 4];
+        if (WideCharToMultiByte(CP_UTF8, 0, found.cFileName, -1, name, sizeof name, NULL, NULL) == 0 ||
+            !mp_shadowed(dir_map, name)) {
+            *out = found;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void mp_find_free(VIRTUAL_FIND_HANDLE_DATA* data) {
+    if (data->real != INVALID_HANDLE_VALUE) FindClose(data->real);
+    free(data);
 }
 
 MP_STD(HANDLE) mp_FindFirstFileA(LPCSTR lpFileName, LPWIN32_FIND_DATAA lpFindFileData) {
@@ -2993,56 +3239,49 @@ MP_STD(BOOL) mp_FindNextFileA(HANDLE hFindFile, LPWIN32_FIND_DATAA lpFindFileDat
  * Intercepts searches in virtual directories.
  */
 MP_STD(HANDLE) mp_FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData) {
-    char file_mb[PATH_MAX];
-    wcstombs(file_mb, lpFileName, sizeof(file_mb));
-
-    char search_dir[PATH_MAX];
-    strcpy(search_dir, file_mb);
-    PathRemoveFileSpecA(search_dir);
-    char* search_pattern = PathFindFileNameA(file_mb);
-
-    char absolute_path[PATH_MAX] = {};
-    mp_get_absolute_path(search_dir, absolute_path, PATH_MAX);
-
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
-    if (!get_executable_path(execfolder, executable)) {
+    if (lpFileName == NULL || wcslen(lpFileName) >= PATH_MAX) {
         return FindFirstFileW(lpFileName, lpFindFileData);
     }
-
-    char virtual_dir_path[PATH_MAX] = {};
-    get_virtual_path(virtual_dir_path, execfolder, absolute_path);
+    wchar_t search_dir[PATH_MAX];
+    wcscpy(search_dir, lpFileName);
+    PathRemoveFileSpecW(search_dir);
+    if (search_dir[0] == L'\0') {
+        wcscpy(search_dir, L".");
+    }
+    const wchar_t* search_pattern = PathFindFileNameW(lpFileName);
 
     EMAP *dir_map;
-    if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
-        /* Walk children directly via the precomputed children index. */
-        for (uint32_t ci = 0; ci < dir_map->children_count; ++ci) {
-            const EMAP* child = mp_embed_child_at(dir_map, ci);
-            const char* filename_part = PathFindFileNameA(mp_path_of(child));
-            if (PathMatchSpecA(filename_part, search_pattern)) {
-                VIRTUAL_FIND_HANDLE_DATA* find_handle_data = (VIRTUAL_FIND_HANDLE_DATA*)malloc(sizeof(VIRTUAL_FIND_HANDLE_DATA));
-                if (!find_handle_data) {
-                    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-                    return INVALID_HANDLE_VALUE;
-                }
-                find_handle_data->dir_map = dir_map;
-                find_handle_data->next_child = ci + 1;
-                strcpy(find_handle_data->search_pattern, search_pattern);
+    if (mp_find_virtual_w(search_dir, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
+        VIRTUAL_FIND_HANDLE_DATA* find_handle_data = (VIRTUAL_FIND_HANDLE_DATA*)calloc(1, sizeof(VIRTUAL_FIND_HANDLE_DATA));
+        if (!find_handle_data) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return INVALID_HANDLE_VALUE;
+        }
+        find_handle_data->dir_map = dir_map;
+        wcsncpy(find_handle_data->search_pattern, search_pattern, MAX_PATH - 1);
+        find_handle_data->search_pattern[MAX_PATH - 1] = L'\0';
+        find_handle_data->real = FindFirstFileW(lpFileName, &find_handle_data->real_next);
+        find_handle_data->real_ready = find_handle_data->real != INVALID_HANDLE_VALUE;
 
-                for (int i = 0; i < 512; i++) {
-                    if (mp_findhandles[i].h == NULL) {
-                        mp_findhandles[i].h = (HANDLE)find_handle_data;
-                        mp_findhandles[i].data = find_handle_data;
-                        populate_find_data((EMAP*)child, lpFindFileData);
-                        return mp_findhandles[i].h;
-                    }
-                }
-                free(find_handle_data);
-                SetLastError(ERROR_TOO_MANY_OPEN_FILES);
-                return INVALID_HANDLE_VALUE;
+        WIN32_FIND_DATAW first;
+        if (!mp_find_next(find_handle_data, &first)) {
+            mp_find_free(find_handle_data);
+            SetLastError(ERROR_FILE_NOT_FOUND);
+            return INVALID_HANDLE_VALUE;
+        }
+        MP_REGISTRY_LOCK();
+        for (int i = 0; i < 512; i++) {
+            if (mp_findhandles[i].h == NULL) {
+                mp_findhandles[i].data = find_handle_data;
+                mp_findhandles[i].h = (HANDLE)find_handle_data;
+                MP_REGISTRY_UNLOCK();
+                *lpFindFileData = first;
+                return (HANDLE)find_handle_data;
             }
         }
-
-        SetLastError(ERROR_FILE_NOT_FOUND);
+        MP_REGISTRY_UNLOCK();
+        mp_find_free(find_handle_data);
+        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
         return INVALID_HANDLE_VALUE;
     }
 
@@ -3066,16 +3305,7 @@ MP_STD(BOOL) mp_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileDat
         return FindNextFileW(hFindFile, lpFindFileData);
     }
 
-    const EMAP *dir_map = find_handle_data->dir_map;
-    while (find_handle_data->next_child < dir_map->children_count) {
-        const EMAP* child = mp_embed_child_at(dir_map, find_handle_data->next_child++);
-        const char* filename_part = PathFindFileNameA(mp_path_of(child));
-        if (PathMatchSpecA(filename_part, find_handle_data->search_pattern)) {
-            populate_find_data((EMAP*)child, lpFindFileData);
-            return TRUE;
-        }
-    }
-
+    if (mp_find_next(find_handle_data, lpFindFileData)) return TRUE;
     SetLastError(ERROR_NO_MORE_FILES);
     return FALSE;
 }
@@ -3087,9 +3317,12 @@ MP_STD(BOOL) mp_FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileDat
 MP_STD(BOOL) mp_FindClose(HANDLE hFindFile) {
     for (int i = 0; i < 512; i++) {
         if (mp_findhandles[i].h == hFindFile) {
-            free(mp_findhandles[i].data);
+            VIRTUAL_FIND_HANDLE_DATA* find_handle_data = mp_findhandles[i].data;
+            MP_REGISTRY_LOCK();
             mp_findhandles[i].h = NULL;
             mp_findhandles[i].data = NULL;
+            MP_REGISTRY_UNLOCK();
+            mp_find_free(find_handle_data);
             return TRUE;
         }
     }
@@ -3236,6 +3469,12 @@ MP_STD(HANDLE) mp_CreateFileMappingW(
             return NULL;
         }
 
+        // Like a real empty file, an empty virtual file cannot be mapped.
+        if (e->size == 0) {
+            SetLastError(ERROR_FILE_INVALID);
+            return NULL;
+        }
+
         // The size of the mapping must be within the file's bounds.
         ULONGLONG maxSize = ((ULONGLONG)dwMaximumSizeHigh << 32) | dwMaximumSizeLow;
         if (maxSize > e->size) {
@@ -3243,18 +3482,32 @@ MP_STD(HANDLE) mp_CreateFileMappingW(
             return NULL;
         }
 
-        // We can't create a real mapping object for in-memory data.
-        // Instead, we'll use a pointer to our EFILE struct as a "handle".
-        // This is a bit of a hack, but it allows us to identify the mapping later.
-        // Find an empty slot in our mapping table.
+        // We can't create a real mapping object for in-memory data. The
+        // mapping gets its own decompressed copy, and its address serves as
+        // the "handle".
+        VMAPPING* m = (VMAPPING*)calloc(1, sizeof *m);
+        if (m == NULL) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NULL;
+        }
+        m->data = mp_decompress_entry(e->map, 0, &m->size);
+        if (m->data == NULL) {
+            free(m);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NULL;
+        }
+        MP_REGISTRY_LOCK();
         for (int i = 0; i < 512; i++) {
             if (mp_mapping2file[i].h == NULL) {
-                // We use the EFILE pointer itself as the handle.
-                mp_mapping2file[i].h = (HANDLE)e;
-                mp_mapping2file[i].f = e;
-                return (HANDLE)e;
+                mp_mapping2file[i].m = m;
+                mp_mapping2file[i].h = (HANDLE)m;
+                MP_REGISTRY_UNLOCK();
+                return (HANDLE)m;
             }
         }
+        MP_REGISTRY_UNLOCK();
+        free(m->data);
+        free(m);
         SetLastError(ERROR_TOO_MANY_OPEN_FILES);
         return NULL;
     }
@@ -3270,39 +3523,43 @@ MP_STD(LPVOID) mp_MapViewOfFile(
     DWORD  dwFileOffsetLow,
     SIZE_T dwNumberOfBytesToMap
 ) {
-    EFILE* e = NULL;
+    VMAPPING* m = NULL;
     for (int i = 0; i < 512; i++) {
         // Check if the mapping object is one of our virtual ones.
         if (mp_mapping2file[i].h == hFileMappingObject) {
-            e = mp_mapping2file[i].f;
+            m = mp_mapping2file[i].m;
             break;
         }
     }
 
-    if (e != NULL) {
+    if (m != NULL) {
         // It's a virtual mapping. The "view" is just a pointer into our data block.
         // Check for write access, which is not allowed.
-        if (dwDesiredAccess & (FILE_MAP_WRITE | FILE_MAP_ALL_ACCESS)) {
+        if (dwDesiredAccess & FILE_MAP_WRITE) {
             SetLastError(ERROR_ACCESS_DENIED);
             return NULL;
         }
 
         ULONGLONG offset = ((ULONGLONG)dwFileOffsetHigh << 32) | dwFileOffsetLow;
-        if (offset >= e->size) {
+        if (offset >= m->size) {
             SetLastError(ERROR_INVALID_PARAMETER);
             return NULL;
         }
 
-        LPVOID view = (LPVOID)(e->pos + offset);
+        LPVOID view = (LPVOID)(m->data + offset);
 
         // Store the view so we can recognize it in UnmapViewOfFile
+        MP_REGISTRY_LOCK();
         for (int i = 0; i < 512; i++) {
             if (mp_view2file[i].view == NULL) {
+                mp_view2file[i].m = m;
                 mp_view2file[i].view = view;
-                mp_view2file[i].f = e;
+                m->views++;
+                MP_REGISTRY_UNLOCK();
                 return view;
             }
         }
+        MP_REGISTRY_UNLOCK();
         SetLastError(ERROR_TOO_MANY_OPEN_FILES);
         return NULL;
     }
@@ -3316,11 +3573,18 @@ MP_STD(BOOL) mp_UnmapViewOfFile(
 ) {
     for (int i = 0; i < 512; i++) {
         if (mp_view2file[i].view == lpBaseAddress) {
-            // This is a view of one of our virtual files.
-            // Since we didn't allocate memory with MapViewOfFile,
-            // we don't need to free it here. We just clear our tracking entry.
+            // This is a view of one of our virtual files. The data belongs to
+            // the mapping, freed here only if the mapping is already closed.
+            MP_REGISTRY_LOCK();
+            VMAPPING* m = mp_view2file[i].m;
             mp_view2file[i].view = NULL;
-            mp_view2file[i].f = NULL;
+            mp_view2file[i].m = NULL;
+            bool unused = --m->views == 0 && m->closed;
+            MP_REGISTRY_UNLOCK();
+            if (unused) {
+                free(m->data);
+                free(m);
+            }
             return TRUE;
         }
     }
@@ -3328,84 +3592,170 @@ MP_STD(BOOL) mp_UnmapViewOfFile(
     // Not a virtual view, fall back to the real API.
     return UnmapViewOfFile(lpBaseAddress);
 }
+
+/* A CreateFile handle starts out metadata-only, as os.stat() opens one per
+ * call; the first read or seek through it decompresses the content. */
+static bool mp_efile_load(EFILE *e) {
+    if (e->owned_buf != NULL || e->map->type != ETYPE_FILE) return true;
+    EFILE loaded;
+    memset(&loaded, 0, sizeof loaded);
+    if (!mp_efile_init_virtual(&loaded, e->map)) return false;
+    MP_REGISTRY_LOCK();
+    bool first = e->owned_buf == NULL;
+    if (first) {
+        e->pos = loaded.pos;
+        e->end = loaded.end;
+        e->owned_buf = loaded.owned_buf;
+        e->crt_base = loaded.crt_base;
+        e->crt_ptr = loaded.crt_ptr;
+        e->crt_cnt = loaded.crt_cnt;
+    }
+    MP_REGISTRY_UNLOCK();
+    if (!first) free(loaded.owned_buf);
+    return true;
+}
+
+MP_STD(BOOL) mp_ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped) {
+    EFILE *e = mp_handle_lookup(hFile);
+    if (e == NULL) {
+        return ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+    }
+    if (lpNumberOfBytesRead != NULL) *lpNumberOfBytesRead = 0;
+    if (e->map->type != ETYPE_FILE) {
+        SetLastError(ERROR_INVALID_FUNCTION);
+        return FALSE;
+    }
+    if (!mp_efile_load(e)) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return FALSE;
+    }
+    mp_sync_in(e);
+    // An OVERLAPPED gives the offset, and the read completes synchronously.
+    if (lpOverlapped != NULL) {
+        mp_virtual_seek(e, (int64_t)(((uint64_t)lpOverlapped->OffsetHigh << 32) | lpOverlapped->Offset), SEEK_SET);
+    }
+    size_t n = mp_avail(e);
+    if (n > nNumberOfBytesToRead) n = nNumberOfBytesToRead;
+    if (n != 0) memcpy(lpBuffer, e->pos, n);
+    e->pos += n;
+    mp_sync_out(e);
+    if (lpNumberOfBytesRead != NULL) *lpNumberOfBytesRead = (DWORD)n;
+    if (lpOverlapped != NULL) {
+        bool eof = n == 0 && nNumberOfBytesToRead != 0;
+        lpOverlapped->Internal = eof ? (ULONG_PTR)0xC0000011L /* STATUS_END_OF_FILE */ : 0;
+        lpOverlapped->InternalHigh = n;
+        if (lpOverlapped->hEvent != NULL) SetEvent(lpOverlapped->hEvent);
+        if (eof) {
+            SetLastError(ERROR_HANDLE_EOF);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+/* SetFilePointer(Ex) on a virtual handle: the new position, or -1 with the
+ * last error set. FILE_BEGIN/CURRENT/END are SEEK_SET/CUR/END. */
+static int64_t mp_handle_seek(EFILE *e, int64_t distance, DWORD method) {
+    if (method > FILE_END) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return -1;
+    }
+    if (!mp_efile_load(e)) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return -1;
+    }
+    mp_sync_in(e);
+    int64_t at = mp_virtual_seek(e, distance, (int)method);
+    if (at < 0) SetLastError(ERROR_NEGATIVE_SEEK);
+    return at;
+}
+
+MP_STD(DWORD) mp_SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod) {
+    EFILE *e = mp_handle_lookup(hFile);
+    if (e == NULL) {
+        return SetFilePointer(hFile, lDistanceToMove, lpDistanceToMoveHigh, dwMoveMethod);
+    }
+    int64_t distance = lpDistanceToMoveHigh == NULL ? (int64_t)lDistanceToMove :
+        (int64_t)(((uint64_t)(uint32_t)*lpDistanceToMoveHigh << 32) | (uint32_t)lDistanceToMove);
+    int64_t at = mp_handle_seek(e, distance, dwMoveMethod);
+    if (at < 0) return INVALID_SET_FILE_POINTER;
+    if (lpDistanceToMoveHigh != NULL) *lpDistanceToMoveHigh = (LONG)(at >> 32);
+    // A low part equal to INVALID_SET_FILE_POINTER is told apart by the last error.
+    SetLastError(NO_ERROR);
+    return (DWORD)at;
+}
+
+MP_STD(BOOL) mp_SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer, DWORD dwMoveMethod) {
+    EFILE *e = mp_handle_lookup(hFile);
+    if (e == NULL) {
+        return SetFilePointerEx(hFile, liDistanceToMove, lpNewFilePointer, dwMoveMethod);
+    }
+    int64_t at = mp_handle_seek(e, liDistanceToMove.QuadPart, dwMoveMethod);
+    if (at < 0) return FALSE;
+    if (lpNewFilePointer != NULL) lpNewFilePointer->QuadPart = at;
+    return TRUE;
+}
+
+static bool mp_is_this_process(HANDLE process) {
+    return process == GetCurrentProcess() || GetProcessId(process) == GetCurrentProcessId();
+}
+
+/* A duplicate of a virtual handle in this process is registered with a copy
+ * of its EFILE (Python's mmap maps the duplicate of the fd's handle). */
+MP_STD(BOOL) mp_DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle, LPHANDLE lpTargetHandle, DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwOptions) {
+    EFILE *e = mp_handle_lookup(hSourceHandle);
+    if (e == NULL || !mp_is_this_process(hSourceProcessHandle)) {
+        return DuplicateHandle(hSourceProcessHandle, hSourceHandle, hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
+    }
+    EFILE *copy = NULL;
+    if (lpTargetHandle != NULL && mp_is_this_process(hTargetProcessHandle)) {
+        copy = mp_efile_dup(e);
+        if (copy == NULL) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return FALSE;
+        }
+    }
+    // DUPLICATE_CLOSE_SOURCE closes the source handle even if the call fails.
+    EFILE *closed = (dwOptions & DUPLICATE_CLOSE_SOURCE) ? mp_handle_unregister(hSourceHandle) : NULL;
+    BOOL ok = DuplicateHandle(hSourceProcessHandle, hSourceHandle, hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
+    mp_efile_destroy(closed);
+    if (!ok || copy == NULL) {
+        mp_efile_destroy(copy);
+        return ok;
+    }
+    if (!mp_handle_register(*lpTargetHandle, copy)) {
+        CloseHandle(*lpTargetHandle);
+        mp_efile_destroy(copy);
+        SetLastError(ERROR_TOO_MANY_OPEN_FILES);
+        return FALSE;
+    }
+    return TRUE;
+}
 #else
 MP_DECL(int) mp_stat(const char *file, struct stat *buf) {
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
-      struct stat tmp;
-      memset(&tmp, 0, sizeof(tmp));
-      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-      switch (map->type) {
-        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-      }
-      tmp.st_size = mp_uncompressed_size(map);
-      memcpy(buf, &tmp, sizeof(tmp));
-      return 0;
-    }
+  EMAP *map;
+  if (mp_find_virtual(file, &map)) {
+    mp_fill_stat(map, buf);
+    return 0;
   }
   return stat(file, buf);
 }
 
 MP_DECL(int) mp_lstat(const char *file, struct stat *buf) {
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(file, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
-      struct stat tmp;
-      memset(&tmp, 0, sizeof(tmp));
-      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-      switch (map->type) {
-        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-      }
-      tmp.st_size = mp_uncompressed_size(map);
-      memcpy(buf, &tmp, sizeof(tmp));
-      return 0;
-    }
+  EMAP *map;
+  if (mp_find_virtual(file, &map)) {
+    mp_fill_stat(map, buf);
+    return 0;
   }
   return lstat(file, buf);
 }
 
 MP_DECL(int) mp_fstat(int fd, struct stat *buf) {
-  init_fd2file();
   // Check if the file descriptor is for a virtual file.
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      EFILE *e = mp_fd2file[i].f;
-      EMAP *map = e->map;
-
-      // This is a virtual file, populate the stat buffer from the map.
-      struct stat tmp;
-      memset(&tmp, 0, sizeof(tmp));
-      // Set standard read/execute permissions for user, group, and other.
-      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-      switch (map->type) {
-        case ETYPE_FILE:
-          tmp.st_mode |= S_IFREG; // Regular file
-          break;
-        case ETYPE_DIRECTORY:
-          tmp.st_mode |= S_IFDIR; // Directory
-          break;
-      }
-      tmp.st_size = mp_uncompressed_size(map); // Set the file size.
-      // Other fields like timestamps, user/group ID etc., remain 0.
-
-      memcpy(buf, &tmp, sizeof(tmp));
-      return 0; // Success
-    }
+  EFILE *e = mp_fd_lookup(fd);
+  if (e != NULL) {
+    mp_fill_stat(e->map, buf);
+    return 0;
   }
 
   // If the fd is not in our virtual file table, fall back to the native call.
@@ -3413,149 +3763,64 @@ MP_DECL(int) mp_fstat(int fd, struct stat *buf) {
 }
 
 MP_DECL(int) mp_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
-  init_fd2file();
-  // Handle cases where pathname is relative to a virtual directory fd
-  if (pathname[0] != '/') {
-    for (int i = 0; i < 512; i++) {
-      if (mp_fd2file[i].fd == dirfd) {
-        EFILE *e = mp_fd2file[i].f;
-        // We found the fd, it corresponds to a virtual file.
-        if (e->map->type != ETYPE_DIRECTORY) {
-          errno = ENOTDIR;
-          return -1;
-        }
-
-        // It's a directory, construct the full virtual path.
-        char full_virtual_path[PATH_MAX];
-        snprintf(full_virtual_path, PATH_MAX, "%s/%s", e->name, pathname);
-
-        // The virtual path is already normalized, but the new one might not be (e.g., ../)
-        char temp_path_for_norm[PATH_MAX];
-        strcpy(temp_path_for_norm, full_virtual_path);
-        mp_normalize_path(temp_path_for_norm);
-
-        EMAP *map;
-        if (find_embedded_file(temp_path_for_norm, &map)) {
-          struct stat tmp;
-          memset(&tmp, 0, sizeof(tmp));
-          tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-          switch (map->type) {
-            case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-            case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-          }
-          tmp.st_size = mp_uncompressed_size(map);
-          memcpy(buf, &tmp, sizeof(tmp));
-          return 0;
-        } else {
-          errno = ENOENT;
-          return -1;
-        }
-      }
-    }
+#ifdef AT_EMPTY_PATH
+  if (pathname[0] == '\0' && (flags & AT_EMPTY_PATH)) return mp_fstat(dirfd, buf);
+#endif
+  // The virtual file system does not support symlinks, so AT_SYMLINK_NOFOLLOW
+  // is effectively ignored as the behavior is the same as lstat/stat.
+  EMAP *map;
+  int found = mp_find_virtual_at(dirfd, pathname, &map);
+  if (found > 0) {
+    mp_fill_stat(map, buf);
+    return 0;
   }
-
-  // Fallback for absolute paths, AT_FDCWD, or native file descriptors
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
-      // The virtual file system does not support symlinks, so AT_SYMLINK_NOFOLLOW
-      // is effectively ignored as the behavior is the same as lstat/stat.
-      struct stat tmp;
-      memset(&tmp, 0, sizeof(tmp));
-      tmp.st_mode = S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
-      switch (map->type) {
-        case ETYPE_FILE: tmp.st_mode |= S_IFREG; break;
-        case ETYPE_DIRECTORY: tmp.st_mode |= S_IFDIR; break;
-      }
-      tmp.st_size = mp_uncompressed_size(map);
-      memcpy(buf, &tmp, sizeof(tmp));
-      return 0;
-    }
-  }
+  if (found < 0) return -1;
 
   // Fallback to the real fstatat for non-virtual files.
   return fstatat(dirfd, pathname, buf, flags);
 }
 
-MP_DECL(int) mp_access(const char *pathname, int mode) {
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(pathname, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
-      if (mode == F_OK) return 0; // Existence check passes
-      if ((mode & W_OK)) { // Write check fails
-        errno = EROFS;
-        return -1;
-      }
-      if ((mode & R_OK) || (mode & X_OK)) { // Read/Exec check passes
-        return 0;
-      }
-    }
+/* Virtual entries exist and can be read and searched, never written. */
+static int mp_virtual_access(int mode) {
+  if (mode & W_OK) {
+    errno = EROFS;
+    return -1;
   }
+  return 0;
+}
+
+MP_DECL(int) mp_access(const char *pathname, int mode) {
+  EMAP *map;
+  if (mp_find_virtual(pathname, &map)) return mp_virtual_access(mode);
   return access(pathname, mode);
 }
 
 MP_DECL(int) mp_faccessat(int dirfd, const char *pathname, int mode, int flags) {
-  // This implementation ignores dirfd and flags for virtual files.
-  return mp_access(pathname, mode);
+  EMAP *map;
+  int found = mp_find_virtual_at(dirfd, pathname, &map);
+  if (found > 0) return mp_virtual_access(mode);
+  if (found < 0) return -1;
+  return faccessat(dirfd, pathname, mode, flags);
 }
 
 MP_DECL(int) mp_statvfs(const char *path, struct statvfs *buf) {
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(path, absolute_path, PATH_MAX);
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-  if (get_executable_path(execfolder, executable)) {
-    char search_path[PATH_MAX] = {};
-    get_virtual_path(search_path, execfolder, absolute_path);
-
-    EMAP *map;
-    if (find_embedded_file(search_path, &map)) {
-      // Virtual file system lives on the same FS as the executable
-      return statvfs(execfolder, buf);
-    }
+  EMAP *map;
+  if (mp_find_virtual(path, &map)) {
+    // Virtual file system lives on the same FS as the executable
+    return statvfs(mp_execfolder, buf);
   }
   return statvfs(path, buf);
 }
 
 MP_DECL(int) mp_fstatvfs(int fd, struct statvfs *buf) {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
-  if (e != NULL) {
-    char execfolder[PATH_MAX] = {}, executable[PATH_MAX];
-    if (get_executable_path(execfolder, executable)) {
-      return statvfs(execfolder, buf);
-    }
+  if (mp_fd_lookup(fd) != NULL) {
+    return statvfs(mp_execfolder, buf);
   }
   return fstatvfs(fd, buf);
 }
 
 MP_DECL(ssize_t) mp_pwrite(int fd, const void *buf, size_t count, off_t offset) {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
-  if (e != NULL) {
+  if (mp_fd_lookup(fd) != NULL) {
     errno = EROFS; // Read-only file system
     return -1;
   }
@@ -3563,22 +3828,19 @@ MP_DECL(ssize_t) mp_pwrite(int fd, const void *buf, size_t count, off_t offset) 
 }
 
 MP_DECL(ssize_t) mp_readv(int fd, const struct iovec *iov, int iovcnt) {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e == NULL) {
     return readv(fd, iov, iovcnt);
+  }
+  if (e->map->type == ETYPE_DIRECTORY) {
+    errno = EISDIR;
+    return -1;
   }
 
   ssize_t total_read = 0;
   for (int i = 0; i < iovcnt; i++) {
-    ssize_t bytes_to_read = iov[i].iov_len;
-    ssize_t remaining_in_file = e->end - e->pos;
+    size_t bytes_to_read = iov[i].iov_len;
+    size_t remaining_in_file = mp_avail(e);
     if (bytes_to_read > remaining_in_file) {
       bytes_to_read = remaining_in_file;
     }
@@ -3598,25 +3860,26 @@ MP_DECL(ssize_t) mp_preadv(int fd, const struct iovec *iov, int iovcnt, off_t of
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e == NULL) {
     return preadv(fd, iov, iovcnt, offset);
   }
 
-  if (offset >= e->size) return 0;
+  if (e->map->type == ETYPE_DIRECTORY) {
+    errno = EISDIR;
+    return -1;
+  }
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if ((uint64_t)offset >= e->size) return 0;
 
   const char* start_pos = (e->end - e->size) + offset;
   ssize_t total_read = 0;
   for (int i = 0; i < iovcnt; i++) {
-    ssize_t bytes_to_read = iov[i].iov_len;
-    ssize_t remaining_in_file = e->end - start_pos;
+    size_t bytes_to_read = iov[i].iov_len;
+    size_t remaining_in_file = (size_t)(e->end - start_pos);
     if (bytes_to_read > remaining_in_file) {
       bytes_to_read = remaining_in_file;
     }
@@ -3632,8 +3895,9 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 
 #ifdef __linux
 MP_DECL(ssize_t) mp_preadv2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
-  // Ignoring flags for virtual files
-  return mp_preadv(fd, iov, iovcnt, offset);
+  if (mp_fd_lookup(fd) == NULL) return preadv2(fd, iov, iovcnt, offset, flags);
+  // Ignoring flags for virtual files; offset -1 reads at the file position.
+  return offset == -1 ? mp_readv(fd, iov, iovcnt) : mp_preadv(fd, iov, iovcnt, offset);
 }
 #endif
 
@@ -3642,15 +3906,7 @@ MP_DECL(ssize_t) mp_writev(int fd, const struct iovec *iov, int iovcnt)
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
-  if (e != NULL) {
+  if (mp_fd_lookup(fd) != NULL) {
     errno = EROFS; // Read-only
     return -1;
   }
@@ -3662,15 +3918,7 @@ MP_DECL(ssize_t) mp_pwritev(int fd, const struct iovec *iov, int iovcnt, off_t o
 __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 #endif
 {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
-  if (e != NULL) {
+  if (mp_fd_lookup(fd) != NULL) {
     errno = EROFS; // Read-only
     return -1;
   }
@@ -3679,84 +3927,106 @@ __API_AVAILABLE(macos(11.0), ios(14.0), watchos(7.0), tvos(14.0))
 
 #ifdef __linux
 MP_DECL(ssize_t) mp_pwritev2(int fd, const struct iovec *iov, int iovcnt, off_t offset, int flags) {
-  // Ignoring flags for virtual files
-  return mp_pwritev(fd, iov, iovcnt, offset);
+  if (mp_fd_lookup(fd) != NULL) {
+    errno = EROFS; // Read-only
+    return -1;
+  }
+  return pwritev2(fd, iov, iovcnt, offset, flags);
 }
 #endif
 
 typedef struct VDIR_S {
   const EMAP* dir_map;       // The directory entry being iterated
   uint32_t next_child;       // Index into dir_map->children of next entry to return
+  int fd;                    // fd taken over by fdopendir(), closed by closedir(); else -1
+  DIR *real;                 // The same directory on disk, listed after dir_map; or NULL
   struct dirent entry;       // The current entry to be returned
 } VDIR;
 
 // A map to associate DIR* pointers with our VDIR structs
 VDIR* mp_open_vdirs[512] = {};
 
-MP_DECL(DIR*) mp_opendir(const char* name) {
-  char absolute_path[PATH_MAX] = {};
-  mp_get_absolute_path(name, absolute_path, PATH_MAX);
+/* Opens the directory on disk that a virtual directory lies over, if any:
+ * files there stay visible in listings. "~/..." is below the executable. */
+static DIR *mp_vdir_open_real(const EMAP *dir_map) {
+  const char *vpath = mp_path_of(dir_map);
+  char path[PATH_MAX];
+  if (vpath[0] == '~') snprintf(path, PATH_MAX, "%s%s", mp_execfolder, vpath + 1);
+  else snprintf(path, PATH_MAX, "%s", vpath);
+  int err = errno;
+  DIR *real = opendir(path);
+  errno = err;
+  return real;
+}
 
-  char execfolder[PATH_MAX] = {}, executable[PATH_MAX] = {};
-  if (!get_executable_path(execfolder, executable)) {
-    return opendir(name);
+static DIR *mp_vdir_open(const EMAP *dir_map, int fd) {
+  VDIR* vdir = (VDIR*)calloc(1, sizeof(VDIR));
+  if (!vdir) {
+    errno = ENOMEM;
+    return NULL;
   }
+  vdir->dir_map = dir_map;
+  vdir->fd = fd;
+  vdir->real = mp_vdir_open_real(dir_map);
 
-  char virtual_dir_path[PATH_MAX] = {};
-  get_virtual_path(virtual_dir_path, execfolder, absolute_path);
+  MP_REGISTRY_LOCK();
+  for (int i = 0; i < 512; i++) {
+    if (mp_open_vdirs[i] == NULL) {
+      mp_open_vdirs[i] = vdir;
+      MP_REGISTRY_UNLOCK();
+      return (DIR*)vdir;
+    }
+  }
+  MP_REGISTRY_UNLOCK();
+  if (vdir->real) closedir(vdir->real);
+  free(vdir);
+  errno = EMFILE; // Too many open files
+  return NULL;
+}
 
+static VDIR *mp_vdir_lookup(DIR *dirp) {
+  for (int i = 0; i < 512; i++) {
+    if (mp_open_vdirs[i] == (VDIR*)dirp) return (VDIR*)dirp;
+  }
+  return NULL;
+}
+
+MP_DECL(DIR*) mp_opendir(const char* name) {
   EMAP *dir_map;
-  if (find_embedded_file(virtual_dir_path, &dir_map) && dir_map->type == ETYPE_DIRECTORY) {
-    VDIR* vdir = (VDIR*)malloc(sizeof(VDIR));
-    if (!vdir) {
-      errno = ENOMEM;
+  if (mp_find_virtual(name, &dir_map)) {
+    if (dir_map->type != ETYPE_DIRECTORY) {
+      errno = ENOTDIR;
       return NULL;
     }
-    vdir->dir_map = dir_map;
-    vdir->next_child = 0;
-
-    for (int i = 0; i < 512; i++) {
-      if (mp_open_vdirs[i] == NULL) {
-        mp_open_vdirs[i] = vdir;
-        return (DIR*)vdir;
-      }
-    }
-    free(vdir);
-    errno = EMFILE; // Too many open files
-    return NULL;
+    return mp_vdir_open(dir_map, -1);
   }
   return opendir(name);
 }
 
 MP_DECL(DIR*) mp_fdopendir(int fd) {
-  init_fd2file();
-  EFILE *e = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_fd2file[i].fd == fd) {
-      e = mp_fd2file[i].f;
-      break;
-    }
-  }
+  EFILE *e = mp_fd_lookup(fd);
   if (e != NULL) {
     // We have a virtual file descriptor. We can open it if it's a directory.
-    return mp_opendir(e->name);
+    if (e->map->type != ETYPE_DIRECTORY) {
+      errno = ENOTDIR;
+      return NULL;
+    }
+    return mp_vdir_open(e->map, fd);
   }
   return fdopendir(fd);
 }
 
 MP_DECL(struct dirent*) mp_readdir(DIR *dirp) {
-  VDIR* vdir = NULL;
-  for (int i = 0; i < 512; i++) {
-    if (mp_open_vdirs[i] == (VDIR*)dirp) {
-      vdir = (VDIR*)dirp;
-      break;
-    }
-  }
+  VDIR* vdir = mp_vdir_lookup(dirp);
   if (vdir == NULL) {
     return readdir(dirp);
   }
 
   if (vdir->next_child >= vdir->dir_map->children_count) {
+    struct dirent *real;
+    while (vdir->real && (real = readdir(vdir->real)) != NULL) {
+      if (!mp_shadowed(vdir->dir_map, real->d_name)) return real;
+    }
     return NULL; // No more entries
   }
   const EMAP* current_map = mp_embed_child_at(vdir->dir_map, vdir->next_child++);
@@ -3768,32 +4038,38 @@ MP_DECL(struct dirent*) mp_readdir(DIR *dirp) {
 
   strncpy(vdir->entry.d_name, filename_part, sizeof(vdir->entry.d_name));
   vdir->entry.d_name[sizeof(vdir->entry.d_name) - 1] = '\0';
-  vdir->entry.d_ino = (ino_t)(uintptr_t)current_map; // unique-enough fake inode
+#ifdef __APPLE__
+  vdir->entry.d_namlen = (uint16_t)strlen(vdir->entry.d_name);
+#endif
+  vdir->entry.d_ino = MP_VIRTUAL_INO_BASE + (ino_t)(current_map - mp_entries);
   vdir->entry.d_type = (current_map->type == ETYPE_DIRECTORY) ? DT_DIR : DT_REG;
   return &vdir->entry;
 }
 
 MP_DECL(int) mp_closedir(DIR *dirp) {
-  for (int i = 0; i < 512; i++) {
-    if (mp_open_vdirs[i] == (VDIR*)dirp) {
-      free(mp_open_vdirs[i]);
-      mp_open_vdirs[i] = NULL;
-      return 0;
-    }
+  VDIR* vdir = mp_vdir_lookup(dirp);
+  if (vdir == NULL) {
+    return closedir(dirp);
   }
-  return closedir(dirp);
-}
-
-MP_DECL(void) mp_rewinddir(DIR *dirp) {
-  VDIR* vdir = NULL;
+  MP_REGISTRY_LOCK();
   for (int i = 0; i < 512; i++) {
-    if (mp_open_vdirs[i] == (VDIR*)dirp) {
-      vdir = (VDIR*)dirp;
+    if (mp_open_vdirs[i] == vdir) {
+      mp_open_vdirs[i] = NULL;
       break;
     }
   }
+  MP_REGISTRY_UNLOCK();
+  int fd = vdir->fd;
+  if (vdir->real) closedir(vdir->real);
+  free(vdir);
+  return fd >= 0 ? mp_close(fd) : 0;
+}
+
+MP_DECL(void) mp_rewinddir(DIR *dirp) {
+  VDIR* vdir = mp_vdir_lookup(dirp);
   if (vdir != NULL) {
     vdir->next_child = 0;
+    if (vdir->real) rewinddir(vdir->real);
   } else {
     rewinddir(dirp);
   }

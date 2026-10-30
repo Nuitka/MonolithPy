@@ -52,6 +52,7 @@ typedef SSIZE_T ssize_t;
     #include <libgen.h>
     #include <sys/uio.h>
     #include <sys/statvfs.h>
+    #include <sys/mman.h>
 #endif  /* _WIN32 */
 #else  /* FOPEN_MAX */
 
@@ -204,6 +205,21 @@ typedef SSIZE_T ssize_t;
 #define readdir orig_readdir
 #define closedir orig_closedir
 #define rewinddir orig_rewinddir
+#define dup orig_dup
+#define dup2 orig_dup2
+#define dup3 orig_dup3
+#define _dup orig__dup
+#define _dup2 orig__dup2
+#define fcntl orig_fcntl
+#define _fstat32 orig__fstat32
+#define _fstat64 orig__fstat64
+#define _fstat32i64 orig__fstat32i64
+#define _fstat64i32 orig__fstat64i32
+#define ReadFile orig_ReadFile
+#define SetFilePointer orig_SetFilePointer
+#define SetFilePointerEx orig_SetFilePointerEx
+#define DuplicateHandle orig_DuplicateHandle
+#define mmap orig_mmap
 
 #ifdef __linux
 #define stdin orig_stdin
@@ -250,6 +266,7 @@ typedef SSIZE_T ssize_t;
 #include <dirent.h>
 #include <sys/uio.h>
 #include <sys/statvfs.h>
+#include <sys/mman.h>
 #endif  /* _WIN32 */
 #ifndef MONOLITHPY_EMBED_BUILD
 #undef open
@@ -395,6 +412,21 @@ typedef SSIZE_T ssize_t;
 #undef readdir
 #undef closedir
 #undef rewinddir
+#undef dup
+#undef dup2
+#undef dup3
+#undef _dup
+#undef _dup2
+#undef fcntl
+#undef _fstat32
+#undef _fstat64
+#undef _fstat32i64
+#undef _fstat64i32
+#undef ReadFile
+#undef SetFilePointer
+#undef SetFilePointerEx
+#undef DuplicateHandle
+#undef mmap
 
 #ifdef __linux
 #undef stdin
@@ -433,6 +465,9 @@ typedef SSIZE_T ssize_t;
  *   [Child slots]       (num_child_slots * 4 bytes; for readdir)
  *   [Entries]           (num_entries * 32 bytes; CHD slot-indexed)
  *   [Paths]             (paths_size bytes; null-terminated, indexed by entry.path_offset)
+ *   [Mtimes]            (num_entries * 8 bytes at mtimes_offset, 8-aligned; int64
+ *                        nanoseconds since the epoch, slot-indexed. Absent when
+ *                        mtimes_offset is 0.)
  *
  * nuitka_embed_data is just concatenated file content, indexed by
  * entry.data_pos / entry.data_size.
@@ -452,7 +487,8 @@ typedef struct mp_embed_header_S {
     uint32_t paths_size;
     uint32_t num_child_slots;
     uint32_t map_total_size;
-    uint8_t  pad[12];
+    uint32_t mtimes_offset;
+    uint8_t  pad[8];
 } mp_embed_header_t;
 
 struct EMAP_S {                  /* 32 bytes - 2 entries per cache line */
@@ -498,6 +534,11 @@ struct EFILE_S {    // Virtual File Stream
     char* crt_ptr;
     int   crt_cnt;
 #endif
+    /* ungetc() of a byte other than the one before pos writes it into
+     * owned_buf: 0x100 | the byte it replaced at offset unget_at, which is
+     * put back when the stream is repositioned. 0 when there is none. */
+    int    unget_saved;
+    size_t unget_at;
 };
 typedef struct EFILE_S EFILE;
 
@@ -937,6 +978,16 @@ MP_STD(HANDLE) mp_CreateFileMappingA(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileM
 MP_STD(HANDLE) mp_CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect, DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName);
 MP_STD(LPVOID) mp_MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh, DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap);
 MP_STD(BOOL) mp_UnmapViewOfFile(LPCVOID lpBaseAddress);
+MP_STD(BOOL) mp_ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
+MP_STD(DWORD) mp_SetFilePointer(HANDLE hFile, LONG lDistanceToMove, PLONG lpDistanceToMoveHigh, DWORD dwMoveMethod);
+MP_STD(BOOL) mp_SetFilePointerEx(HANDLE hFile, LARGE_INTEGER liDistanceToMove, PLARGE_INTEGER lpNewFilePointer, DWORD dwMoveMethod);
+MP_STD(BOOL) mp_DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle, LPHANDLE lpTargetHandle, DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwOptions);
+MP_DECL(int) mp__fstat32(int fd, struct _stat32 *buf);
+MP_DECL(int) mp__fstat64(int fd, struct _stat64 *buf);
+MP_DECL(int) mp__fstat32i64(int fd, struct _stat32i64 *buf);
+MP_DECL(int) mp__fstat64i32(int fd, struct _stat64i32 *buf);
+MP_DECL(int) mp_dup(int fd);
+MP_DECL(int) mp_dup2(int fd, int fd2);
 #else  /* _WIN32 */
 MP_DECL(int) mp_stat(const char *path, struct stat *buf);
 MP_DECL(int) mp_fstat(int fd, struct stat *buf);
@@ -958,6 +1009,13 @@ MP_DECL(DIR*) mp_fdopendir(int fd);
 MP_DECL(struct dirent*) mp_readdir(DIR *dirp);
 MP_DECL(int) mp_closedir(DIR *dirp);
 MP_DECL(void) mp_rewinddir(DIR *dirp);
+MP_DECL(int) mp_dup(int fd);
+MP_DECL(int) mp_dup2(int fd, int fd2);
+#ifdef __linux
+MP_DECL(int) mp_dup3(int fd, int fd2, int flags);
+#endif  /* __linux */
+MP_DECL(int) mp_fcntl(int fd, int cmd, ...);
+MP_DECL(void*) mp_mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset);
 #endif  /* _WIN32 */
 
 #if !defined(MONOLITHPY_EMBED_BUILD) && !defined(MP_STDIO_ALREADY_LOADED)
@@ -1129,7 +1187,7 @@ ALWAYS_INLINE MP_DECL(int) openat(int dirfd, const char *pathname, int flags, mo
 #define MP_EMBED_openat0() openat()
 #define MP_EMBED_openat1(a) openat(a)
 #define MP_EMBED_openat2(a, b) openat(a, b, 0)
-#define MP_EMBED_openat3(a, b, c) openat(a, b, c)
+#define MP_EMBED_openat3(a, b, c) openat(a, b, c, 0)
 #define MP_EMBED_openat4(a, b, c, d) openat(a, b, c, d)
 #define MP_EMBED_openat5(a, b, c, d, e) openat(a, b, c, d, e)
 #define MP_EMBED_openat6(a, b, c, d, e, f) openat(a, b, c, d, e, f)
@@ -1288,6 +1346,9 @@ ALWAYS_INLINE MP_DECL(int) _get_stream_buffer_pointers(FILE *stream, char ***pBa
 // Need to use a macro for this one due to varargs.
 #define fscanf mp_fscanf
 #define _fscanf mp_fscanf
+#ifndef _WIN32
+#define fcntl mp_fcntl
+#endif  /* _WIN32 */
 
 ALWAYS_INLINE MP_DECL(size_t) fread(void* ptr, size_t size, size_t count, FILE* stream) {
     return mp_fread(ptr, size, count, stream);
@@ -1516,6 +1577,78 @@ ALWAYS_INLINE MP_DECL(int) _wstat32i64(const wchar_t *path, struct _stat32i64 *b
 
 ALWAYS_INLINE MP_DECL(int) _wstat64i32(const wchar_t *path, struct _stat64i32 *buffer) {
     return mp__wstat64i32(path, buffer);
+}
+
+ALWAYS_INLINE MP_DECL(int) _fstat32(int fd, struct _stat32 *buffer) {
+    return mp__fstat32(fd, buffer);
+}
+
+ALWAYS_INLINE MP_DECL(int) _fstat64(int fd, struct _stat64 *buffer) {
+    return mp__fstat64(fd, buffer);
+}
+
+ALWAYS_INLINE MP_DECL(int) _fstat32i64(int fd, struct _stat32i64 *buffer) {
+    return mp__fstat32i64(fd, buffer);
+}
+
+ALWAYS_INLINE MP_DECL(int) _fstat64i32(int fd, struct _stat64i32 *buffer) {
+    return mp__fstat64i32(fd, buffer);
+}
+
+ALWAYS_INLINE MP_DECL(int) _dup(int fd) {
+    return mp_dup(fd);
+}
+
+ALWAYS_INLINE MP_DECL(int) dup(int fd) {
+    return mp_dup(fd);
+}
+
+ALWAYS_INLINE MP_DECL(int) _dup2(int fd, int fd2) {
+    return mp_dup2(fd, fd2);
+}
+
+ALWAYS_INLINE MP_DECL(int) dup2(int fd, int fd2) {
+    return mp_dup2(fd, fd2);
+}
+
+ALWAYS_INLINE MP_STD(BOOL) ReadFile(
+        _In_ HANDLE hFile,
+        _Out_writes_bytes_to_opt_(nNumberOfBytesToRead, *lpNumberOfBytesRead) LPVOID lpBuffer,
+        _In_ DWORD nNumberOfBytesToRead,
+        _Out_opt_ LPDWORD lpNumberOfBytesRead,
+        _Inout_opt_ LPOVERLAPPED lpOverlapped
+) {
+    return mp_ReadFile(hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+}
+
+ALWAYS_INLINE MP_STD(DWORD) SetFilePointer(
+        _In_ HANDLE hFile,
+        _In_ LONG lDistanceToMove,
+        _Inout_opt_ PLONG lpDistanceToMoveHigh,
+        _In_ DWORD dwMoveMethod
+) {
+    return mp_SetFilePointer(hFile, lDistanceToMove, lpDistanceToMoveHigh, dwMoveMethod);
+}
+
+ALWAYS_INLINE MP_STD(BOOL) SetFilePointerEx(
+        _In_ HANDLE hFile,
+        _In_ LARGE_INTEGER liDistanceToMove,
+        _Out_opt_ PLARGE_INTEGER lpNewFilePointer,
+        _In_ DWORD dwMoveMethod
+) {
+    return mp_SetFilePointerEx(hFile, liDistanceToMove, lpNewFilePointer, dwMoveMethod);
+}
+
+ALWAYS_INLINE MP_STD(BOOL) DuplicateHandle(
+        _In_ HANDLE hSourceProcessHandle,
+        _In_ HANDLE hSourceHandle,
+        _In_ HANDLE hTargetProcessHandle,
+        _Outptr_ LPHANDLE lpTargetHandle,
+        _In_ DWORD dwDesiredAccess,
+        _In_ BOOL bInheritHandle,
+        _In_ DWORD dwOptions
+) {
+    return mp_DuplicateHandle(hSourceProcessHandle, hSourceHandle, hTargetProcessHandle, lpTargetHandle, dwDesiredAccess, bInheritHandle, dwOptions);
 }
 
 ALWAYS_INLINE MP_STD(DWORD) GetFileAttributesA(_In_ LPCSTR lpFileName) {
@@ -1868,6 +2001,24 @@ ALWAYS_INLINE MP_DECL(int) closedir(DIR *dirp) {
 
 ALWAYS_INLINE MP_DECL(void) rewinddir(DIR *dirp) {
     mp_rewinddir(dirp);
+}
+
+ALWAYS_INLINE MP_DECL(int) dup(int fd) {
+    return mp_dup(fd);
+}
+
+ALWAYS_INLINE MP_DECL(int) dup2(int fd, int fd2) {
+    return mp_dup2(fd, fd2);
+}
+
+#ifdef __linux
+ALWAYS_INLINE MP_DECL(int) dup3(int fd, int fd2, int flags) {
+    return mp_dup3(fd, fd2, flags);
+}
+#endif  /* __linux */
+
+ALWAYS_INLINE MP_DECL(void *) mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset) {
+    return mp_mmap(addr, len, prot, flags, fd, offset);
 }
 #endif  /* _WIN32 */
 
