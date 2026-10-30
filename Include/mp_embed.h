@@ -1120,9 +1120,9 @@ MP_DECL(void*) mp_mmap(void *addr, size_t len, int prot, int flags, int fd, off_
 
 #ifdef __linux
 /* Standard streams.  */
-extern EFILE *stdin;		/* Standard input stream.  */
-extern EFILE *stdout;		/* Standard output stream.  */
-extern EFILE *stderr;		/* Standard error output stream.  */
+extern FILE *stdin;		/* Standard input stream.  */
+extern FILE *stdout;		/* Standard output stream.  */
+extern FILE *stderr;		/* Standard error output stream.  */
 #endif  /* __linux */
 
 /* File Opening and Closing */
