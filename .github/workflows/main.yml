@@ -138,7 +138,7 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.tar.gz"
+          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}-gcc$(gcc -dumpversion).tar.gz"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           curl -L "$file_url" -o "$file_name" || exit 0
           tar -xf "$file_name" || exit 0
@@ -218,7 +218,7 @@ jobs:
           CACHE_SAS: ${{ secrets.CACHE_SAS }}
         run: |
           cd ..
-          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}.tar.gz"
+          export "file_name=MP_ubuntu-${{ hashFiles('build.sh') }}-gcc$(gcc -dumpversion).tar.gz"
           export "file_url=https://nuitkapythonci.blob.core.windows.net/job-cache/${file_name}?${CACHE_SAS}"
           rm -rf ${file_name}
           rm -f MonolithPy-Deps/lib64
