@@ -2910,7 +2910,7 @@ MP_STD(BOOL) mp_GetFileInformationByHandle(HANDLE hFile, LPBY_HANDLE_FILE_INFORM
 
         // Use the address of the map entry as a unique file index.
         uintptr_t fileIndex = (uintptr_t)(e->map);
-        lpFileInformation->nFileIndexHigh = (DWORD)(fileIndex >> 32);
+        lpFileInformation->nFileIndexHigh = (DWORD)((uint64_t)fileIndex >> 32);
         lpFileInformation->nFileIndexLow = (DWORD)(fileIndex & 0xFFFFFFFF);
 
         lpFileInformation->ftCreationTime = lpFileInformation->ftLastAccessTime =
