@@ -70,21 +70,21 @@
       "checksums": [
         {
           "algorithm": "SHA256",
-          "checksumValue": "31b7c83102602ec29530b175eae56bc77c27b692534fdcf35e978245cc19d5e1"
+          "checksumValue": "906e4b84c82e3a3f7ab70617ce905ff4c29f32171290b35d727f490187068116"
         }
       ],
-      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/openssl-3.5.7.tar.gz",
+      "downloadLocation": "https://github.com/Nuitka/MonolithPy-source-deps/archive/refs/tags/openssl-3.5.9.tar.gz",
       "externalRefs": [
         {
           "referenceCategory": "SECURITY",
-          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.5.7:*:*:*:*:*:*:*",
+          "referenceLocator": "cpe:2.3:a:openssl:openssl:3.5.9:*:*:*:*:*:*:*",
           "referenceType": "cpe23Type"
         }
       ],
       "licenseConcluded": "NOASSERTION",
       "name": "openssl",
       "primaryPackagePurpose": "SOURCE",
-      "versionInfo": "3.5.7"
+      "versionInfo": "3.5.9"
     },
     {
       "SPDXID": "SPDXRef-PACKAGE-sqlite",

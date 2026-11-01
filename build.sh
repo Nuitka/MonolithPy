@@ -196,10 +196,10 @@ export "CPPFLAGS=$CPPFLAGS_bak"
 cd ..
 fi
 
-if [ ! -d openssl-3.5.7 ]; then
-download_file https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz openssl.tar.gz
+if [ ! -d openssl-3.5.9 ]; then
+download_file https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz openssl.tar.gz
 tar -xf openssl.tar.gz
-cd openssl-3.5.7
+cd openssl-3.5.9
 export "CPPINCLUDES=$PYTHON_BASE/Include"
 ./Configure --prefix=${PREFIX} --libdir=lib linux-x86_64 enable-ec_nistp_64_gcc_128 no-shared no-tests --openssldir=/vfs/ssl
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
