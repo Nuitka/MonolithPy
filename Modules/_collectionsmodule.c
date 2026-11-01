@@ -508,7 +508,6 @@ deque_extend_impl(dequeobject *deque, PyObject *iterable)
     iternext = *Py_TYPE(it)->tp_iternext;
     while ((item = iternext(it)) != NULL) {
         if (deque_append_lock_held(deque, item, maxlen) == -1) {
-            Py_DECREF(item);
             Py_DECREF(it);
             return NULL;
         }
@@ -646,7 +645,7 @@ deque_copy_impl(dequeobject *deque)
         result = PyObject_CallOneArg((PyObject *)(Py_TYPE(deque)),
                                      (PyObject *)deque);
     else
-        result = PyObject_CallFunction((PyObject *)(Py_TYPE(deque)), "Oi",
+        result = PyObject_CallFunction((PyObject *)(Py_TYPE(deque)), "On",
                                        deque, old_deque->maxlen, NULL);
     if (result != NULL && !PyObject_TypeCheck(result, state->deque_type)) {
         PyErr_Format(PyExc_TypeError,

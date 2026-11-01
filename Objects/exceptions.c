@@ -233,7 +233,7 @@ BaseException___reduce___impl(PyBaseExceptionObject *self)
  */
 
 /*[clinic input]
-@critical_section
+@critical_section state
 BaseException.__setstate__
     state: object
     /
@@ -241,7 +241,7 @@ BaseException.__setstate__
 
 static PyObject *
 BaseException___setstate___impl(PyBaseExceptionObject *self, PyObject *state)
-/*[clinic end generated code: output=f3834889950453ab input=5524b61cfe9b9856]*/
+/*[clinic end generated code: output=f3834889950453ab input=f9b1aea70382cdb6]*/
 {
     PyObject *d_key, *d_value;
     Py_ssize_t i = 0;
@@ -352,12 +352,13 @@ BaseException_args_get_impl(PyBaseExceptionObject *self)
 /*[clinic input]
 @critical_section
 @setter
+@deleter
 BaseException.args
 [clinic start generated code]*/
 
 static int
 BaseException_args_set_impl(PyBaseExceptionObject *self, PyObject *value)
-/*[clinic end generated code: output=331137e11d8f9e80 input=2400047ea5970a84]*/
+/*[clinic end generated code: output=331137e11d8f9e80 input=177ad350c8b45219]*/
 {
     PyObject *seq;
     if (value == NULL) {
@@ -391,13 +392,14 @@ BaseException___traceback___get_impl(PyBaseExceptionObject *self)
 /*[clinic input]
 @critical_section
 @setter
+@deleter
 BaseException.__traceback__
 [clinic start generated code]*/
 
 static int
 BaseException___traceback___set_impl(PyBaseExceptionObject *self,
                                      PyObject *value)
-/*[clinic end generated code: output=a82c86d9f29f48f0 input=12676035676badad]*/
+/*[clinic end generated code: output=a82c86d9f29f48f0 input=53a1df586023d786]*/
 {
     if (value == NULL) {
         PyErr_SetString(PyExc_TypeError, "__traceback__ may not be deleted");
@@ -436,13 +438,14 @@ BaseException___context___get_impl(PyBaseExceptionObject *self)
 /*[clinic input]
 @critical_section
 @setter
+@deleter
 BaseException.__context__
 [clinic start generated code]*/
 
 static int
 BaseException___context___set_impl(PyBaseExceptionObject *self,
                                    PyObject *value)
-/*[clinic end generated code: output=b4cb52dcca1da3bd input=c0971adf47fa1858]*/
+/*[clinic end generated code: output=b4cb52dcca1da3bd input=fe79e7c0a0854004]*/
 {
     if (value == NULL) {
         PyErr_SetString(PyExc_TypeError, "__context__ may not be deleted");
@@ -479,13 +482,14 @@ BaseException___cause___get_impl(PyBaseExceptionObject *self)
 /*[clinic input]
 @critical_section
 @setter
+@deleter
 BaseException.__cause__
 [clinic start generated code]*/
 
 static int
 BaseException___cause___set_impl(PyBaseExceptionObject *self,
                                  PyObject *value)
-/*[clinic end generated code: output=6161315398aaf541 input=e1b403c0bde3f62a]*/
+/*[clinic end generated code: output=6161315398aaf541 input=3fdd9a0d1674abc9]*/
 {
     if (value == NULL) {
         PyErr_SetString(PyExc_TypeError, "__cause__ may not be deleted");
@@ -994,11 +998,11 @@ BaseExceptionGroup_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
          */
         cls = (PyTypeObject*)PyExc_BaseExceptionGroup;
     }
-    PyBaseExceptionGroupObject *self =
-        PyBaseExceptionGroupObject_CAST(BaseException_new(cls, args, kwds));
-    if (!self) {
+    PyObject *op = BaseException_new(cls, args, kwds);
+    if (!op) {
         goto error;
     }
+    PyBaseExceptionGroupObject *self = PyBaseExceptionGroupObject_CAST(op);
 
     self->msg = Py_NewRef(message);
     self->excs = exceptions;
@@ -1100,7 +1104,8 @@ BaseExceptionGroup_repr(PyObject *op)
          * value of self.args[1]; but this can be mutable and go out-of-sync
          * with self.exceptions. Instead, use self.exceptions for accuracy,
          * making it look like self.args[1] for backwards compatibility. */
-        if (PyList_Check(PyTuple_GET_ITEM(self->args, 1))) {
+        assert(PyTuple_Check(self->args));
+        if (PyTuple_GET_SIZE(self->args) == 2 && PyList_Check(PyTuple_GET_ITEM(self->args, 1))) {
             PyObject *exceptions_list = PySequence_List(self->excs);
             if (!exceptions_list) {
                 return NULL;
@@ -2074,10 +2079,10 @@ oserror_init(PyOSErrorObject *self, PyObject **p_args,
                 return -1;
         }
         else {
-            self->filename = Py_NewRef(filename);
+            Py_XSETREF(self->filename, Py_NewRef(filename));
 
             if (filename2 && filename2 != Py_None) {
-                self->filename2 = Py_NewRef(filename2);
+                Py_XSETREF(self->filename2, Py_NewRef(filename2));
             }
 
             if (nargs >= 2 && nargs <= 5) {
@@ -2092,10 +2097,10 @@ oserror_init(PyOSErrorObject *self, PyObject **p_args,
             }
         }
     }
-    self->myerrno = Py_XNewRef(myerrno);
-    self->strerror = Py_XNewRef(strerror);
+    Py_XSETREF(self->myerrno, Py_XNewRef(myerrno));
+    Py_XSETREF(self->strerror, Py_XNewRef(strerror));
 #ifdef MS_WINDOWS
-    self->winerror = Py_XNewRef(winerror);
+    Py_XSETREF(self->winerror, Py_XNewRef(winerror));
 #endif
 
     /* Steals the reference to args */

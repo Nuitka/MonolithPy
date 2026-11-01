@@ -5,13 +5,14 @@
 import collections.abc
 import unittest
 from test import support
-from test.support import import_helper
+from test.support import import_helper, script_helper
 from test.support import os_helper
 from test.support import _2G
 from test.support import subTests
 import weakref
 import pickle
 import operator
+import re
 import struct
 import sys
 import warnings
@@ -35,6 +36,11 @@ typecodes = 'uwbBhHiIlLfdqQ'
 
 class MiscTest(unittest.TestCase):
 
+    def test_array_type_importable(self):
+        from array import ArrayType
+
+        self.assertIs(array.array, ArrayType)
+
     def test_array_is_sequence(self):
         self.assertIsInstance(array.array("B"), collections.abc.MutableSequence)
         self.assertIsInstance(array.array("B"), collections.abc.Reversible)
@@ -44,6 +50,23 @@ class MiscTest(unittest.TestCase):
         self.assertRaises(TypeError, array.array, spam=42)
         self.assertRaises(TypeError, array.array, 'xx')
         self.assertRaises(ValueError, array.array, 'x')
+
+    @support.cpython_only
+    def test_does_not_crash_on_broken_imports(self):
+        # gh-153210
+        code = """if 1:
+            import collections.abc
+
+            del collections.abc.MutableSequence
+
+            try:
+                import array  # it used to crash before
+            except AttributeError:
+                pass
+            else:
+                raise AssertionError('AttributeError was not raised')
+        """
+        script_helper.assert_python_ok('-c', code)
 
     @support.cpython_only
     def test_disallow_instantiation(self):
@@ -67,6 +90,27 @@ class MiscTest(unittest.TestCase):
         self.assertEqual(len(a * 3), 0)
         a += a
         self.assertEqual(len(a), 0)
+
+    @support.cpython_only
+    @support.requires_docstrings
+    def test_typecodes_documented(self):
+        # The type code table in the array.array docstring must list every
+        # supported type code, and nothing else, and the minimum size it
+        # gives for each of them must be one the implementation meets.
+        row = re.compile(r"^ {4}'(\w+)' +\S.*? +(\d+)(?: \(see note\))?$")
+        documented = {}
+        for line in array.array.__doc__.splitlines():
+            match = row.match(line)
+            if match is not None:
+                documented[match.group(1)] = int(match.group(2))
+
+        self.assertEqual(sorted(documented), sorted(array.typecodes))
+        for typecode, minimum_size in documented.items():
+            with self.subTest(typecode=typecode):
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', DeprecationWarning)
+                    self.assertGreaterEqual(array.array(typecode).itemsize,
+                                            minimum_size)
 
 
 # Machine format codes.

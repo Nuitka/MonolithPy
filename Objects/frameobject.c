@@ -1109,7 +1109,7 @@ frame_back_get_impl(PyFrameObject *self)
 /*[clinic end generated code: output=3a84c22a55a63c79 input=9e528570d0e1f44a]*/
 {
     PyObject *res = (PyObject *)PyFrame_GetBack(self);
-    if (res == NULL) {
+    if (res == NULL && !PyErr_Occurred()) {
         Py_RETURN_NONE;
     }
     return res;
@@ -1641,10 +1641,6 @@ frame_lineno_set_impl(PyFrameObject *self, PyObject *value)
 /*[clinic end generated code: output=e64c86ff6be64292 input=36ed3c896b27fb91]*/
 {
     PyCodeObject *code = _PyFrame_GetCode(self->f_frame);
-    if (value == NULL) {
-        PyErr_SetString(PyExc_AttributeError, "cannot delete attribute");
-        return -1;
-    }
     /* f_lineno must be an integer. */
     if (!PyLong_CheckExact(value)) {
         PyErr_SetString(PyExc_ValueError,
@@ -1856,12 +1852,13 @@ frame_trace_get_impl(PyFrameObject *self)
 /*[clinic input]
 @critical_section
 @setter
+@deleter
 frame.f_trace as frame_trace
 [clinic start generated code]*/
 
 static int
 frame_trace_set_impl(PyFrameObject *self, PyObject *value)
-/*[clinic end generated code: output=d6fe08335cf76ae4 input=d96a18bda085707f]*/
+/*[clinic end generated code: output=d6fe08335cf76ae4 input=b652d64fdd1189f2]*/
 {
     if (value == Py_None) {
         value = NULL;
@@ -2400,6 +2397,9 @@ PyFrame_GetBack(PyFrameObject *frame)
         prev = _PyFrame_GetFirstComplete(prev);
         if (prev) {
             back = _PyFrame_GetFrameObject(prev);
+            if (back == NULL) {
+                return NULL;
+            }
         }
     }
     return (PyFrameObject*)Py_XNewRef(back);

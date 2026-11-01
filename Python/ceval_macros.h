@@ -285,6 +285,25 @@ GETITEM(PyObject *v, Py_ssize_t i) {
 #define ADAPTIVE_COUNTER_TRIGGERS(COUNTER) \
     backoff_counter_triggers(forge_backoff_counter((COUNTER)))
 
+#ifdef Py_GIL_DISABLED
+/* Counters are unreachable when thread-local bytecode is disabled,
+ * so there is no need to update them. */
+#define ADVANCE_ADAPTIVE_COUNTER(COUNTER) \
+    do { \
+        _Py_BackoffCounter cnt = (COUNTER); \
+        if (!is_unreachable_backoff_counter(cnt)) { \
+            (COUNTER) = advance_backoff_counter(cnt); \
+        } \
+    } while (0);
+
+#define PAUSE_ADAPTIVE_COUNTER(COUNTER) \
+    do { \
+        _Py_BackoffCounter cnt = (COUNTER); \
+        if (!is_unreachable_backoff_counter(cnt)) { \
+            (COUNTER) = pause_backoff_counter(cnt); \
+        } \
+    } while (0);
+#else
 #define ADVANCE_ADAPTIVE_COUNTER(COUNTER) \
     do { \
         (COUNTER) = advance_backoff_counter((COUNTER)); \
@@ -294,6 +313,7 @@ GETITEM(PyObject *v, Py_ssize_t i) {
     do { \
         (COUNTER) = pause_backoff_counter((COUNTER)); \
     } while (0);
+#endif
 
 #ifdef ENABLE_SPECIALIZATION_FT
 /* Multiple threads may execute these concurrently if thread-local bytecode is
@@ -320,14 +340,15 @@ GETITEM(PyObject *v, Py_ssize_t i) {
 // for an exception handler, displaying the traceback, and so on
 #define INSTRUMENTED_JUMP(src, dest, event) \
 do { \
+    _Py_CODEUNIT *_dest = (dest); \
     if (tstate->tracing) {\
-        next_instr = dest; \
+        next_instr = _dest; \
     } else { \
         _PyFrame_SetStackPointer(frame, stack_pointer); \
-        next_instr = _Py_call_instrumentation_jump(this_instr, tstate, event, frame, src, dest); \
+        next_instr = _Py_call_instrumentation_jump(this_instr, tstate, event, frame, src, _dest); \
         stack_pointer = _PyFrame_GetStackPointer(frame); \
         if (next_instr == NULL) { \
-            next_instr = (dest)+1; \
+            next_instr = _dest + 1; \
             JUMP_TO_LABEL(error); \
         } \
     } \

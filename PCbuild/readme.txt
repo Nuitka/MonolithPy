@@ -236,7 +236,7 @@ _sqlite3
     Homepage:
         http://www.sqlite.org/
 _tkinter
-    Wraps version 8.6.15 of the Tk windowing system, which is downloaded
+    Wraps version 9.0.4 of the Tk windowing system, which is downloaded
     from our binaries repository at
     https://github.com/python/cpython-bin-deps.
 

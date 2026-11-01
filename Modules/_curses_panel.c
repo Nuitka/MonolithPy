@@ -252,11 +252,13 @@ _curses_panel.panel.show
     cls: defining_class
 
 Display the panel (which might have been hidden).
+
+The panel is placed on top of the panel stack.
 [clinic start generated code]*/
 
 static PyObject *
 _curses_panel_panel_show_impl(PyCursesPanelObject *self, PyTypeObject *cls)
-/*[clinic end generated code: output=dc3421de375f0409 input=8122e80151cb4379]*/
+/*[clinic end generated code: output=dc3421de375f0409 input=59375ba57303320d]*/
 {
     _curses_panel_state *state = PyType_GetModuleState(cls);
     return PyCursesCheckERR(state, show_panel(self->pan), "show");
@@ -309,13 +311,13 @@ PyCursesPanel_Clear(PyObject *op)
     PyCursesPanelObject *self = _PyCursesPanelObject_CAST(op);
     PyObject *extra = (PyObject *)panel_userptr(self->pan);
     if (extra != NULL) {
-        Py_DECREF(extra);
         if (set_panel_userptr(self->pan, NULL) == ERR) {
             _curses_panel_state *state = get_curses_panel_state_by_panel(self);
             PyErr_SetString(state->PyCursesError,
                             "set_panel_userptr() returned ERR");
             return -1;
         }
+        Py_DECREF(extra);
     }
     // self->wo should not be cleared because an associated WINDOW may exist
     return 0;
@@ -328,18 +330,26 @@ PyCursesPanel_Dealloc(PyObject *self)
     PyObject_GC_UnTrack(self);
 
     PyCursesPanelObject *po = _PyCursesPanelObject_CAST(self);
-    if (PyCursesPanel_Clear(self) < 0) {
+    PyObject *extra = (PyObject *)panel_userptr(po->pan);
+    if (extra != NULL && set_panel_userptr(po->pan, NULL) == ERR) {
+        _curses_panel_state *state = get_curses_panel_state_by_panel(po);
+        PyErr_SetString(state->PyCursesError,
+                        "set_panel_userptr() returned ERR");
         PyErr_FormatUnraisable("Exception ignored in PyCursesPanel_Dealloc()");
+    }
+    if (po->wo != NULL) {
+        remove_lop(po);
+        if (PyErr_Occurred()) {
+            PyErr_FormatUnraisable("Exception ignored in PyCursesPanel_Dealloc()");
+        }
     }
     if (del_panel(po->pan) == ERR && !PyErr_Occurred()) {
         _curses_panel_state *state = get_curses_panel_state_by_panel(po);
         PyErr_SetString(state->PyCursesError, "del_panel() returned ERR");
         PyErr_FormatUnraisable("Exception ignored in PyCursesPanel_Dealloc()");
     }
-    if (po->wo != NULL) {
-        Py_DECREF(po->wo);
-        remove_lop(po);
-    }
+    Py_XDECREF(extra);
+    Py_XDECREF(po->wo);
     tp->tp_free(po);
     Py_DECREF(tp);
 }
@@ -634,11 +644,13 @@ _curses_panel.new_panel
     /
 
 Return a panel object, associating it with the given window win.
+
+The new panel is placed on top of the panel stack.
 [clinic start generated code]*/
 
 static PyObject *
 _curses_panel_new_panel_impl(PyObject *module, PyCursesWindowObject *win)
-/*[clinic end generated code: output=45e948e0176a9bd2 input=74d4754e0ebe4800]*/
+/*[clinic end generated code: output=45e948e0176a9bd2 input=3b6fea647b808fd7]*/
 {
     _curses_panel_state *state = get_curses_panel_state(module);
 

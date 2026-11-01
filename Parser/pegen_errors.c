@@ -9,53 +9,6 @@
 
 // TOKENIZER ERRORS
 
-void
-_PyPegen_raise_tokenizer_init_error(PyObject *filename)
-{
-    if (!(PyErr_ExceptionMatches(PyExc_LookupError)
-          || PyErr_ExceptionMatches(PyExc_SyntaxError)
-          || PyErr_ExceptionMatches(PyExc_ValueError)
-          || PyErr_ExceptionMatches(PyExc_UnicodeDecodeError))) {
-        return;
-    }
-    PyObject *errstr = NULL;
-    PyObject *tuple = NULL;
-    PyObject *type;
-    PyObject *value;
-    PyObject *tback;
-    PyErr_Fetch(&type, &value, &tback);
-    if (PyErr_GivenExceptionMatches(value, PyExc_SyntaxError)) {
-        if (PyObject_SetAttr(value, &_Py_ID(filename), filename)) {
-            goto error;
-        }
-        PyErr_Restore(type, value, tback);
-        return;
-    }
-    errstr = PyObject_Str(value);
-    if (!errstr) {
-        goto error;
-    }
-
-    PyObject *tmp = Py_BuildValue("(OiiO)", filename, 0, -1, Py_None);
-    if (!tmp) {
-        goto error;
-    }
-
-    tuple = PyTuple_Pack(2, errstr, tmp);
-    Py_DECREF(tmp);
-    if (!tuple) {
-        goto error;
-    }
-    PyErr_SetObject(PyExc_SyntaxError, tuple);
-
-error:
-    Py_XDECREF(type);
-    Py_XDECREF(value);
-    Py_XDECREF(tback);
-    Py_XDECREF(errstr);
-    Py_XDECREF(tuple);
-}
-
 static inline void
 raise_unclosed_parentheses_error(Parser *p) {
        int error_lineno = p->tok->parenlinenostack[p->tok->level-1];
@@ -129,6 +82,12 @@ _Pypegen_tokenizer_error(Parser *p)
 int
 _Pypegen_raise_decode_error(Parser *p)
 {
+    return _Pypegen_raise_decode_error_known_location(p, NULL);
+}
+
+int
+_Pypegen_raise_decode_error_known_location(Parser *p, expr_ty a)
+{
     assert(PyErr_Occurred());
     const char *errtype = NULL;
     if (PyErr_ExceptionMatches(PyExc_UnicodeError)) {
@@ -145,12 +104,22 @@ _Pypegen_raise_decode_error(Parser *p)
         PyErr_Fetch(&type, &value, &tback);
         errstr = PyObject_Str(value);
         if (errstr) {
-            RAISE_SYNTAX_ERROR("(%s) %U", errtype, errstr);
+            if (a != NULL) {
+                RAISE_SYNTAX_ERROR_KNOWN_LOCATION(a, "(%s) %U", errtype, errstr);
+            }
+            else {
+                RAISE_SYNTAX_ERROR("(%s) %U", errtype, errstr);
+            }
             Py_DECREF(errstr);
         }
         else {
             PyErr_Clear();
-            RAISE_SYNTAX_ERROR("(%s) unknown error", errtype);
+            if (a != NULL) {
+                RAISE_SYNTAX_ERROR_KNOWN_LOCATION(a, "(%s) unknown error", errtype);
+            }
+            else {
+                RAISE_SYNTAX_ERROR("(%s) unknown error", errtype);
+            }
         }
         Py_XDECREF(type);
         Py_XDECREF(value);

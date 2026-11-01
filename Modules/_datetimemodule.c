@@ -1031,7 +1031,16 @@ parse_hh_mm_ss_ff(const char *tstr, const char *tstr_end, int *hour,
             has_separator = (c == ':');
         }
 
-        if (p >= p_end) {
+        if (c == '.' || c == ',') {
+            if (i < 2) {
+                return -3;  // Decimal mark on hour or minute
+            }
+            if (p >= p_end) {
+                return -3;  // Decimal mark not followed by any digit
+            }
+            break;
+        }
+        else if (p >= p_end) {
             return c != '\0';
         }
         else if (has_separator && (c == ':')) {
@@ -1040,14 +1049,10 @@ parse_hh_mm_ss_ff(const char *tstr, const char *tstr_end, int *hour,
             }
             continue;
         }
-        else if (c == '.' || c == ',') {
-            if (i < 2) {
-                return -3; // Decimal mark on hour or minute
-            }
-            break;
-        } else if (!has_separator) {
+        else if (!has_separator) {
             --p;
-        } else {
+        }
+        else {
             return -4;  // Malformed time separator
         }
     }
@@ -1660,8 +1665,8 @@ tzinfo_from_isoformat_results(int rv, int tzoffset, int tz_useconds)
 {
     PyObject *tzinfo;
     if (rv == 1) {
-        // Create a timezone from offset in seconds (0 returns UTC)
-        if (tzoffset == 0) {
+        // Create a timezone from the offset (a zero offset returns UTC)
+        if (tzoffset == 0 && tz_useconds == 0) {
             return Py_NewRef(CONST_UTC(NO_STATE));
         }
 
@@ -1767,17 +1772,19 @@ inline static int
 normalize_century(void)
 {
     static int cache = -1;
-    if (cache < 0) {
+    int res = FT_ATOMIC_LOAD_INT_RELAXED(cache);
+    if (res < 0) {
         char year[5];
         struct tm date = {
             .tm_year = -1801,
             .tm_mon = 0,
             .tm_mday = 1
         };
-        cache = (strftime(year, sizeof(year), "%Y", &date) &&
-                 strcmp(year, "0099") != 0);
+        res = (strftime(year, sizeof(year), "%Y", &date) &&
+               strcmp(year, "0099") != 0);
+        FT_ATOMIC_STORE_INT_RELAXED(cache, res);
     }
-    return cache;
+    return res;
 }
 
 static PyObject *
@@ -5981,7 +5988,7 @@ datetime_fromisoformat(PyObject *cls, PyObject *dtstr)
         goto error;
     }
 
-    if ((hour == 24) && (month <= 12))  {
+    if ((hour == 24) && (month >= 1 && month <= 12))  {
         int d_in_month = days_in_month(year, month);
         if (day <= d_in_month) {
             if (minute == 0 && second == 0 && microsecond == 0) {
@@ -6583,6 +6590,9 @@ local_timezone_from_timestamp(time_t timestamp)
     struct tm local_time_tm;
     PyObject *nameo = NULL;
     const char *zone = NULL;
+#ifndef HAVE_STRUCT_TM_TM_ZONE
+    char buf[100];  // for zone, which is used after the block below
+#endif
 
     if (_PyTime_localtime(timestamp, &local_time_tm) != 0)
         return NULL;
@@ -6593,9 +6603,9 @@ local_timezone_from_timestamp(time_t timestamp)
     {
         PyObject *local_time, *utc_time;
         struct tm utc_time_tm;
-        char buf[100];
-        strftime(buf, sizeof(buf), "%Z", &local_time_tm);
-        zone = buf;
+        if (strftime(buf, sizeof(buf), "%Z", &local_time_tm) != 0) {
+            zone = buf;
+        }
         local_time = new_datetime(local_time_tm.tm_year + 1900,
                                   local_time_tm.tm_mon + 1,
                                   local_time_tm.tm_mday,
@@ -6605,8 +6615,10 @@ local_timezone_from_timestamp(time_t timestamp)
         if (local_time == NULL) {
             return NULL;
         }
-        if (_PyTime_gmtime(timestamp, &utc_time_tm) != 0)
+        if (_PyTime_gmtime(timestamp, &utc_time_tm) != 0) {
+            Py_DECREF(local_time);
             return NULL;
+        }
         utc_time = new_datetime(utc_time_tm.tm_year + 1900,
                                 utc_time_tm.tm_mon + 1,
                                 utc_time_tm.tm_mday,

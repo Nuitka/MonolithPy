@@ -1,4 +1,5 @@
 #include "Python.h"
+#include "pycore_bytesobject.h"       // _PyBytes_ResizeKeepOnError()
 #include "pycore_critical_section.h"  // Py_BEGIN_CRITICAL_SECTION()
 #include "pycore_object.h"
 #include "pycore_sysmodule.h"     // _PySys_GetSizeOf()
@@ -22,6 +23,9 @@ typedef struct {
     PyObject *dict;
     PyObject *weakreflist;
     Py_ssize_t exports;
+#ifdef Py_GIL_DISABLED
+    int buf_shared;
+#endif
 } bytesio;
 
 #define bytesio_CAST(op)    ((bytesio *)(op))
@@ -71,7 +75,45 @@ check_exports(bytesio *self)
         return NULL; \
     }
 
+#ifdef Py_GIL_DISABLED
+#define SHARED_BUF(self) ((self)->buf_shared || !_PyObject_IsUniquelyReferenced((self)->buf))
+#else
 #define SHARED_BUF(self) (!_PyObject_IsUniquelyReferenced((self)->buf))
+#endif
+
+static inline void
+set_shared_buf(bytesio *self)
+{
+#ifdef Py_GIL_DISABLED
+    self->buf_shared = 1;
+#endif
+}
+
+static inline void
+clear_shared_buf(bytesio *self)
+{
+#ifdef Py_GIL_DISABLED
+    self->buf_shared = 0;
+#endif
+}
+
+static int
+resize_unshared_buffer_lock_held(bytesio *self, Py_ssize_t size)
+{
+    _Py_CRITICAL_SECTION_ASSERT_OBJECT_LOCKED(self);
+
+#ifdef Py_GIL_DISABLED
+    /* If the internal bytes object escaped via a zero-copy getvalue(), read(),
+       or peek(), resizing it would mutate an object visible to Python code.
+       Callers must detach first. */
+    assert(!self->buf_shared);
+#endif
+    int ret = _PyBytes_ResizeKeepOnError(&self->buf, size);
+    if (ret == 0) {
+        clear_shared_buf(self);
+    }
+    return ret;
+}
 
 
 /* Internal routine to get a line from the buffer of a BytesIO
@@ -128,6 +170,7 @@ unshare_buffer_lock_held(bytesio *self, size_t size)
     memcpy(PyBytes_AS_STRING(new_buf), PyBytes_AS_STRING(self->buf),
            self->string_size);
     Py_SETREF(self->buf, new_buf);
+    clear_shared_buf(self);
     return 0;
 }
 
@@ -173,7 +216,7 @@ resize_buffer_lock_held(bytesio *self, size_t size)
             return -1;
     }
     else {
-        if (_PyBytes_Resize(&self->buf, alloc) < 0)
+        if (resize_unshared_buffer_lock_held(self, alloc) < 0)
             return -1;
     }
 
@@ -381,10 +424,11 @@ _io_BytesIO_getvalue_impl(bytesio *self)
                 return NULL;
         }
         else {
-            if (_PyBytes_Resize(&self->buf, self->string_size) < 0)
+            if (resize_unshared_buffer_lock_held(self, self->string_size) < 0)
                 return NULL;
         }
     }
+    set_shared_buf(self);
     return Py_NewRef(self->buf);
 }
 
@@ -433,6 +477,7 @@ read_bytes_lock_held(bytesio *self, Py_ssize_t size)
         self->pos == 0 && size == PyBytes_GET_SIZE(self->buf) &&
         FT_ATOMIC_LOAD_SSIZE_RELAXED(self->exports) == 0) {
         self->pos += size;
+        set_shared_buf(self);
         return Py_NewRef(self->buf);
     }
 
@@ -625,7 +670,7 @@ _io_BytesIO_readinto_impl(bytesio *self, Py_buffer *buffer)
 
     assert(self->pos + len <= PY_SSIZE_T_MAX);
     assert(len >= 0);
-    memcpy(buffer->buf, PyBytes_AS_STRING(self->buf) + self->pos, len);
+    memmove(buffer->buf, PyBytes_AS_STRING(self->buf) + self->pos, len);
     self->pos += len;
 
     return PyLong_FromSsize_t(len);
@@ -665,12 +710,17 @@ _io_BytesIO_truncate_impl(bytesio *self, PyObject *size)
                          "negative size value %zd", new_size);
             return NULL;
         }
+        CHECK_CLOSED(self);
+        CHECK_EXPORTS(self);
     }
 
     if (new_size < self->string_size) {
+        Py_ssize_t old_string_size = self->string_size;
         self->string_size = new_size;
-        if (resize_buffer_lock_held(self, new_size) < 0)
+        if (resize_buffer_lock_held(self, new_size) < 0) {
+            self->string_size = old_string_size;
             return NULL;
+        }
     }
 
     return PyLong_FromSsize_t(new_size);
@@ -1034,18 +1084,20 @@ static int
 _io_BytesIO___init___impl(bytesio *self, PyObject *initvalue)
 /*[clinic end generated code: output=65c0c51e24c5b621 input=3da5a74ee4c4f1ac]*/
 {
-    /* In case, __init__ is called multiple times. */
-    self->string_size = 0;
-    self->pos = 0;
-
     if (FT_ATOMIC_LOAD_SSIZE_RELAXED(self->exports) > 0) {
         PyErr_SetString(PyExc_BufferError,
                         "Existing exports of data: object cannot be re-sized");
         return -1;
     }
+
+    /* In case, __init__ is called multiple times. */
+    self->string_size = 0;
+    self->pos = 0;
+
     if (initvalue && initvalue != Py_None) {
         if (PyBytes_CheckExact(initvalue)) {
             Py_XSETREF(self->buf, Py_NewRef(initvalue));
+            clear_shared_buf(self);
             self->string_size = PyBytes_GET_SIZE(initvalue);
         }
         else {

@@ -528,7 +528,7 @@ class IOBase(metaclass=abc.ABCMeta):
                     return 1
                 n = (readahead.find(b"\n") + 1) or len(readahead)
                 if size >= 0:
-                    n = min(n, size)
+                    n = min(n, size - len(res))
                 return n
         else:
             def nreadahead():
@@ -1904,7 +1904,7 @@ class TextIOBase(IOBase):
         """Truncate size to pos, where pos is an int."""
         self._unsupported("truncate")
 
-    def readline(self):
+    def readline(self, size=-1, /):
         """Read until newline or EOF.
 
         Returns an empty string if EOF is hit immediately.

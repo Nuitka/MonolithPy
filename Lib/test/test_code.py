@@ -215,7 +215,6 @@ from test.support.script_helper import assert_python_ok
 from test.support import threading_helper, import_helper
 from test.support.bytecode_helper import instructions_with_positions
 from opcode import opmap, opname
-from _testcapi import code_offset_to_line
 try:
     import _testinternalcapi
 except ModuleNotFoundError:
@@ -1246,10 +1245,15 @@ class CodeConstsTest(unittest.TestCase):
         class MyInt(int):
             pass
 
+        class MyComplex(complex):
+            pass
+
         code = compile("a = 1", "<string>", "exec")
-        code = code.replace(co_consts=(1, Unhashable(), MyInt(1), MyInt(1)))
+        code = code.replace(co_consts=(1, Unhashable(), MyInt(1), MyInt(1),
+                                       MyComplex(1j)))
         self.assertIsInstance(code.co_consts[1], Unhashable)
         self.assertEqual(code.co_consts[2], code.co_consts[3])
+        self.assertFalse(sys._is_immortal(code.co_consts[4]))
 
 
 class CodeWeakRefTest(unittest.TestCase):
@@ -1485,6 +1489,8 @@ class CodeLocationTest(unittest.TestCase):
         rc, out, err = assert_python_ok('-OO', '-c', code)
 
     def test_co_branches(self):
+        _testcapi = import_helper.import_module("_testcapi")
+        code_offset_to_line = _testcapi.code_offset_to_line
 
         def get_line_branches(func):
             code = func.__code__
