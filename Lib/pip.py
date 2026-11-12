@@ -332,9 +332,11 @@ if os.name == "nt":
 import pip._internal.wheel_builder as _wb
 _wb._should_cache = lambda req: not (req.editable or not req.source_dir)
 
-# Each unique wheel version is extracted once; every subsequent install into a
+# Each unique wheel is extracted once; every subsequent install into a
 # build-isolation env creates hardlinks from the cache.
+import hashlib
 import tempfile
+import zipfile
 import pip._internal.operations.install.wheel as _iw
 
 _WHEEL_CACHE_DIR = pathlib.Path(
@@ -345,10 +347,24 @@ _CACHE_COMPLETE = "_COMPLETE"
 _orig_install_wheel = _iw.install_wheel
 
 
+def _wheel_cache_key(wheel_path):
+    # The file name (name-version-tags) alone does not identify a wheel's
+    # contents: one rebuilt against newer dependencies keeps its name, and
+    # keying on the name would hand back the old build's files. The zip's
+    # central directory lists every member's CRC-32 and size, so hashing it
+    # fingerprints the contents without reading any member data -- only the
+    # index pip reads anyway to install the wheel.
+    digest = hashlib.sha256()
+    with zipfile.ZipFile(wheel_path) as zf:
+        for info in sorted(zf.infolist(), key=lambda i: i.filename):
+            digest.update(f"{info.filename}\0{info.CRC:08x}\0{info.file_size}\n".encode("utf-8"))
+    return f"{pathlib.Path(wheel_path).stem}-{digest.hexdigest()[:16]}"
+
+
 def _cached_install_wheel(name, wheel_path, scheme, req_description,
                            pycompile=True, warn_script_location=True,
                            direct_url=None, requested=False):
-    cache_dir = _WHEEL_CACHE_DIR / pathlib.Path(wheel_path).stem
+    cache_dir = _WHEEL_CACHE_DIR / _wheel_cache_key(wheel_path)
     cache_complete = cache_dir / _CACHE_COMPLETE
     is_hit = cache_complete.exists()
 
