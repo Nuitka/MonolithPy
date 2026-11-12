@@ -191,10 +191,10 @@ make install
 cd ..
 fi
 
-if [ ! -d sqlite-autoconf-3530300 ]; then
-download_file https://sqlite.org/2026/sqlite-autoconf-3530300.tar.gz sqlite.tar.gz
+if [ ! -d sqlite-autoconf-3540100 ]; then
+download_file https://sqlite.org/2026/sqlite-autoconf-3540100.tar.gz sqlite.tar.gz
 tar -xf sqlite.tar.gz
-cd sqlite-autoconf-3530300
+cd sqlite-autoconf-3540100
 export "CFLAGS_bak=$CFLAGS"
 export "CPPFLAGS_bak=$CPPFLAGS"
 export "CFLAGS=$CFLAGS -DSQLITE_ENABLE_COLUMN_METADATA"
@@ -269,10 +269,10 @@ make install
 cd ..
 fi
 
-if [ ! -d libpng-1.6.50 ]; then
-download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.50/libpng-1.6.50.tar.xz libpng.tar.gz
+if [ ! -d libpng-1.6.59 ]; then
+download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.59/libpng-1.6.59.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
-cd libpng-1.6.50
+cd libpng-1.6.59
 ./configure --prefix=${PREFIX} --disable-shared --with-zlib-prefix=${PREFIX}
 make pnglibconf.h
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "mp_embed.h"\n\'$'\n/g'
@@ -285,9 +285,9 @@ fi
 # pkgconf provides the pkg-config that harfbuzz's meson build uses to find
 # freetype. macOS ships no pkg-config, so build it from source.
 if [ ! -x ${PREFIX}/bin/pkg-config ]; then
-download_file https://github.com/pkgconf/pkgconf/releases/download/pkgconf-3.0.3/pkgconf-3.0.3.tar.xz pkgconf.tar.xz
+download_file https://github.com/pkgconf/pkgconf/releases/download/pkgconf-3.0.10/pkgconf-3.0.10.tar.xz pkgconf.tar.xz
 tar -xf pkgconf.tar.xz
-cd pkgconf-3.0.3
+cd pkgconf-3.0.10
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(sysctl -n hw.ncpu)
 make install
@@ -295,10 +295,10 @@ ln -sf pkgconf ${PREFIX}/bin/pkg-config
 cd ..
 fi
 
-if [ ! -d harfbuzz-14.2.1 ]; then
-download_file https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz harfbuzz.tar.gz
+if [ ! -d harfbuzz-15.1.0 ]; then
+download_file https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
-cd harfbuzz-14.2.1
+cd harfbuzz-15.1.0
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 # harfbuzz >= 9 dropped autotools and is meson-only. Build a static lib with
 # freetype disabled on this first pass (freetype is built next, then harfbuzz
@@ -308,17 +308,20 @@ meson install -C build-pass1
 cd ..
 fi
 
-if [ ! -d freetype-2.14.3 ]; then
-download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz freetype.tar.gz
+if [ ! -d freetype-2.15.0 ]; then
+download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.15.0/freetype-2.15.0.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
-cd freetype-2.14.3
+cd freetype-2.15.0
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '' '1s/^/#include "mp_embed.h"\n\'$'\n/g'
-./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
+# 2.15 enables its HVF driver whenever the SDK has hvf/Scaler.h; it then needs
+# Apple's libhvf.dylib (macOS 15.4+, above our deployment target) in every
+# consumer's link. configure has no switch for it, so answer the check "no".
+./configure --prefix=${PREFIX} --disable-shared --with-brotli=no ac_cv_header_hvf_Scaler_h=no
 make -j$(sysctl -n hw.ncpu)
 make install
 cd ..
 
-cd harfbuzz-14.2.1
+cd harfbuzz-15.1.0
 # Rebuild harfbuzz now that freetype is installed (found via pkg-config).
 meson setup build-pass2 --prefix=${PREFIX} --libdir=lib --default-library=static --buildtype=release -Dfreetype=enabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled -Dglib=disabled -Dgobject=disabled -Dcairo=disabled -Dicu=disabled
 meson install -C build-pass2
@@ -337,10 +340,10 @@ make install
 cd ../..
 fi
 
-if [ ! -d expat-2.8.2 ]; then
-download_file https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.gz expat.tar.gz
+if [ ! -d expat-2.10.0 ]; then
+download_file https://github.com/libexpat/libexpat/releases/download/R_2_10_0/expat-2.10.0.tar.gz expat.tar.gz
 tar -xf expat.tar.gz
-cd expat-2.8.2
+cd expat-2.10.0
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(sysctl -n hw.ncpu)
 make install

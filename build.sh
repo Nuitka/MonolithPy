@@ -180,10 +180,10 @@ make install
 cd ..
 fi
 
-if [ ! -d sqlite-autoconf-3530300 ]; then
-download_file https://sqlite.org/2026/sqlite-autoconf-3530300.tar.gz sqlite.tar.gz
+if [ ! -d sqlite-autoconf-3540100 ]; then
+download_file https://sqlite.org/2026/sqlite-autoconf-3540100.tar.gz sqlite.tar.gz
 tar -xf sqlite.tar.gz
-cd sqlite-autoconf-3530300
+cd sqlite-autoconf-3540100
 export "CFLAGS_bak=$CFLAGS"
 export "CPPFLAGS_bak=$CPPFLAGS"
 export "CFLAGS=$CFLAGS -DSQLITE_ENABLE_COLUMN_METADATA"
@@ -258,10 +258,10 @@ make install
 cd ..
 fi
 
-if [ ! -d libpng-1.6.50 ]; then
-download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.50/libpng-1.6.50.tar.xz libpng.tar.gz
+if [ ! -d libpng-1.6.59 ]; then
+download_file http://downloads.sourceforge.net/project/libpng/libpng16/1.6.59/libpng-1.6.59.tar.xz libpng.tar.gz
 tar -xf libpng.tar.gz
-cd libpng-1.6.50
+cd libpng-1.6.59
 ./configure --prefix=${PREFIX} --disable-shared
 make pnglibconf.h
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
@@ -271,10 +271,10 @@ make install
 cd ..
 fi
 
-if [ ! -d harfbuzz-14.2.1 ]; then
-download_file https://github.com/harfbuzz/harfbuzz/releases/download/14.2.1/harfbuzz-14.2.1.tar.xz harfbuzz.tar.gz
+if [ ! -d harfbuzz-15.1.0 ]; then
+download_file https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz harfbuzz.tar.gz
 tar -xf harfbuzz.tar.gz
-cd harfbuzz-14.2.1
+cd harfbuzz-15.1.0
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 # harfbuzz >= 9 dropped autotools and is meson-only. Static build with all
 # optional deps disabled (on Linux freetype is built separately and does not
@@ -334,10 +334,10 @@ make install
 cd ..
 fi
 
-if [ ! -d freetype-2.14.3 ]; then
-download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz freetype.tar.gz
+if [ ! -d freetype-2.15.0 ]; then
+download_file http://downloads.sourceforge.net/project/freetype/freetype2/2.15.0/freetype-2.15.0.tar.xz freetype.tar.gz
 tar -xf freetype.tar.gz
-cd freetype-2.14.3
+cd freetype-2.15.0
 find . \( -iname '*.h.in' -o -iname '*.h' -o -iname '*.c' -o -iname '*.cc' -o -iname '*.cpp' -o -iname '*.cxx' \) | xargs sed -i '1s/^/#include "mp_embed.h"\n\'$'\n/g'
 ./configure --prefix=${PREFIX} --disable-shared --with-brotli=no
 make -j$(nproc --all)
@@ -499,10 +499,10 @@ make install
 cd ../..
 fi
 
-if [ ! -d expat-2.8.2 ]; then
-download_file https://github.com/libexpat/libexpat/releases/download/R_2_8_2/expat-2.8.2.tar.gz expat.tar.gz
+if [ ! -d expat-2.10.0 ]; then
+download_file https://github.com/libexpat/libexpat/releases/download/R_2_10_0/expat-2.10.0.tar.gz expat.tar.gz
 tar -xf expat.tar.gz
-cd expat-2.8.2
+cd expat-2.10.0
 ./configure --prefix=${PREFIX} --disable-shared
 make -j$(nproc --all)
 make install
