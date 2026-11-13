@@ -761,11 +761,24 @@ static inline void Py_InitStaticModules(void) {
 
         os.environ["MACOSX_DEPLOYMENT_TARGET"] = __mp__.get_macos_deployment_target()
 
+        # Compile for the architecture the link below targets (LDFLAGS carries
+        # its -arch). Left to itself clang compiles for the architecture it runs
+        # as, which need not be this interpreter's: an x86_64 interpreter under
+        # Rosetta can start a clang that runs natively as arm64.
+        ldflags = sysconfig.get_config_var("LDFLAGS").split()
+        arch_flags = []
+        for i, flag in enumerate(ldflags[:-1]):
+            if flag == "-arch":
+                arch_flags += ["-arch", ldflags[i + 1]]
+        if not arch_flags:
+            arch_flags = ["-arch", platform.machine()]
+
         compiler.compile(
             [os.path.join(sysconfig.get_config_var("prefix"), "python.c")],
             output_dir="/",
             include_dirs=include_dirs,
             macros=macros,
+            extra_preargs=arch_flags,
         )
 
         extra_args_combined = [x for x in sysconfig.get_config_var("LDFLAGS").split() if
