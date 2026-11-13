@@ -56,6 +56,11 @@ jobs:
         echo "Using Python: $PYTHON_BIN"
         "$PYTHON_BIN" tests/python_smoke.py
         EOF
+    # No LTO only: the -arch handling is the same with LTO, and an LTO link by a
+    # clang running under Rosetta (arm64 job) would add a lot of time.
+    - name: Run interpreter rebuild test (clang running as the other architecture)
+      if: matrix.lto.lto_arg == '--no-lto'
+      run: arch -${{ matrix.architecture.arch }} bash tests/rebuild_arch_test.sh "${{ github.workspace }}/MonolithPy-Out" ${{ matrix.architecture.arch }}
     - name: Run mp_embed tests
       run: |
         arch -${{ matrix.architecture.arch }} bash <<'EOF'
